@@ -1,0 +1,19 @@
+{
+  "source_id": "src_notion_pricing",
+  "product_name": "Notion",
+  "dimension": "pricing",
+  "source_url": "https://www.notion.so/pricing",
+  "source_type": "html",
+  "title": "Notion · Pricing",
+  "raw_html": null,
+  "raw_text": "Notion offers four plans: Free, Plus at $10 per seat/month, Business at $15 per seat/month, and Enterprise (contact sales). Plus plan includes unlimited blocks for teams, unlimited file uploads, and 30 day page history.",
+  "summary": "Notion offers four plans: Free, Plus at $10 per seat/month, Business at $15 per seat/month, and Enterprise (contact sale",
+  "language": "en",
+  "collected_at": "2026-05-27T14:00:00Z",
+  "fetch_method": "firecrawl",
+  "http_status": 200,
+  "robots_allowed": true,
+  "source_authority": 0.95,
+  "detected_paywall": false,
+  "detected_outdated": false
+}

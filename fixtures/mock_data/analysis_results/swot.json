@@ -1,0 +1,38 @@
+{
+  "dimension": "swot",
+  "summary": "围绕 Notion 视角的 SWOT。",
+  "claims": [
+    {
+      "claim_id": "cl_swot_001",
+      "text": "Notion 优势：文档+数据库灵活组合，AI 能力内嵌。",
+      "products_involved": [
+        "Notion"
+      ],
+      "evidence_ids": [
+        "ev_notion_home_01",
+        "ev_notion_feature_01"
+      ],
+      "confidence": 0.87,
+      "counter_evidence_ids": [],
+      "qualifier": null
+    },
+    {
+      "claim_id": "cl_swot_002",
+      "text": "Notion 劣势：复杂项目管理与工作流自动化能力弱于专业 PM 工具。",
+      "products_involved": [
+        "Notion",
+        "ClickUp",
+        "Asana"
+      ],
+      "evidence_ids": [
+        "ev_clickup_feature_01",
+        "ev_asana_review_01"
+      ],
+      "confidence": 0.8,
+      "counter_evidence_ids": [],
+      "qualifier": null
+    }
+  ],
+  "comparison_matrix": null,
+  "confidence": 0.82
+}

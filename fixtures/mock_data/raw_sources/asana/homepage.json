@@ -1,0 +1,19 @@
+{
+  "source_id": "src_asana_homepage",
+  "product_name": "Asana",
+  "dimension": "homepage",
+  "source_url": "https://asana.com/",
+  "source_type": "html",
+  "title": "Asana – Manage your team's work, projects, & tasks online",
+  "raw_html": null,
+  "raw_text": "Asana helps teams orchestrate their work — from daily tasks to strategic cross-functional initiatives.",
+  "summary": "Asana helps teams orchestrate their work — from daily tasks to strategic cross-functional initiatives.",
+  "language": "en",
+  "collected_at": "2026-05-27T14:00:00Z",
+  "fetch_method": "firecrawl",
+  "http_status": 200,
+  "robots_allowed": true,
+  "source_authority": 0.95,
+  "detected_paywall": false,
+  "detected_outdated": false
+}

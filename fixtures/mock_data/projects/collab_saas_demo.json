@@ -1,0 +1,32 @@
+{
+  "project_id": "proj_collab_demo",
+  "project_name": "协作办公 SaaS 竞品分析 · Demo",
+  "owner": "demo_user",
+  "created_at": "2026-05-27T14:00:00Z",
+  "target_product": "Notion",
+  "competitors": [
+    "ClickUp",
+    "Asana"
+  ],
+  "industry": "collaboration_saas",
+  "industry_schema_version": "1.0.0",
+  "analysis_dimensions": [
+    "feature_comparison",
+    "pricing_comparison",
+    "swot",
+    "differentiation_opportunities"
+  ],
+  "report_template_id": "standard_v1",
+  "target_audience": "产品经理",
+  "mode": "hybrid",
+  "collect_constraints": {
+    "max_pages_per_dimension": 5,
+    "timeout_seconds": 60,
+    "respect_robots_txt": true,
+    "allow_paid_content": false,
+    "fallback_to_mock": true
+  },
+  "status": "draft",
+  "current_report_id": null,
+  "metrics": null
+}

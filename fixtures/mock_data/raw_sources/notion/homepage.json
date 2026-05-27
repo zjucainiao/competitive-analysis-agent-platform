@@ -1,0 +1,19 @@
+{
+  "source_id": "src_notion_homepage",
+  "product_name": "Notion",
+  "dimension": "homepage",
+  "source_url": "https://www.notion.so/",
+  "source_type": "html",
+  "title": "Notion – The connected workspace",
+  "raw_html": null,
+  "raw_text": "Notion is the connected workspace where better, faster work happens. Bring teams, projects, and tools together. Notion AI helps you write, summarize, and brainstorm directly in your docs.",
+  "summary": "Notion is the connected workspace where better, faster work happens. Bring teams, projects, and tools together. Notion A",
+  "language": "en",
+  "collected_at": "2026-05-27T14:00:00Z",
+  "fetch_method": "firecrawl",
+  "http_status": 200,
+  "robots_allowed": true,
+  "source_authority": 0.95,
+  "detected_paywall": false,
+  "detected_outdated": false
+}

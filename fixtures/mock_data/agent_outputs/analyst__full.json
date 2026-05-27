@@ -1,0 +1,168 @@
+{
+  "agent_name": "analyst",
+  "agent_version": "1.0.0",
+  "task_id": "t_analyze",
+  "trace_id": "trace_demo",
+  "span_id": "span_analyze",
+  "status": "success",
+  "confidence": 0.86,
+  "self_critique": "覆盖 3 维度；feature 维度有 1 条 counter_evidence 体现严谨。",
+  "tokens_input": 6500,
+  "tokens_output": 1800,
+  "cost_usd": 0.0,
+  "duration_ms": 16800,
+  "errors": [],
+  "result": {
+    "target_product": "Notion",
+    "competitors": [
+      "ClickUp",
+      "Asana"
+    ],
+    "dimensions": {
+      "feature_comparison": {
+        "dimension": "feature_comparison",
+        "summary": "Notion 以文档+数据库灵活组合见长；ClickUp 在任务管理与自动化能力上更强；Asana 在视觉化项目跟踪和跨职能协调上口碑领先。",
+        "claims": [
+          {
+            "claim_id": "cl_feat_001",
+            "text": "Notion 在文档协作与知识管理场景的灵活度领先。",
+            "products_involved": [
+              "Notion",
+              "ClickUp",
+              "Asana"
+            ],
+            "evidence_ids": [
+              "ev_notion_home_01",
+              "ev_notion_feature_01"
+            ],
+            "confidence": 0.88,
+            "counter_evidence_ids": [],
+            "qualifier": "文档为核心的工作流"
+          },
+          {
+            "claim_id": "cl_feat_002",
+            "text": "ClickUp 在自动化能力上明显强于 Notion，适合需要复杂跨任务工作流的中型团队。",
+            "products_involved": [
+              "Notion",
+              "ClickUp"
+            ],
+            "evidence_ids": [
+              "ev_clickup_feature_01"
+            ],
+            "confidence": 0.84,
+            "counter_evidence_ids": [
+              "ev_notion_feature_01"
+            ],
+            "qualifier": null
+          },
+          {
+            "claim_id": "cl_feat_003",
+            "text": "Asana 的多视图项目跟踪能力被用户公认为业内领先之一。",
+            "products_involved": [
+              "Asana"
+            ],
+            "evidence_ids": [
+              "ev_asana_review_01"
+            ],
+            "confidence": 0.86,
+            "counter_evidence_ids": [],
+            "qualifier": null
+          }
+        ],
+        "comparison_matrix": null,
+        "confidence": 0.85
+      },
+      "pricing_comparison": {
+        "dimension": "pricing_comparison",
+        "summary": "三者均采用 Freemium。ClickUp 入门档最便宜（$7），Notion 居中（Plus $10），Asana 较高（Starter $10.99，Advanced $24.99）。",
+        "claims": [
+          {
+            "claim_id": "cl_price_001",
+            "text": "ClickUp Unlimited 档 $7/seat/月，是三者中入门档最低价。",
+            "products_involved": [
+              "Notion",
+              "ClickUp",
+              "Asana"
+            ],
+            "evidence_ids": [
+              "ev_clickup_price_01",
+              "ev_notion_price_01",
+              "ev_asana_price_01"
+            ],
+            "confidence": 0.95,
+            "counter_evidence_ids": [],
+            "qualifier": null
+          },
+          {
+            "claim_id": "cl_price_002",
+            "text": "Asana Advanced 档 $24.99/seat/月，相较 Notion Business （$15）与 ClickUp Business（$12）溢价明显。",
+            "products_involved": [
+              "Notion",
+              "ClickUp",
+              "Asana"
+            ],
+            "evidence_ids": [
+              "ev_asana_price_01",
+              "ev_notion_price_01",
+              "ev_clickup_price_01"
+            ],
+            "confidence": 0.92,
+            "counter_evidence_ids": [],
+            "qualifier": null
+          }
+        ],
+        "comparison_matrix": {
+          "entry_paid_usd": {
+            "Notion": 10,
+            "ClickUp": 7,
+            "Asana": 10.99
+          },
+          "advanced_paid_usd": {
+            "Notion": 15,
+            "ClickUp": 12,
+            "Asana": 24.99
+          }
+        },
+        "confidence": 0.93
+      },
+      "swot": {
+        "dimension": "swot",
+        "summary": "围绕 Notion 视角的 SWOT。",
+        "claims": [
+          {
+            "claim_id": "cl_swot_001",
+            "text": "Notion 优势：文档+数据库灵活组合，AI 能力内嵌。",
+            "products_involved": [
+              "Notion"
+            ],
+            "evidence_ids": [
+              "ev_notion_home_01",
+              "ev_notion_feature_01"
+            ],
+            "confidence": 0.87,
+            "counter_evidence_ids": [],
+            "qualifier": null
+          },
+          {
+            "claim_id": "cl_swot_002",
+            "text": "Notion 劣势：复杂项目管理与工作流自动化能力弱于专业 PM 工具。",
+            "products_involved": [
+              "Notion",
+              "ClickUp",
+              "Asana"
+            ],
+            "evidence_ids": [
+              "ev_clickup_feature_01",
+              "ev_asana_review_01"
+            ],
+            "confidence": 0.8,
+            "counter_evidence_ids": [],
+            "qualifier": null
+          }
+        ],
+        "comparison_matrix": null,
+        "confidence": 0.82
+      }
+    }
+  }
+}

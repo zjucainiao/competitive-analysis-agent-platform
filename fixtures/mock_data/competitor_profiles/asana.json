@@ -1,0 +1,208 @@
+{
+  "profile_id": "profile_asana",
+  "schema_version": "1.0.0",
+  "industry": "collaboration_saas",
+  "basic_info": {
+    "name": "Asana",
+    "company": "Asana, Inc.",
+    "official_website": "https://asana.com/",
+    "category": "协作办公 / 项目管理 SaaS",
+    "positioning": "Manage work and projects across teams from daily tasks to strategic initiatives.",
+    "target_users": [
+      {
+        "name": "中小企业团队",
+        "size_range": "10-200",
+        "industry": null
+      },
+      {
+        "name": "产品 / 项目团队",
+        "size_range": "5-100",
+        "industry": null
+      }
+    ],
+    "main_scenarios": [
+      "项目管理",
+      "文档协作",
+      "知识管理"
+    ],
+    "founded_year": null,
+    "headquarters": null,
+    "languages_supported": [
+      "en",
+      "zh",
+      "ja",
+      "de",
+      "fr"
+    ],
+    "evidence_refs": {
+      "positioning": [
+        "ev_asana_home_01"
+      ]
+    }
+  },
+  "features": {
+    "core_features": [
+      {
+        "name": "项目跨视图",
+        "description": "List / Board / Timeline / Calendar 视图",
+        "availability": {
+          "free": true,
+          "paid": true,
+          "enterprise_only": false,
+          "plan_names": []
+        },
+        "tags": [
+          "view"
+        ]
+      }
+    ],
+    "feature_modules": [],
+    "differentiated_features": [],
+    "integration_capabilities": [],
+    "security_and_permission": null,
+    "ai_capabilities": [],
+    "evidence_refs": {}
+  },
+  "pricing": {
+    "pricing_model": "freemium",
+    "plans": [
+      {
+        "name": "Personal",
+        "price_per_seat_monthly_usd": 0.0,
+        "price_per_seat_annual_usd": null,
+        "min_seats": null,
+        "max_seats": null,
+        "target_segment": null,
+        "included_features": [],
+        "limits": {}
+      },
+      {
+        "name": "Starter",
+        "price_per_seat_monthly_usd": 10.99,
+        "price_per_seat_annual_usd": null,
+        "min_seats": null,
+        "max_seats": null,
+        "target_segment": null,
+        "included_features": [],
+        "limits": {}
+      },
+      {
+        "name": "Advanced",
+        "price_per_seat_monthly_usd": 24.99,
+        "price_per_seat_annual_usd": null,
+        "min_seats": null,
+        "max_seats": null,
+        "target_segment": null,
+        "included_features": [],
+        "limits": {}
+      },
+      {
+        "name": "Enterprise",
+        "price_per_seat_monthly_usd": null,
+        "price_per_seat_annual_usd": null,
+        "min_seats": null,
+        "max_seats": null,
+        "target_segment": null,
+        "included_features": [],
+        "limits": {}
+      }
+    ],
+    "free_trial": null,
+    "billing_cycle": [
+      "monthly",
+      "annual"
+    ],
+    "currency_supported": [
+      "USD"
+    ],
+    "enterprise_contact_required": true,
+    "evidence_refs": {
+      "plans": [
+        "ev_asana_price_01"
+      ]
+    }
+  },
+  "user_feedback": {
+    "overall_rating": 4.4,
+    "review_count": 9800,
+    "review_sources": [
+      "G2"
+    ],
+    "positive_themes": [
+      {
+        "theme": "可视化项目跟踪",
+        "mention_count": null,
+        "sentiment": "positive",
+        "sample_quotes": [
+          "跨职能项目协调最强之一"
+        ],
+        "evidence_ids": [
+          "ev_asana_review_01"
+        ]
+      }
+    ],
+    "negative_themes": [],
+    "user_pain_points": [
+      {
+        "pain": "非营利 / 教育版本对个体用户限制较多",
+        "affected_segment": null,
+        "severity": "medium",
+        "evidence_ids": []
+      }
+    ],
+    "typical_reviews": [
+      {
+        "source": "G2",
+        "rating": 4.5,
+        "quote": "Asana is best-in-class for cross-functional project coordination with strong visual tracking.",
+        "reviewer_role": null,
+        "review_date": null,
+        "evidence_id": "ev_asana_review_01"
+      }
+    ],
+    "evidence_refs": {}
+  },
+  "competitive": {
+    "strengths": [],
+    "weaknesses": [],
+    "opportunities": [],
+    "threats": [],
+    "recommendations": []
+  },
+  "industry_extension": {
+    "industry_id": "collaboration_saas",
+    "task_management": {
+      "has_capability": true,
+      "maturity_level": "best_in_class",
+      "notes": null,
+      "evidence_ids": [
+        "ev_asana_review_01"
+      ]
+    },
+    "kanban_view": {
+      "has_capability": true,
+      "maturity_level": "advanced",
+      "notes": null,
+      "evidence_ids": []
+    },
+    "calendar_view": null,
+    "gantt_view": null,
+    "document_collaboration": {
+      "has_capability": true,
+      "maturity_level": "basic",
+      "notes": null,
+      "evidence_ids": []
+    },
+    "workflow_automation": null,
+    "knowledge_base": null,
+    "team_permission": null,
+    "third_party_integration": null,
+    "mobile_support": null,
+    "realtime_editing": null,
+    "ai_assistance": null,
+    "evidence_refs": {}
+  },
+  "extracted_at": "2026-05-27T14:00:00Z",
+  "field_confidence": {},
+  "field_status": {}
+}

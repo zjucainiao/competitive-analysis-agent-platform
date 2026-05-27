@@ -1,0 +1,53 @@
+{
+  "dimension": "feature_comparison",
+  "summary": "Notion 以文档+数据库灵活组合见长；ClickUp 在任务管理与自动化能力上更强；Asana 在视觉化项目跟踪和跨职能协调上口碑领先。",
+  "claims": [
+    {
+      "claim_id": "cl_feat_001",
+      "text": "Notion 在文档协作与知识管理场景的灵活度领先。",
+      "products_involved": [
+        "Notion",
+        "ClickUp",
+        "Asana"
+      ],
+      "evidence_ids": [
+        "ev_notion_home_01",
+        "ev_notion_feature_01"
+      ],
+      "confidence": 0.88,
+      "counter_evidence_ids": [],
+      "qualifier": "文档为核心的工作流"
+    },
+    {
+      "claim_id": "cl_feat_002",
+      "text": "ClickUp 在自动化能力上明显强于 Notion，适合需要复杂跨任务工作流的中型团队。",
+      "products_involved": [
+        "Notion",
+        "ClickUp"
+      ],
+      "evidence_ids": [
+        "ev_clickup_feature_01"
+      ],
+      "confidence": 0.84,
+      "counter_evidence_ids": [
+        "ev_notion_feature_01"
+      ],
+      "qualifier": null
+    },
+    {
+      "claim_id": "cl_feat_003",
+      "text": "Asana 的多视图项目跟踪能力被用户公认为业内领先之一。",
+      "products_involved": [
+        "Asana"
+      ],
+      "evidence_ids": [
+        "ev_asana_review_01"
+      ],
+      "confidence": 0.86,
+      "counter_evidence_ids": [],
+      "qualifier": null
+    }
+  ],
+  "comparison_matrix": null,
+  "confidence": 0.85
+}

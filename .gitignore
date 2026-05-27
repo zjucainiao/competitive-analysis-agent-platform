@@ -1,0 +1,78 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+.installed.cfg
+
+# Virtual env
+.venv/
+venv/
+env/
+ENV/
+
+# uv / pip
+.uv/
+pip-log.txt
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Env / Secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Storage
+.chroma/
+chroma_db/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Frontend
+node_modules/
+.next/
+out/
+dist/
+.turbo/
+
+# Outputs / Caches
+.cache/
+tmp/
+.tmp/
+
+# Object storage local mirror
+storage/raw_html/
+storage/uploads/
+
+# Local docker volumes
+postgres-data/
+redis-data/
+
+# Trace dumps
+traces/

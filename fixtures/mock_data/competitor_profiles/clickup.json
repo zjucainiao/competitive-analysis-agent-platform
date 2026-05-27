@@ -1,0 +1,211 @@
+{
+  "profile_id": "profile_clickup",
+  "schema_version": "1.0.0",
+  "industry": "collaboration_saas",
+  "basic_info": {
+    "name": "ClickUp",
+    "company": "ClickUp, Inc.",
+    "official_website": "https://clickup.com/",
+    "category": "协作办公 / 项目管理 SaaS",
+    "positioning": "One app to replace them all: tasks, docs, goals, chat in one place.",
+    "target_users": [
+      {
+        "name": "中小企业团队",
+        "size_range": "10-200",
+        "industry": null
+      },
+      {
+        "name": "产品 / 项目团队",
+        "size_range": "5-100",
+        "industry": null
+      }
+    ],
+    "main_scenarios": [
+      "项目管理",
+      "文档协作",
+      "知识管理"
+    ],
+    "founded_year": null,
+    "headquarters": null,
+    "languages_supported": [
+      "en",
+      "zh",
+      "ja",
+      "de",
+      "fr"
+    ],
+    "evidence_refs": {
+      "positioning": [
+        "ev_clickup_home_01"
+      ]
+    }
+  },
+  "features": {
+    "core_features": [
+      {
+        "name": "任务管理",
+        "description": "多视图任务管理（List/Board/Gantt/Timeline）",
+        "availability": {
+          "free": true,
+          "paid": true,
+          "enterprise_only": false,
+          "plan_names": []
+        },
+        "tags": [
+          "task"
+        ]
+      },
+      {
+        "name": "自动化",
+        "description": "100+ 预制自动化 + 自定义工作流触发器",
+        "availability": {
+          "free": false,
+          "paid": true,
+          "enterprise_only": false,
+          "plan_names": [
+            "Unlimited",
+            "Business"
+          ]
+        },
+        "tags": [
+          "automation"
+        ]
+      }
+    ],
+    "feature_modules": [],
+    "differentiated_features": [],
+    "integration_capabilities": [],
+    "security_and_permission": null,
+    "ai_capabilities": [],
+    "evidence_refs": {
+      "core_features": [
+        "ev_clickup_feature_01"
+      ]
+    }
+  },
+  "pricing": {
+    "pricing_model": "freemium",
+    "plans": [
+      {
+        "name": "Free Forever",
+        "price_per_seat_monthly_usd": 0.0,
+        "price_per_seat_annual_usd": null,
+        "min_seats": null,
+        "max_seats": null,
+        "target_segment": "个人 / 试用",
+        "included_features": [],
+        "limits": {}
+      },
+      {
+        "name": "Unlimited",
+        "price_per_seat_monthly_usd": 7.0,
+        "price_per_seat_annual_usd": null,
+        "min_seats": null,
+        "max_seats": null,
+        "target_segment": "小团队",
+        "included_features": [],
+        "limits": {}
+      },
+      {
+        "name": "Business",
+        "price_per_seat_monthly_usd": 12.0,
+        "price_per_seat_annual_usd": null,
+        "min_seats": null,
+        "max_seats": null,
+        "target_segment": "中型团队",
+        "included_features": [],
+        "limits": {}
+      },
+      {
+        "name": "Enterprise",
+        "price_per_seat_monthly_usd": null,
+        "price_per_seat_annual_usd": null,
+        "min_seats": null,
+        "max_seats": null,
+        "target_segment": "企业",
+        "included_features": [],
+        "limits": {}
+      }
+    ],
+    "free_trial": null,
+    "billing_cycle": [
+      "monthly",
+      "annual"
+    ],
+    "currency_supported": [
+      "USD"
+    ],
+    "enterprise_contact_required": true,
+    "evidence_refs": {
+      "plans": [
+        "ev_clickup_price_01"
+      ]
+    }
+  },
+  "user_feedback": {
+    "overall_rating": null,
+    "review_count": null,
+    "review_sources": [],
+    "positive_themes": [],
+    "negative_themes": [],
+    "user_pain_points": [],
+    "typical_reviews": [],
+    "evidence_refs": {}
+  },
+  "competitive": {
+    "strengths": [
+      {
+        "text": "价格相对低，自动化能力丰富",
+        "rationale": null,
+        "evidence_ids": [
+          "ev_clickup_price_01",
+          "ev_clickup_feature_01"
+        ],
+        "confidence": 0.88
+      }
+    ],
+    "weaknesses": [],
+    "opportunities": [],
+    "threats": [],
+    "recommendations": []
+  },
+  "industry_extension": {
+    "industry_id": "collaboration_saas",
+    "task_management": {
+      "has_capability": true,
+      "maturity_level": "best_in_class",
+      "notes": null,
+      "evidence_ids": []
+    },
+    "kanban_view": null,
+    "calendar_view": null,
+    "gantt_view": null,
+    "document_collaboration": {
+      "has_capability": true,
+      "maturity_level": "standard",
+      "notes": null,
+      "evidence_ids": []
+    },
+    "workflow_automation": {
+      "has_capability": true,
+      "maturity_level": "advanced",
+      "notes": null,
+      "evidence_ids": [
+        "ev_clickup_feature_01"
+      ]
+    },
+    "knowledge_base": null,
+    "team_permission": null,
+    "third_party_integration": null,
+    "mobile_support": null,
+    "realtime_editing": null,
+    "ai_assistance": null,
+    "evidence_refs": {}
+  },
+  "extracted_at": "2026-05-27T14:00:00Z",
+  "field_confidence": {
+    "pricing.plans": 0.94,
+    "industry_extension.workflow_automation": 0.91
+  },
+  "field_status": {}
+}

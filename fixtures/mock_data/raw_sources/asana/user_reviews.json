@@ -1,0 +1,19 @@
+{
+  "source_id": "src_asana_reviews",
+  "product_name": "Asana",
+  "dimension": "user_reviews",
+  "source_url": "https://www.g2.com/products/asana/reviews",
+  "source_type": "html",
+  "title": "Asana reviews on G2",
+  "raw_html": null,
+  "raw_text": "Reviewers consistently praise Asana for its visual project tracking across boards, lists, and timelines, calling it best-in-class for cross-functional project coordination.",
+  "summary": "Reviewers consistently praise Asana for its visual project tracking across boards, lists, and timelines, calling it best",
+  "language": "en",
+  "collected_at": "2026-05-27T14:00:00Z",
+  "fetch_method": "firecrawl",
+  "http_status": 200,
+  "robots_allowed": true,
+  "source_authority": 0.75,
+  "detected_paywall": false,
+  "detected_outdated": false
+}

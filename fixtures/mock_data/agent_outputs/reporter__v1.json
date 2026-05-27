@@ -1,0 +1,155 @@
+{
+  "agent_name": "reporter",
+  "agent_version": "1.0.0",
+  "task_id": "t_report",
+  "trace_id": "trace_demo",
+  "span_id": "span_report",
+  "status": "success",
+  "confidence": 0.84,
+  "self_critique": "所有量化段落均与 evidence 字面一致；overview 段落为软结论。",
+  "tokens_input": 8400,
+  "tokens_output": 2100,
+  "cost_usd": 0.0,
+  "duration_ms": 18600,
+  "errors": [],
+  "draft": {
+    "report_id": "rep_collab_demo_v1",
+    "version": 1,
+    "template_id": "standard_v1",
+    "sections": [
+      {
+        "section_id": "sec_overview",
+        "title": "1. 竞品概览",
+        "order": 1,
+        "paragraphs": [
+          {
+            "paragraph_id": "p_ov_01",
+            "text": "本次对比聚焦 Notion、ClickUp、Asana 三款主流协作办公 SaaS，覆盖核心定位、目标用户、定价模型与差异化能力。",
+            "claim_ids": [],
+            "evidence_ids": [],
+            "is_quantitative": false,
+            "is_soft_conclusion": true
+          }
+        ]
+      },
+      {
+        "section_id": "sec_features",
+        "title": "2. 核心功能对比",
+        "order": 2,
+        "paragraphs": [
+          {
+            "paragraph_id": "p_fe_01",
+            "text": "Notion 以文档+数据库灵活组合见长，AI 能力内嵌于编辑器，适合知识密集型工作流。",
+            "claim_ids": [
+              "cl_feat_001"
+            ],
+            "evidence_ids": [
+              "ev_notion_home_01",
+              "ev_notion_feature_01"
+            ],
+            "is_quantitative": false,
+            "is_soft_conclusion": false
+          },
+          {
+            "paragraph_id": "p_fe_02",
+            "text": "ClickUp 在自动化能力上明显强于 Notion，提供 100+ 预制自动化与自定义触发器，适合复杂跨任务工作流。",
+            "claim_ids": [
+              "cl_feat_002"
+            ],
+            "evidence_ids": [
+              "ev_clickup_feature_01"
+            ],
+            "is_quantitative": false,
+            "is_soft_conclusion": false
+          },
+          {
+            "paragraph_id": "p_fe_03",
+            "text": "Asana 的多视图项目跟踪能力被用户公认为业内领先之一，尤其适用于跨职能项目协调。",
+            "claim_ids": [
+              "cl_feat_003"
+            ],
+            "evidence_ids": [
+              "ev_asana_review_01"
+            ],
+            "is_quantitative": false,
+            "is_soft_conclusion": false
+          }
+        ]
+      },
+      {
+        "section_id": "sec_pricing",
+        "title": "3. 定价策略对比",
+        "order": 3,
+        "paragraphs": [
+          {
+            "paragraph_id": "p_pr_01",
+            "text": "三者均采用 Freemium 模式。ClickUp Unlimited 档 $7/seat/月，是三者中入门档最低价；Notion Plus $10/seat/月，Asana Starter $10.99/seat/月。",
+            "claim_ids": [
+              "cl_price_001"
+            ],
+            "evidence_ids": [
+              "ev_clickup_price_01",
+              "ev_notion_price_01",
+              "ev_asana_price_01"
+            ],
+            "is_quantitative": true,
+            "is_soft_conclusion": false
+          },
+          {
+            "paragraph_id": "p_pr_02",
+            "text": "Asana Advanced 档 $24.99/seat/月，相较 Notion Business $15 与 ClickUp Business $12，溢价明显，更适合预算充足的中大型团队。",
+            "claim_ids": [
+              "cl_price_002"
+            ],
+            "evidence_ids": [
+              "ev_asana_price_01",
+              "ev_notion_price_01",
+              "ev_clickup_price_01"
+            ],
+            "is_quantitative": true,
+            "is_soft_conclusion": false
+          }
+        ]
+      },
+      {
+        "section_id": "sec_swot",
+        "title": "4. SWOT（以 Notion 为视角）",
+        "order": 4,
+        "paragraphs": [
+          {
+            "paragraph_id": "p_sw_01",
+            "text": "优势：文档+数据库灵活组合，AI 能力内嵌于编辑器。",
+            "claim_ids": [
+              "cl_swot_001"
+            ],
+            "evidence_ids": [
+              "ev_notion_home_01",
+              "ev_notion_feature_01"
+            ],
+            "is_quantitative": false,
+            "is_soft_conclusion": false
+          },
+          {
+            "paragraph_id": "p_sw_02",
+            "text": "劣势：复杂项目管理与工作流自动化能力相对薄弱，在面对深度自动化与可视化项目跟踪需求时不如专业 PM 工具。",
+            "claim_ids": [
+              "cl_swot_002"
+            ],
+            "evidence_ids": [
+              "ev_clickup_feature_01",
+              "ev_asana_review_01"
+            ],
+            "is_quantitative": false,
+            "is_soft_conclusion": false
+          }
+        ]
+      }
+    ],
+    "summary": "Notion vs ClickUp vs Asana 协作办公场景对比。Notion 在文档与 AI 能力上领先，ClickUp 在自动化与价格上有优势，Asana 在视觉化项目跟踪上口碑突出。",
+    "metadata": {
+      "word_count": 360,
+      "claim_count": 7,
+      "evidence_count": 10
+    }
+  }
+}

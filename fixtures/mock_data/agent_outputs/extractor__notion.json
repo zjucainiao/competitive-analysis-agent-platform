@@ -1,0 +1,407 @@
+{
+  "agent_name": "extractor",
+  "agent_version": "1.0.0",
+  "task_id": "t_extract_notion",
+  "trace_id": "trace_demo",
+  "span_id": "span_extract_notion",
+  "status": "success",
+  "confidence": 0.87,
+  "self_critique": "所有必填字段已填充；user_feedback.review_count 来自二手数据，标 unverified。",
+  "tokens_input": 4800,
+  "tokens_output": 900,
+  "cost_usd": 0.0,
+  "duration_ms": 12400,
+  "errors": [],
+  "profile": {
+    "profile_id": "profile_notion",
+    "schema_version": "1.0.0",
+    "industry": "collaboration_saas",
+    "basic_info": {
+      "name": "Notion",
+      "company": "Notion Labs, Inc.",
+      "official_website": "https://www.notion.so/",
+      "category": "协作办公 / 项目管理 SaaS",
+      "positioning": "All-in-one workspace for notes, docs, projects and knowledge management.",
+      "target_users": [
+        {
+          "name": "中小企业团队",
+          "size_range": "10-200",
+          "industry": null
+        },
+        {
+          "name": "产品 / 项目团队",
+          "size_range": "5-100",
+          "industry": null
+        }
+      ],
+      "main_scenarios": [
+        "项目管理",
+        "文档协作",
+        "知识管理"
+      ],
+      "founded_year": null,
+      "headquarters": null,
+      "languages_supported": [
+        "en",
+        "zh",
+        "ja",
+        "de",
+        "fr"
+      ],
+      "evidence_refs": {
+        "positioning": [
+          "ev_notion_home_01"
+        ]
+      }
+    },
+    "features": {
+      "core_features": [
+        {
+          "name": "文档",
+          "description": "块级文档编辑",
+          "availability": {
+            "free": true,
+            "paid": true,
+            "enterprise_only": false,
+            "plan_names": [
+              "Free",
+              "Plus",
+              "Business"
+            ]
+          },
+          "tags": [
+            "doc"
+          ]
+        },
+        {
+          "name": "数据库",
+          "description": "可关联的结构化数据库视图",
+          "availability": {
+            "free": true,
+            "paid": true,
+            "enterprise_only": false,
+            "plan_names": [
+              "Free",
+              "Plus",
+              "Business"
+            ]
+          },
+          "tags": [
+            "database",
+            "view"
+          ]
+        }
+      ],
+      "feature_modules": [],
+      "differentiated_features": [],
+      "integration_capabilities": [],
+      "security_and_permission": null,
+      "ai_capabilities": [
+        {
+          "name": "Notion AI",
+          "description": "文档内 AI 写作、摘要、头脑风暴",
+          "availability": {
+            "free": false,
+            "paid": true,
+            "enterprise_only": false,
+            "plan_names": [
+              "Plus",
+              "Business"
+            ]
+          },
+          "tags": [
+            "ai"
+          ]
+        }
+      ],
+      "evidence_refs": {
+        "core_features": [
+          "ev_notion_home_01"
+        ],
+        "ai_capabilities": [
+          "ev_notion_feature_01"
+        ]
+      }
+    },
+    "pricing": {
+      "pricing_model": "freemium",
+      "plans": [
+        {
+          "name": "Free",
+          "price_per_seat_monthly_usd": 0.0,
+          "price_per_seat_annual_usd": null,
+          "min_seats": null,
+          "max_seats": null,
+          "target_segment": "个人 / 小团队",
+          "included_features": [],
+          "limits": {}
+        },
+        {
+          "name": "Plus",
+          "price_per_seat_monthly_usd": 10.0,
+          "price_per_seat_annual_usd": null,
+          "min_seats": null,
+          "max_seats": null,
+          "target_segment": "小团队",
+          "included_features": [
+            "unlimited blocks",
+            "30 day page history"
+          ],
+          "limits": {}
+        },
+        {
+          "name": "Business",
+          "price_per_seat_monthly_usd": 15.0,
+          "price_per_seat_annual_usd": null,
+          "min_seats": null,
+          "max_seats": null,
+          "target_segment": "中型团队",
+          "included_features": [],
+          "limits": {}
+        },
+        {
+          "name": "Enterprise",
+          "price_per_seat_monthly_usd": null,
+          "price_per_seat_annual_usd": null,
+          "min_seats": null,
+          "max_seats": null,
+          "target_segment": "企业",
+          "included_features": [],
+          "limits": {}
+        }
+      ],
+      "free_trial": null,
+      "billing_cycle": [
+        "monthly",
+        "annual"
+      ],
+      "currency_supported": [
+        "USD"
+      ],
+      "enterprise_contact_required": true,
+      "evidence_refs": {
+        "plans": [
+          "ev_notion_price_01",
+          "ev_notion_price_02"
+        ]
+      }
+    },
+    "user_feedback": {
+      "overall_rating": 4.7,
+      "review_count": 5200,
+      "review_sources": [
+        "G2",
+        "Capterra"
+      ],
+      "positive_themes": [
+        {
+          "theme": "灵活度高",
+          "mention_count": null,
+          "sentiment": "positive",
+          "sample_quotes": [
+            "几乎可以拼出任何工作流"
+          ],
+          "evidence_ids": [
+            "ev_notion_home_01"
+          ]
+        }
+      ],
+      "negative_themes": [],
+      "user_pain_points": [],
+      "typical_reviews": [],
+      "evidence_refs": {}
+    },
+    "competitive": {
+      "strengths": [
+        {
+          "text": "灵活的块编辑 + 数据库组合，可塑造多种工作流",
+          "rationale": null,
+          "evidence_ids": [
+            "ev_notion_home_01"
+          ],
+          "confidence": 0.9
+        }
+      ],
+      "weaknesses": [],
+      "opportunities": [],
+      "threats": [],
+      "recommendations": []
+    },
+    "industry_extension": {
+      "industry_id": "collaboration_saas",
+      "task_management": {
+        "has_capability": true,
+        "maturity_level": "standard",
+        "notes": "基础任务管理，复杂项目场景能力一般",
+        "evidence_ids": []
+      },
+      "kanban_view": null,
+      "calendar_view": null,
+      "gantt_view": null,
+      "document_collaboration": {
+        "has_capability": true,
+        "maturity_level": "best_in_class",
+        "notes": "块级编辑 + 多人实时协作",
+        "evidence_ids": [
+          "ev_notion_home_01"
+        ]
+      },
+      "workflow_automation": {
+        "has_capability": true,
+        "maturity_level": "basic",
+        "notes": null,
+        "evidence_ids": []
+      },
+      "knowledge_base": {
+        "has_capability": true,
+        "maturity_level": "advanced",
+        "notes": null,
+        "evidence_ids": []
+      },
+      "team_permission": null,
+      "third_party_integration": null,
+      "mobile_support": null,
+      "realtime_editing": null,
+      "ai_assistance": {
+        "has_capability": true,
+        "maturity_level": "advanced",
+        "notes": "Notion AI 内嵌写作与摘要",
+        "evidence_ids": [
+          "ev_notion_feature_01"
+        ]
+      },
+      "evidence_refs": {}
+    },
+    "extracted_at": "2026-05-27T14:00:00Z",
+    "field_confidence": {
+      "basic_info.positioning": 0.92,
+      "pricing.plans": 0.93,
+      "features.ai_capabilities": 0.9
+    },
+    "field_status": {
+      "basic_info.positioning": "verified",
+      "pricing.plans": "verified",
+      "user_feedback.overall_rating": "unverified"
+    }
+  },
+  "evidences": [
+    {
+      "evidence_id": "ev_notion_home_01",
+      "source_id": "src_notion_homepage",
+      "product_name": "Notion",
+      "source_url": "https://www.notion.so/",
+      "source_type": "homepage",
+      "source_authority": 0.95,
+      "content": "Notion is the connected workspace where better, faster work happens. Bring teams, projects, and tools together.",
+      "content_hash": "hash_notion_home_01",
+      "context_before": null,
+      "context_after": null,
+      "location": {
+        "char_start": null,
+        "char_end": null,
+        "selector": null,
+        "page_section": null
+      },
+      "language": "en",
+      "collected_at": "2026-05-27T14:00:00Z",
+      "extracted_at": "2026-05-27T14:00:00Z",
+      "confidence": 0.95,
+      "tags": [
+        "positioning",
+        "homepage"
+      ],
+      "embedding_id": null,
+      "disputed": false
+    },
+    {
+      "evidence_id": "ev_notion_price_01",
+      "source_id": "src_notion_pricing",
+      "product_name": "Notion",
+      "source_url": "https://www.notion.so/pricing",
+      "source_type": "pricing_page",
+      "source_authority": 0.95,
+      "content": "Notion offers four plans: Free, Plus at $10 per seat/month, Business at $15 per seat/month, and Enterprise (contact sales).",
+      "content_hash": "hash_notion_price_01",
+      "context_before": null,
+      "context_after": null,
+      "location": {
+        "char_start": null,
+        "char_end": null,
+        "selector": null,
+        "page_section": null
+      },
+      "language": "en",
+      "collected_at": "2026-05-27T14:00:00Z",
+      "extracted_at": "2026-05-27T14:00:00Z",
+      "confidence": 0.93,
+      "tags": [
+        "pricing"
+      ],
+      "embedding_id": null,
+      "disputed": false
+    },
+    {
+      "evidence_id": "ev_notion_price_02",
+      "source_id": "src_notion_pricing",
+      "product_name": "Notion",
+      "source_url": "https://www.notion.so/pricing",
+      "source_type": "pricing_page",
+      "source_authority": 0.95,
+      "content": "Plus plan includes unlimited blocks for teams, unlimited file uploads, and 30 day page history.",
+      "content_hash": "hash_notion_price_02",
+      "context_before": null,
+      "context_after": null,
+      "location": {
+        "char_start": null,
+        "char_end": null,
+        "selector": null,
+        "page_section": null
+      },
+      "language": "en",
+      "collected_at": "2026-05-27T14:00:00Z",
+      "extracted_at": "2026-05-27T14:00:00Z",
+      "confidence": 0.9,
+      "tags": [
+        "pricing",
+        "feature"
+      ],
+      "embedding_id": null,
+      "disputed": false
+    },
+    {
+      "evidence_id": "ev_notion_feature_01",
+      "source_id": "src_notion_homepage",
+      "product_name": "Notion",
+      "source_url": "https://www.notion.so/",
+      "source_type": "homepage",
+      "source_authority": 0.95,
+      "content": "Notion AI helps you write, summarize, and brainstorm directly in your docs.",
+      "content_hash": "hash_notion_feature_01",
+      "context_before": null,
+      "context_after": null,
+      "location": {
+        "char_start": null,
+        "char_end": null,
+        "selector": null,
+        "page_section": null
+      },
+      "language": "en",
+      "collected_at": "2026-05-27T14:00:00Z",
+      "extracted_at": "2026-05-27T14:00:00Z",
+      "confidence": 0.92,
+      "tags": [
+        "feature",
+        "ai"
+      ],
+      "embedding_id": null,
+      "disputed": false
+    }
+  ],
+  "field_confidence": {
+    "basic_info.positioning": 0.92,
+    "pricing.plans": 0.93,
+    "features.ai_capabilities": 0.9
+  },
+  "schema_version": "1.0.0",
+  "unmatched_quotes": []
+}

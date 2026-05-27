@@ -1,0 +1,19 @@
+{
+  "source_id": "src_asana_pricing",
+  "product_name": "Asana",
+  "dimension": "pricing",
+  "source_url": "https://asana.com/pricing",
+  "source_type": "html",
+  "title": "Asana · Pricing",
+  "raw_html": null,
+  "raw_text": "Asana plans: Personal (free), Starter at $10.99 per user/month, Advanced at $24.99 per user/month, plus Enterprise tiers.",
+  "summary": "Asana plans: Personal (free), Starter at $10.99 per user/month, Advanced at $24.99 per user/month, plus Enterprise tiers",
+  "language": "en",
+  "collected_at": "2026-05-27T14:00:00Z",
+  "fetch_method": "firecrawl",
+  "http_status": 200,
+  "robots_allowed": true,
+  "source_authority": 0.95,
+  "detected_paywall": false,
+  "detected_outdated": false
+}

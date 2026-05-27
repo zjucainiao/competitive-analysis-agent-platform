@@ -1,0 +1,82 @@
+{
+  "verdict_id": "qa_revise_001",
+  "overall_status": "needs_revision",
+  "dimension_results": {
+    "fact_consistency": {
+      "dimension": "fact_consistency",
+      "score": 0.88,
+      "pass": true,
+      "notes": "多数段落通过；存在 1 处量化数据未在 evidence 找到字面。"
+    },
+    "evidence_completeness": {
+      "dimension": "evidence_completeness",
+      "score": 0.72,
+      "pass": false,
+      "notes": "第 4 节有 2 个段落缺少 evidence_ids。"
+    },
+    "schema_completeness": {
+      "dimension": "schema_completeness",
+      "score": 0.85,
+      "pass": true,
+      "notes": "-"
+    },
+    "logic_consistency": {
+      "dimension": "logic_consistency",
+      "score": 0.94,
+      "pass": true,
+      "notes": "-"
+    },
+    "freshness": {
+      "dimension": "freshness",
+      "score": 0.98,
+      "pass": true,
+      "notes": "-"
+    },
+    "expression": {
+      "dimension": "expression",
+      "score": 0.92,
+      "pass": true,
+      "notes": "-"
+    }
+  },
+  "issues": [
+    {
+      "issue_id": "iss_001",
+      "dimension": "evidence_completeness",
+      "severity": "major",
+      "location": "report.sections[3].paragraphs[0]",
+      "problem": "SWOT 段落引用了 cl_swot_001，但段落自身 evidence_ids 为空。",
+      "suggested_fix": "为该段落补充 evidence_ids，引用 cl_swot_001 关联的证据。",
+      "target_agent": "reporter",
+      "required_inputs": {
+        "paragraph_id": "p_sw_01"
+      }
+    },
+    {
+      "issue_id": "iss_002",
+      "dimension": "fact_consistency",
+      "severity": "minor",
+      "location": "report.sections[2].paragraphs[1]",
+      "problem": "段落提到 'Notion Business $15'，evidence 中虽提及 Business 档，但单价数字需精确匹配。",
+      "suggested_fix": "确认引用 ev_notion_price_01 中的精确价格，或加入软结论限定。",
+      "target_agent": "reporter",
+      "required_inputs": {
+        "paragraph_id": "p_pr_02"
+      }
+    }
+  ],
+  "routing": [
+    {
+      "target_agent": "reporter",
+      "reason": "2 处段落问题，均可在 Reporter 层修复，无需重新采集或抽取。",
+      "payload": {
+        "must_address": [
+          "iss_001",
+          "iss_002"
+        ],
+        "instructions": "1) 为 p_sw_01 补充 evidence_ids；2) 检查 p_pr_02 的量化数据与 evidence 的字面一致性。"
+      }
+    }
+  ],
+  "blocking": true
+}

@@ -1,0 +1,19 @@
+{
+  "source_id": "src_clickup_pricing",
+  "product_name": "ClickUp",
+  "dimension": "pricing",
+  "source_url": "https://clickup.com/pricing",
+  "source_type": "html",
+  "title": "ClickUp · Pricing",
+  "raw_html": null,
+  "raw_text": "ClickUp provides Free Forever, Unlimited at $7 per user/month, Business at $12 per user/month, and Enterprise plans. ClickUp Automations include 100+ pre-built automations and the ability to build custom workflow triggers across tasks, docs, and integrations.",
+  "summary": "ClickUp provides Free Forever, Unlimited at $7 per user/month, Business at $12 per user/month, and Enterprise plans. Cli",
+  "language": "en",
+  "collected_at": "2026-05-27T14:00:00Z",
+  "fetch_method": "firecrawl",
+  "http_status": 200,
+  "robots_allowed": true,
+  "source_authority": 0.95,
+  "detected_paywall": false,
+  "detected_outdated": false
+}

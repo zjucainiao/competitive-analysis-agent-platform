@@ -1,0 +1,60 @@
+{
+  "agent_name": "qa",
+  "agent_version": "1.0.0",
+  "task_id": "t_qa",
+  "trace_id": "trace_demo",
+  "span_id": "span_qa",
+  "status": "success",
+  "confidence": 0.95,
+  "self_critique": "6 维度全通过，无 blocking issue。",
+  "tokens_input": 7800,
+  "tokens_output": 600,
+  "cost_usd": 0.0,
+  "duration_ms": 8200,
+  "errors": [],
+  "verdict": {
+    "verdict_id": "qa_pass_001",
+    "overall_status": "pass",
+    "dimension_results": {
+      "fact_consistency": {
+        "dimension": "fact_consistency",
+        "score": 0.97,
+        "pass": true,
+        "notes": "所有事实性段落均被 evidence 蕴含。"
+      },
+      "evidence_completeness": {
+        "dimension": "evidence_completeness",
+        "score": 0.94,
+        "pass": true,
+        "notes": "关键段落 evidence 覆盖率 ≥ 0.9。"
+      },
+      "schema_completeness": {
+        "dimension": "schema_completeness",
+        "score": 0.88,
+        "pass": true,
+        "notes": "3 个 Profile 字段填充率均 ≥ 0.8。"
+      },
+      "logic_consistency": {
+        "dimension": "logic_consistency",
+        "score": 0.96,
+        "pass": true,
+        "notes": "无前后矛盾。"
+      },
+      "freshness": {
+        "dimension": "freshness",
+        "score": 0.99,
+        "pass": true,
+        "notes": "所有 evidence 抓取于 30 天内。"
+      },
+      "expression": {
+        "dimension": "expression",
+        "score": 0.95,
+        "pass": true,
+        "notes": "表达规范，无禁用词。"
+      }
+    },
+    "issues": [],
+    "routing": [],
+    "blocking": false
+  }
+}

@@ -1,0 +1,199 @@
+"""Pydantic schemas — the single source of truth for cross-module data.
+
+所有跨 Agent / 跨模块的数据结构都在此目录内定义。
+任何字段变更必须 bump SCHEMA_VERSION 并经过架构窗口 review。
+"""
+
+SCHEMA_VERSION = "1.0.0"
+
+# Agent IO base
+from .agent_io import (
+    AgentError,
+    AgentInputBase,
+    AgentOutputBase,
+    AgentStatus,
+)
+
+# Evidence & raw sources
+from .evidence import (
+    Evidence,
+    EvidenceLocation,
+    RawSourceDoc,
+)
+
+# Competitor profile (universal + extensions)
+from .competitor import (
+    CompetitiveAnalysis,
+    CompetitorProfile,
+    Feature,
+    FeatureModule,
+    FeatureProfile,
+    FieldStatus,
+    FreeTrialInfo,
+    Insight,
+    Integration,
+    PlanAvailability,
+    PricingModel,
+    PricingPlan,
+    PricingProfile,
+    ProductBasicInfo,
+    SecurityProfile,
+    UserFeedbackProfile,
+    UserSegment,
+    FeedbackTheme,
+    PainPoint,
+    TypicalReview,
+)
+
+# Industry extensions
+from .industry import (
+    CollaborationSaasExtension,
+    CrmSaasExtension,
+    CrossBorderEcommerceSaasExtension,
+    IndustryExtensionUnion,
+    MaturityScore,
+)
+
+# Per-agent IO
+from .collector import (
+    CollectConstraints,
+    CollectDimension,
+    CollectorInput,
+    CollectorOutput,
+)
+from .extractor import (
+    ExtractorInput,
+    ExtractorOutput,
+)
+from .analyst import (
+    AnalysisClaim,
+    AnalysisDimension,
+    AnalysisResult,
+    AnalystInput,
+    AnalystOutput,
+    DimensionAnalysis,
+)
+from .reporter import (
+    ReportDraft,
+    ReportParagraph,
+    ReportSection,
+    ReporterInput,
+    ReporterOutput,
+)
+from .qa import (
+    QADimension,
+    QADimensionResult,
+    QAFeedback,
+    QAInput,
+    QAIssue,
+    QAOutput,
+    QARouting,
+    QAStatus,
+    QAVerdict,
+)
+
+# Infrastructure
+from .trace import (
+    LLMCallRecord,
+    ToolCallRecord,
+    TraceRecord,
+)
+from .dag import (
+    DAGEdge,
+    DAGNode,
+    DAGPlan,
+    DAGState,
+    NodeStatus,
+    NodeType,
+)
+from .project import (
+    Project,
+    ProjectMetrics,
+    ProjectStatus,
+)
+
+__all__ = [
+    "SCHEMA_VERSION",
+    # agent_io
+    "AgentError",
+    "AgentInputBase",
+    "AgentOutputBase",
+    "AgentStatus",
+    # evidence
+    "Evidence",
+    "EvidenceLocation",
+    "RawSourceDoc",
+    # competitor
+    "CompetitiveAnalysis",
+    "CompetitorProfile",
+    "Feature",
+    "FeatureModule",
+    "FeatureProfile",
+    "FeedbackTheme",
+    "FieldStatus",
+    "FreeTrialInfo",
+    "Insight",
+    "Integration",
+    "PainPoint",
+    "PlanAvailability",
+    "PricingModel",
+    "PricingPlan",
+    "PricingProfile",
+    "ProductBasicInfo",
+    "SecurityProfile",
+    "TypicalReview",
+    "UserFeedbackProfile",
+    "UserSegment",
+    # industry
+    "CollaborationSaasExtension",
+    "CrmSaasExtension",
+    "CrossBorderEcommerceSaasExtension",
+    "IndustryExtensionUnion",
+    "MaturityScore",
+    # collector
+    "CollectConstraints",
+    "CollectDimension",
+    "CollectorInput",
+    "CollectorOutput",
+    # extractor
+    "ExtractorInput",
+    "ExtractorOutput",
+    # analyst
+    "AnalysisClaim",
+    "AnalysisDimension",
+    "AnalysisResult",
+    "AnalystInput",
+    "AnalystOutput",
+    "DimensionAnalysis",
+    # reporter
+    "ReportDraft",
+    "ReportParagraph",
+    "ReportSection",
+    "ReporterInput",
+    "ReporterOutput",
+    # qa
+    "QADimension",
+    "QADimensionResult",
+    "QAFeedback",
+    "QAInput",
+    "QAIssue",
+    "QAOutput",
+    "QARouting",
+    "QAStatus",
+    "QAVerdict",
+    # trace
+    "LLMCallRecord",
+    "ToolCallRecord",
+    "TraceRecord",
+    # dag
+    "DAGEdge",
+    "DAGNode",
+    "DAGPlan",
+    "DAGState",
+    "NodeStatus",
+    "NodeType",
+    # project
+    "Project",
+    "ProjectMetrics",
+    "ProjectStatus",
+]

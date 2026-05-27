@@ -1,0 +1,19 @@
+{
+  "source_id": "src_clickup_homepage",
+  "product_name": "ClickUp",
+  "dimension": "homepage",
+  "source_url": "https://clickup.com/",
+  "source_type": "html",
+  "title": "ClickUp – One app to replace them all",
+  "raw_html": null,
+  "raw_text": "ClickUp is one app to replace them all: tasks, docs, goals, chat — everything teams need to work in one place.",
+  "summary": "ClickUp is one app to replace them all: tasks, docs, goals, chat — everything teams need to work in one place.",
+  "language": "en",
+  "collected_at": "2026-05-27T14:00:00Z",
+  "fetch_method": "firecrawl",
+  "http_status": 200,
+  "robots_allowed": true,
+  "source_authority": 0.95,
+  "detected_paywall": false,
+  "detected_outdated": false
+}

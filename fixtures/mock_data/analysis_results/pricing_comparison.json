@@ -1,0 +1,53 @@
+{
+  "dimension": "pricing_comparison",
+  "summary": "三者均采用 Freemium。ClickUp 入门档最便宜（$7），Notion 居中（Plus $10），Asana 较高（Starter $10.99，Advanced $24.99）。",
+  "claims": [
+    {
+      "claim_id": "cl_price_001",
+      "text": "ClickUp Unlimited 档 $7/seat/月，是三者中入门档最低价。",
+      "products_involved": [
+        "Notion",
+        "ClickUp",
+        "Asana"
+      ],
+      "evidence_ids": [
+        "ev_clickup_price_01",
+        "ev_notion_price_01",
+        "ev_asana_price_01"
+      ],
+      "confidence": 0.95,
+      "counter_evidence_ids": [],
+      "qualifier": null
+    },
+    {
+      "claim_id": "cl_price_002",
+      "text": "Asana Advanced 档 $24.99/seat/月，相较 Notion Business （$15）与 ClickUp Business（$12）溢价明显。",
+      "products_involved": [
+        "Notion",
+        "ClickUp",
+        "Asana"
+      ],
+      "evidence_ids": [
+        "ev_asana_price_01",
+        "ev_notion_price_01",
+        "ev_clickup_price_01"
+      ],
+      "confidence": 0.92,
+      "counter_evidence_ids": [],
+      "qualifier": null
+    }
+  ],
+  "comparison_matrix": {
+    "entry_paid_usd": {
+      "Notion": 10,
+      "ClickUp": 7,
+      "Asana": 10.99
+    },
+    "advanced_paid_usd": {
+      "Notion": 15,
+      "ClickUp": 12,
+      "Asana": 24.99
+    }
+  },
+  "confidence": 0.93
+}
