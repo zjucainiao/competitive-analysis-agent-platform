@@ -136,6 +136,57 @@ class NullLLM:
 
 
 @dataclass
+class StubResponse:
+    """模拟 LLMResponse：携带 Collector._record_llm_usage 关心的字段。"""
+
+    parsed: Any = None
+    content: str = ""
+    tokens_input: int = 0
+    tokens_output: int = 0
+    cost_usd: float = 0.0
+    model: str = ""
+
+
+@dataclass
+class FakeLLM:
+    """可配置 LLM。按 response_format 类型映射到预设响应；同时把每次调用的
+    tokens / cost 设成可观察值，方便测试 Collector 的 token 累加逻辑。"""
+
+    by_response_format: dict[type, Any] = field(default_factory=dict)
+    call_log: list[dict[str, Any]] = field(default_factory=list)
+    raise_on_call: bool = False
+    tokens_in_per_call: int = 0
+    tokens_out_per_call: int = 0
+    cost_usd_per_call: float = 0.0
+    model_name: str = "fake-model"
+
+    def chat(
+        self,
+        *,
+        system: str,
+        messages: list[dict],
+        response_format: type | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        self.call_log.append(
+            {"system": system, "messages": messages, "response_format": response_format}
+        )
+        if self.raise_on_call:
+            raise RuntimeError("simulated LLM failure")
+        canned = self.by_response_format.get(response_format) if response_format else None
+        return StubResponse(
+            parsed=canned,
+            tokens_input=self.tokens_in_per_call,
+            tokens_output=self.tokens_out_per_call,
+            cost_usd=self.cost_usd_per_call,
+            model=self.model_name,
+        )
+
+    def embed(self, texts: list[str], **kwargs: Any) -> list[list[float]]:
+        return [[0.0] * 8 for _ in texts]
+
+
+@dataclass
 class NullTracer:
     """空 Tracer。返回上下文管理器但不做任何持久化。"""
 

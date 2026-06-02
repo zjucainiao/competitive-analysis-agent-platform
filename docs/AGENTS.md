@@ -676,4 +676,9 @@ class QAFeedback(BaseModel):
 - 任何字段变更：major（删/改类型）、minor（新增可选）、patch（注释/校验）
 - 变更须走 PR + 架构窗口审查 + 通知所有 Agent 窗口
 
-当前版本：**v1.0.0**
+当前版本：**v1.1.0**
+
+> v1.1.0（2026-05-29）：新增 `NodeExecutionRequest` / `NodeExecutionResult`
+> （docs/AGENTS.md § 8.2 早已声明，本次补入 `backend/schemas/orchestrator.py`），
+> 为 I 窗口 storage 层的 `EventBusProtocol` 提供消息载荷类型。Minor bump：纯增量，
+> 现有 Agent 输入输出 schema 不变。

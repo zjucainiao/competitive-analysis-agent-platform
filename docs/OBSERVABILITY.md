@@ -349,3 +349,87 @@ backend/observability/
 - 每个 Agent 实现窗口：参考本文档实现 `BaseAgent.invoke()` 时的 Trace 注入
 - O 窗口：每个 DAGNode 执行前后开关 span
 - F 窗口：消费 trace 数据渲染时间轴 + 详情抽屉
+
+---
+
+## 13. 实施落地（I 窗口产出，v1.0）
+
+### 13.1 已落地组件
+
+`backend/observability/` 提供两套 `TracerProtocol` 实现：
+
+| 实现 | 用途 | 何时返回 |
+|---|---|---|
+| `OTLPTracer` | OTel SDK + OTLP HTTP exporter，直连 Jaeger / Tempo | 配置了 `OTEL_EXPORTER_OTLP_ENDPOINT` |
+| `NullTracer` | 单测 / 离线演示 no-op | 未配置 OTLP 或 `OTEL_TRACES_EXPORTER=none` |
+
+工厂入口：
+
+```python
+from backend.observability import build_tracer_from_env
+tracer = build_tracer_from_env(service_name="competitive-analysis-agent")
+agent = Collector(llm=..., tools=..., tracer=tracer)
+```
+
+无 OTel SDK / endpoint 不通时自动降级 `NullTracer`，**Agent 启动永远不被 trace 配置阻塞**。
+
+### 13.2 自动 LLM 子 span
+
+`BaseAgent` 用 `_TrackingLLMWrapper` 包 `self.llm`，每次 `chat()` 完成后：
+
+1. 累加 `tokens_input` / `tokens_output` 到本次 invoke 的 `_LLMUsageCounter`
+2. 调 `backend.llm.pricing.estimate_cost()` 算 `cost_usd` 也累加
+3. 在当前 span 上调 `add_llm_call(model, system_prompt, messages, response, ...)`，OTLPSpan 在父 span 下开 `llm.chat` 子 span
+4. `invoke()` 退出时：`AgentOutput.tokens_input/output/cost_usd` 如果子类没自填则自动回填
+
+效果：Jaeger UI 上一个 e2e 跑出来的 trace 树长这样：
+
+```
+agent.collector
+  ├── llm.chat (model=gpt-4o-mini, tokens=128/45, cost=$0.000046)
+  ├── llm.chat (model=gpt-4o-mini, tokens=210/89)
+  └── tool.scrape.firecrawl (duration=1.2s)
+agent.extractor
+  └── llm.chat (model=deepseek-chat, tokens=1450/620)
+...
+```
+
+### 13.3 PII 脱敏
+
+所有写入 OTel attribute 的 prompt / response / tool args 都过 `backend.tools.sanitize`
+（邮箱 / 电话 / 身份证 / 信用卡 / API key / Bearer token），符合 docs/COMPLIANCE.md § 4.1。
+
+### 13.4 dev infra
+
+```bash
+# 起 Jaeger
+docker compose up -d jaeger
+
+# 配 OTLP（默认 HTTP exporter）
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_SERVICE_NAME=competitive-analysis-agent
+
+# 跑 e2e
+pytest backend/agents/.../tests/test_e2e_real.py -k smoke
+# 打开 UI 验收
+open http://localhost:16686
+```
+
+支持的环境变量都是 OTel 标准：`OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_SERVICE_NAME` /
+`OTEL_RESOURCE_ATTRIBUTES` / `OTEL_TRACES_EXPORTER=none`（强制关闭）。
+
+### 13.5 给 O 窗口的迁移
+
+`backend/orchestrator/tracing.py` 目前是 NullTracer 占位。完整切换时：
+
+```python
+# backend/orchestrator/agent_registry.py（伪代码）
+from backend.observability import build_tracer_from_env
+
+def from_env():
+    tracer = build_tracer_from_env()  # 代替 NullTracer()
+    return Collector(llm=..., tools=..., tracer=tracer), ...
+```
+
+`backend.observability.NullTracer` 与 `orchestrator.tracing.NullTracer` 行为等价，
+零运行时风险。后续 v2 接 LangSmith 双写时只改 `OTLPTracer` 实现，不动调用方。

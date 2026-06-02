@@ -58,6 +58,15 @@ class Evidence(BaseModel):
     language: str = Field(default="en", description="ISO 639-1, e.g. 'en' / 'zh'")
     collected_at: datetime
     extracted_at: datetime
+    source_published_at: datetime | None = Field(
+        default=None,
+        description=(
+            "源文档发布/最后修改时间。来自页面 <time>、meta[name=date]、"
+            "JSON-LD datePublished 或 HTTP Last-Modified。"
+            "None 表示 Collector 未能识别——freshness 检查会按"
+            "'无可靠日期'走中性兜底，避免把刚抓的旧文档判为新鲜。"
+        ),
+    )
     confidence: float = Field(ge=0, le=1, description="抽取置信度")
 
     tags: list[str] = Field(default_factory=list)

@@ -36,10 +36,16 @@ dependencies = [
     "lxml>=5.2",
     "tenacity>=8.3",
     "jinja2>=3.1",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "json-repair>=0.30",
 
     # 可观测
     "structlog>=24.1",
     "opentelemetry-api>=1.25",
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp-proto-http>=1.25",
+    "opentelemetry-semantic-conventions>=0.46b0",
 
     # 工具实用
     "python-ulid>=2.7",
@@ -59,6 +65,17 @@ tools-search = [
     # Tavily / Serper / Firecrawl 通过 httpx 直接调用，无需额外依赖
     # Playwright 是可选的 fallback
     "playwright>=1.44",
+]
+tools-crawl4ai = [
+    # Crawl4AI：JS 渲染 + LLM-friendly markdown 抽取（SPA 抓取兜底）
+    # 安装后还需运行 `python -m playwright install chromium`
+    "crawl4ai>=0.4",
+]
+export-pdf-docx = [
+    # PDF：reportlab 纯 Python，无系统依赖（区别于 weasyprint 需要 pango/cairo）
+    "reportlab>=4.0",
+    # DOCX
+    "python-docx>=1.1",
 ]
 
 [build-system]
@@ -91,5 +108,8 @@ asyncio_mode = "auto"
 markers = [
     "slow: marks tests as slow",
     "e2e: end-to-end integration tests",
+    "postgres: requires a running PostgreSQL (POSTGRES_DSN env var)",
+    "redis: requires a running Redis (REDIS_URL env var)",
+    "otlp: requires opentelemetry SDK + exporter installed",
 ]
-testpaths = ["backend/tests", "backend/agents", "backend/orchestrator"]
+testpaths = ["backend/tests", "backend/agents", "backend/orchestrator", "backend/storage", "backend/api", "backend/tools", "backend/llm", "backend/observability"]

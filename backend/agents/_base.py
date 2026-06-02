@@ -18,6 +18,7 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import (
     Any,
     ClassVar,
@@ -36,6 +37,34 @@ from backend.schemas.agent_io import (
     AgentOutputBase,
     AgentStatus,
 )
+
+# ---------- User prompt override (节点级人工介入) ----------
+#
+# Executor 在调度节点前，若 ``node.metadata['user_prompt_override']`` 非空就把它
+# set 到这个 ContextVar；``_TrackingLLMWrapper.chat`` 在调用 LLM 前从 ContextVar
+# 读出并 **prepend** 到 system prompt 顶部，让 LLM 在所有默认 prompt 之上优先服从
+# 用户输入。退出节点（不论成功失败）reset 还原。
+#
+# 这是个跨 Agent 的人工介入兜底：用户 PATCH /nodes/{nid}/edit-prompt 后，无需
+# 任何 Agent 子类配合即可生效；具体效果取决于 LLM 对 USER OVERRIDE 块的服从度。
+
+_USER_PROMPT_OVERRIDE: ContextVar[str | None] = ContextVar(
+    "_USER_PROMPT_OVERRIDE", default=None
+)
+
+
+def set_user_prompt_override(text: str | None):
+    """Executor 在 invoke 前调用；返回 token 供 reset 使用。"""
+    return _USER_PROMPT_OVERRIDE.set(text)
+
+
+def reset_user_prompt_override(token) -> None:
+    """invoke 结束（含异常）后必须调，避免污染后续节点。"""
+    _USER_PROMPT_OVERRIDE.reset(token)
+
+
+def _current_user_prompt_override() -> str | None:
+    return _USER_PROMPT_OVERRIDE.get()
 
 # ---------- Type variables ----------
 
@@ -124,6 +153,123 @@ class SelfCritiqueRequiredError(ValueError):
     """confidence < 0.6 但 self_critique 为空时抛出。"""
 
 
+# ---------- LLM 用量自动累加 ----------
+#
+# BaseAgent 把传入的 ``llm`` 包成 _TrackingLLMWrapper，每次 ``chat()`` 调用后
+# 从返回值（``LLMResponse`` 或 dict-like）取 ``tokens_input/output`` 累加到
+# 本次 ``invoke()`` 的 ``_LLMUsageCounter``，``invoke()`` 末尾把累加结果
+# 回填到 ``AgentOutput``（仅当子类未自己填）。
+#
+# cost 估算走 ``backend.llm.pricing.estimate_cost``（懒 import 避免循环）。
+
+
+class _LLMUsageCounter:
+    """单次 ``invoke()`` 期内的 LLM 用量累加器。"""
+
+    __slots__ = ("tokens_input", "tokens_output", "cost_usd")
+
+    def __init__(self) -> None:
+        self.tokens_input: int = 0
+        self.tokens_output: int = 0
+        self.cost_usd: float = 0.0
+
+    def reset(self) -> None:
+        self.tokens_input = 0
+        self.tokens_output = 0
+        self.cost_usd = 0.0
+
+    def add(self, *, tokens_in: int, tokens_out: int, cost: float) -> None:
+        self.tokens_input += tokens_in
+        self.tokens_output += tokens_out
+        self.cost_usd += cost
+
+
+class _TrackingLLMWrapper:
+    """包装真实 LLM provider，``chat()`` 调用后把用量累加到 counter。
+
+    其余属性透传给 ``inner``（如 ``model`` / ``embed`` / ``supports_json_mode``）。
+    """
+
+    def __init__(self, inner: Any, counter: _LLMUsageCounter) -> None:
+        self._inner = inner
+        self._counter = counter
+        self._span: Any = None  # 由 BaseAgent.invoke 在进入 tracer span 后 attach
+
+    def _attach_span(self, span: Any) -> None:
+        self._span = span
+
+    def _detach_span(self) -> None:
+        self._span = None
+
+    def chat(self, **kwargs: Any) -> Any:
+        # 用户 prompt 覆盖：把 ContextVar 中的 override 文本 prepend 到 system，
+        # 让 LLM 在默认指令之前先看到用户的人工调整。
+        override = _current_user_prompt_override()
+        if override:
+            base_system = kwargs.get("system", "") or ""
+            kwargs["system"] = (
+                "## ⚠️ USER PROMPT OVERRIDE (highest priority)\n"
+                f"{override.strip()}\n\n"
+                "## Default system prompt below — apply only where not "
+                "overridden above.\n\n"
+                f"{base_system}"
+            )
+        started = time.monotonic()
+        resp = self._inner.chat(**kwargs)
+        duration_ms = int((time.monotonic() - started) * 1000)
+
+        tokens_in = int(getattr(resp, "tokens_input", 0) or 0)
+        tokens_out = int(getattr(resp, "tokens_output", 0) or 0)
+        model = getattr(resp, "model", "") or getattr(self._inner, "model", "")
+        cost = (
+            _estimate_call_cost(model, tokens_in, tokens_out)
+            if model and (tokens_in or tokens_out)
+            else 0.0
+        )
+        if tokens_in or tokens_out:
+            self._counter.add(tokens_in=tokens_in, tokens_out=tokens_out, cost=cost)
+
+        # 推到当前 span（OTLPSpan 落 llm.chat 子 span；NullSpan 是 no-op）
+        span = self._span
+        if span is not None:
+            adder = getattr(span, "add_llm_call", None)
+            if callable(adder):
+                try:
+                    adder(
+                        model=model,
+                        system_prompt=kwargs.get("system", ""),
+                        messages=kwargs.get("messages"),
+                        response=getattr(resp, "content", None)
+                        or getattr(resp, "parsed", None),
+                        tokens_input=tokens_in,
+                        tokens_output=tokens_out,
+                        cost_usd=cost,
+                        finish_reason=getattr(resp, "finish_reason", None),
+                        duration_ms=duration_ms,
+                    )
+                except Exception:  # noqa: BLE001
+                    # tracer 异常永远不阻塞主流程
+                    pass
+        return resp
+
+    def embed(self, texts: list[str], **kwargs: Any) -> Any:
+        # embed 暂不计 token（多数 provider 价格按文本量而非 token）
+        return self._inner.embed(texts, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        # 透传 inner 上的其他属性（model / supports_json_mode / from_env / ...）
+        return getattr(self._inner, name)
+
+
+def _estimate_call_cost(model: str, tokens_in: int, tokens_out: int) -> float:
+    """惰性 import 价格表，避免 backend.agents._base ↔ backend.llm 循环。"""
+    try:
+        from backend.llm.pricing import estimate_cost
+    except Exception:  # noqa: BLE001
+        return 0.0
+    return estimate_cost(model, tokens_in, tokens_out)
+
+
 # ---------- BaseAgent ----------
 
 
@@ -163,10 +309,20 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
         tracer: TracerProtocol | None = None,
         mock: bool = False,
     ) -> None:
-        self.llm = llm
         self.tools = tools
         self.tracer = tracer
         self.mock = mock
+
+        # 每个 Agent 实例独占一个 counter；invoke() 进入时 reset，
+        # 退出时回填到 AgentOutput.tokens_input/output/cost_usd（仅当子类未自填）。
+        self._llm_counter = _LLMUsageCounter()
+
+        # 把 llm 包成跟踪版；子类用 self.llm.chat(...) 时自动累加 token。
+        # mock=True 且 llm=None 时不包。
+        if llm is None:
+            self.llm = None  # type: ignore[assignment]
+        else:
+            self.llm = _TrackingLLMWrapper(llm, self._llm_counter)  # type: ignore[assignment]
 
         if not mock:
             # 真实模式必须配齐依赖
@@ -216,12 +372,19 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
         started = time.monotonic()
         errors: list[AgentError] = []
 
+        # 本次 invoke 的 LLM 用量计数清零（同一 Agent 实例多次 invoke 不串号）
+        self._llm_counter.reset()
+
         with self._open_span(
             trace_id=trace_id,
             span_id=span_id,
             parent_span_id=parent_span_id,
             node_id=node_id,
         ) as span:
+            # 让 LLM wrapper 把每次 chat 推到当前 span，自动注入子 span。
+            # 退出 span 时 detach，防止 invoke 之间互相串号。
+            if isinstance(self.llm, _TrackingLLMWrapper):
+                self.llm._attach_span(span)
             try:
                 if self.mock:
                     out = self._run_mock(inp)  # type: ignore[arg-type]
@@ -324,7 +487,20 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
             if out.duration_ms == 0:
                 out.duration_ms = int((time.monotonic() - started) * 1000)
 
+            # 回填 LLM 用量：仅当子类没自己累加时才覆盖。
+            # extractor 等显式累加 tokens 的子类会保留自己的值。
+            if out.tokens_input == 0 and self._llm_counter.tokens_input > 0:
+                out.tokens_input = self._llm_counter.tokens_input
+            if out.tokens_output == 0 and self._llm_counter.tokens_output > 0:
+                out.tokens_output = self._llm_counter.tokens_output
+            if out.cost_usd == 0.0 and self._llm_counter.cost_usd > 0:
+                out.cost_usd = self._llm_counter.cost_usd
+
             self._safe_set_output(span, out)
+
+            # 清理 wrapper 上的 span 引用（防止下一次 invoke 之外的 chat 误用）
+            if isinstance(self.llm, _TrackingLLMWrapper):
+                self.llm._detach_span()
 
         return out  # type: ignore[return-value]
 

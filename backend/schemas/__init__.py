@@ -4,7 +4,8 @@
 任何字段变更必须 bump SCHEMA_VERSION 并经过架构窗口 review。
 """
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
+# 1.1.0: Evidence 增加可选 source_published_at（向后兼容，旧 JSON 默认 None）
 
 # Agent IO base
 from .agent_io import (
@@ -50,6 +51,7 @@ from .industry import (
     CollaborationSaasExtension,
     CrmSaasExtension,
     CrossBorderEcommerceSaasExtension,
+    EduSaasExtension,
     IndustryExtensionUnion,
     MaturityScore,
 )
@@ -109,7 +111,14 @@ from .dag import (
 from .project import (
     Project,
     ProjectMetrics,
+    ProjectMetricsSnapshot,
     ProjectStatus,
+    RunRef,
+    RunSnapshot,
+)
+from .orchestrator import (
+    NodeExecutionRequest,
+    NodeExecutionResult,
 )
 
 __all__ = [
@@ -148,6 +157,7 @@ __all__ = [
     "CollaborationSaasExtension",
     "CrmSaasExtension",
     "CrossBorderEcommerceSaasExtension",
+    "EduSaasExtension",
     "IndustryExtensionUnion",
     "MaturityScore",
     # collector
@@ -195,5 +205,11 @@ __all__ = [
     # project
     "Project",
     "ProjectMetrics",
+    "ProjectMetricsSnapshot",
     "ProjectStatus",
+    "RunRef",
+    "RunSnapshot",
+    # orchestrator
+    "NodeExecutionRequest",
+    "NodeExecutionResult",
 ]

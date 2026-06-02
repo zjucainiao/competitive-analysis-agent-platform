@@ -24,9 +24,18 @@
 """
 
 from .agent import Collector
+from .llm_providers import LLMResponse, OpenAICompatibleLLM
 from .tools import (
+    Crawl4AIScraper,
     SimpleToolRegistry,
     build_default_registry,
 )
 
-__all__ = ["Collector", "SimpleToolRegistry", "build_default_registry"]
+__all__ = [
+    "Collector",
+    "Crawl4AIScraper",
+    "LLMResponse",
+    "OpenAICompatibleLLM",
+    "SimpleToolRegistry",
+    "build_default_registry",
+]

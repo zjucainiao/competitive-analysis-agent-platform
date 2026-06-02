@@ -1,0 +1,86 @@
+template_id: collab_saas_standard_v1
+name: 协作办公标准 DAG
+industry: collaboration_saas
+description: |
+  1 个 target_product + N 个 competitors，并行 Collector → 并行 Extractor → JOIN
+  → 单 Analyst 多维度对比 → Reporter → QA → END。
+  QA 退回时由 feedback_router 在运行时派生 _v{n+1} 节点，不在模板里建。
+
+# planner 展开时从 Project 字段解析的变量
+variables:
+  products: project.target_plus_competitors
+  collect_dimensions:
+    - homepage
+    - features
+    - pricing
+    - help_docs
+    # 加上 reviews：让 Collector 触发 reviews 路径（豆包 EP 自带联网搜索能采），
+    # 防止 user_feedback.overall_rating 全空导致 QA schema_completeness critical。
+    # 详见 docs/E2E_INTEGRATION_LOG.md
+    - user_reviews
+  # 已知协作办公竞品的官网种子（real 模式 Collector 不再依赖外部搜索 API）。
+  # planner 把命中的 URL 写进 Collector 节点 metadata.official_url；未命中的
+  # 产品仍走搜索 / robots fallback 路径。
+  product_urls:
+    Notion: https://www.notion.so
+    ClickUp: https://clickup.com
+    Asana: https://asana.com
+    Trello: https://trello.com
+    Monday: https://monday.com
+    Lark: https://www.larksuite.com
+    Slack: https://slack.com
+
+nodes:
+  - id: start
+    type: start
+
+  - id: collect.{product}
+    type: agent_call
+    agent: collector
+    for_each: products
+    depends_on: [start]
+    # 5 dimension（含 user_reviews 走豆包联网搜索）单次跑 80-120s，
+    # 60s 太紧，重试 3 次全超时 → fail。拉到 3 分钟。
+    timeout_ms: 180000
+    max_retries: 2
+
+  - id: extract.{product}
+    type: agent_call
+    agent: extractor
+    for_each: products
+    depends_on:
+      - "collect.{product}"
+    # E 窗口 patch 上线后 Extractor 单次跑 200-500s：
+    # 每 source 抽取 LLM × 5+ sources + industry 扩展（12 capability）+ consolidation pass
+    # 实测 Asana（内容较多）会逼近 5 分钟，留 10 分钟 buffer
+    timeout_ms: 600000
+    max_retries: 1
+
+  - id: join_extract
+    type: parallel_join
+    depends_on: [extract.*]
+
+  - id: analyst
+    type: agent_call
+    agent: analyst
+    depends_on: [join_extract]
+    timeout_ms: 120000
+    max_retries: 2
+
+  - id: reporter
+    type: agent_call
+    agent: reporter
+    depends_on: [analyst]
+    timeout_ms: 120000
+    max_retries: 2
+
+  - id: qa
+    type: agent_call
+    agent: qa
+    depends_on: [reporter]
+    timeout_ms: 60000
+    max_retries: 2
+
+  - id: end
+    type: end
+    depends_on: [qa]

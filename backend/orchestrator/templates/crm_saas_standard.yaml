@@ -1,0 +1,73 @@
+template_id: crm_saas_standard_v1
+name: CRM SaaS 标准 DAG
+industry: crm_saas
+description: |
+  CRM 场景：1 个 target_product + N 个 competitors，并行 Collector → 并行 Extractor
+  → JOIN → 单 Analyst 多维度对比 → Reporter → QA → END。
+  反馈环 max_rounds=3。
+
+variables:
+  products: project.target_plus_competitors
+  collect_dimensions:
+    - homepage
+    - features
+    - pricing
+    - help_docs
+    - user_reviews
+  product_urls:
+    Salesforce: https://www.salesforce.com
+    HubSpot: https://www.hubspot.com
+    Zoho CRM: https://www.zoho.com/crm
+    Pipedrive: https://www.pipedrive.com
+    Microsoft Dynamics: https://dynamics.microsoft.com
+    Nimble: https://www.nimble.com
+
+nodes:
+  - id: start
+    type: start
+
+  - id: collect.{product}
+    type: agent_call
+    agent: collector
+    for_each: products
+    depends_on: [start]
+    timeout_ms: 180000
+    max_retries: 2
+
+  - id: extract.{product}
+    type: agent_call
+    agent: extractor
+    for_each: products
+    depends_on:
+      - "collect.{product}"
+    timeout_ms: 600000
+    max_retries: 1
+
+  - id: join_extract
+    type: parallel_join
+    depends_on: [extract.*]
+
+  - id: analyst
+    type: agent_call
+    agent: analyst
+    depends_on: [join_extract]
+    timeout_ms: 120000
+    max_retries: 2
+
+  - id: reporter
+    type: agent_call
+    agent: reporter
+    depends_on: [analyst]
+    timeout_ms: 120000
+    max_retries: 2
+
+  - id: qa
+    type: agent_call
+    agent: qa
+    depends_on: [reporter]
+    timeout_ms: 60000
+    max_retries: 2
+
+  - id: end
+    type: end
+    depends_on: [qa]

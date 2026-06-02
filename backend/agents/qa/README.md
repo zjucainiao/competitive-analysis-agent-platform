@@ -56,11 +56,30 @@ backend/agents/qa/
 - 直接贡献：accuracy / coverage / qa_pass_rate
 - 所有 verdict 完整持久化，用于 trace 回放
 
+## 实现状态（2026-05-29）
+
+- v1 已落地，6 维度全部覆盖（M3 目标），LLM 不可用时所有 checker 都有规则路径降级。
+- Mock 模式按 `inp.draft.version` 切 fixture：v1 → `needs_revision`，v2 → `pass`，
+  专供 Orchestrator M3 闭环演示。
+- 严重度权重：minor=1 / major=5 / critical=20；`total_weight` 0→pass、≤10→
+  needs_revision 非阻塞、>10→阻塞、>25 或 ≥2 critical → reject。
+- 防死循环：同 `dimension+location` 累计出现 ≥ 3 次自动降级 minor；
+  `prior_verdicts` 累计 ≥ 5 强制 `blocking=False` + 注入 `MAX_RETRY_REACHED` 告警。
+- 测试 19 例覆盖：mock 双分支、真实 6 维度跑通、缺引用 / 过期 evidence /
+  禁用词 / 价格冲突 / 防死循环 / `_post_validate` 强校验。
+
+```bash
+pytest backend/agents/qa/
+```
+
 ## 已知限制 / TODO
 
 - v1：entailment 用 LLM（成本较高），v2 可探索专门 NLI 模型
-- v1：freshness 检查仅看 collected_at，未对内容是否已变化做主动验证
+- v1：freshness 检查仅看 `collected_at`，未对内容是否已变化做主动验证
+- v1：`logic_consistency` 规则路径仅覆盖价格冲突 + SWOT 同义反复，复杂语义矛盾依赖 LLM
+- v1：fixture profile 的 `industry_extension` 填充率偏低，schema_completeness 会
+  对此报警；后续可视情况调整阈值或补齐 fixture
 
 ## 责任窗口
 
-**Q 窗口**。M0 后开始，M2 完成 v1（至少 3 维度），M3 完成 6 维度。
+**架构窗口**（2026-05-29 调整自 Q 窗口）。M3 已完成 v1。

@@ -83,6 +83,21 @@ _REVIEW_HOSTS = (
     "gartner.com",
 )
 
+# 各维度在 official_url 下常见的路径片段。
+# 搜索失败时由 _seed_from_official_url 拼接出候选 URL，
+# 由 scrape 真正去验证页面是否存在 + page_type_classifier 复核维度。
+_DIMENSION_PATH_HINTS: dict[CollectDimension, tuple[str, ...]] = {
+    CollectDimension.HOMEPAGE: ("",),
+    CollectDimension.FEATURES: ("product", "features", "platform", "capabilities"),
+    CollectDimension.PRICING: ("pricing", "plans"),
+    CollectDimension.HELP_DOCS: ("help", "docs", "support", "guide"),
+    CollectDimension.CHANGELOG: ("changelog", "release-notes", "whats-new"),
+    CollectDimension.CASES: ("customers", "case-studies", "stories"),
+    CollectDimension.BLOG: ("blog",),
+    CollectDimension.APP_MARKET: ("integrations", "marketplace", "apps"),
+    # REVIEWS 不在官网，留空；走搜索 / 已知评论站
+}
+
 
 # ---------- 内部用 Pydantic（LLM response 校验） ----------
 
@@ -117,6 +132,32 @@ class _PageSummary(BaseModel):
 
     summary: str
     language: str = "en"
+
+
+class _ReviewSource(BaseModel):
+    """LLM 报告的单个评论站点来源。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = Field(description="G2 / Capterra / TrustRadius / ...")
+    url: str = Field(description="该平台上该产品的评论页 URL")
+    excerpt: str = Field(default="", description="<=120 字的该来源评分+典型评价摘要")
+
+
+class _ReviewsFinding(BaseModel):
+    """LLM 联网搜索后的用户评价综合结果。Extractor 抽 user_feedback.overall_rating 依赖此。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    overall_rating: float | None = Field(
+        default=None, ge=0, le=5,
+        description="0-5 综合评分；多源时取算术平均；找不到必须填 null",
+    )
+    review_count: int | None = Field(default=None, description="评论总数（可选）")
+    positive_themes: list[str] = Field(default_factory=list, description="3-5 条")
+    negative_themes: list[str] = Field(default_factory=list, description="3-5 条")
+    sample_quotes: list[str] = Field(default_factory=list, description="2-4 条原文")
+    sources: list[_ReviewSource] = Field(default_factory=list)
 
 
 # ---------- 启发式 fallback ----------
@@ -202,6 +243,80 @@ def _short_text(text: str) -> bool:
     return len(text.strip()) < 200
 
 
+def _product_slug(product_name: str) -> str:
+    """简易 slug：lowercase + 空白转连字符。G2 等评论站常用此约定。"""
+    return product_name.strip().lower().replace(" ", "-")
+
+
+def _seed_review_hosts(product_name: str) -> list[SearchHit]:
+    """REVIEWS 维度的 host-level seed。即使 LLM 联网失败、search API 没 key，
+    至少能把 G2 / Capterra 评论页 URL 喂给 scraper 试一次。"""
+    slug = _product_slug(product_name)
+    if not slug:
+        return []
+    return [
+        SearchHit(
+            url=f"https://www.g2.com/products/{slug}/reviews",
+            title=f"{product_name} reviews | G2",
+            snippet=None,
+            provider="seed.review_host",
+        ),
+        SearchHit(
+            url=f"https://www.capterra.com/p/{slug}/",
+            title=f"{product_name} on Capterra",
+            snippet=None,
+            provider="seed.review_host",
+        ),
+        SearchHit(
+            url=f"https://www.trustradius.com/products/{slug}/reviews",
+            title=f"{product_name} reviews | TrustRadius",
+            snippet=None,
+            provider="seed.review_host",
+        ),
+    ]
+
+
+def _seed_from_official_url(
+    *,
+    official_url: str | None,
+    product_name: str,
+    dimension: CollectDimension,
+) -> list[SearchHit]:
+    """无搜索结果时，从 official_url 拼候选 URL。
+
+    HOMEPAGE 维度直接命中根路径；其他维度拼几个公认路径，让 scrape + classifier 真去验证。
+    """
+    if not official_url:
+        return []
+    hints = _DIMENSION_PATH_HINTS.get(dimension, ())
+    if not hints:
+        return []
+    from urllib.parse import urljoin
+
+    seeds: list[SearchHit] = []
+    base = official_url if official_url.endswith("/") else official_url + "/"
+    for path in hints:
+        full = urljoin(base, path) if path else base
+        title = f"{product_name} {dimension.value}".strip()
+        seeds.append(
+            SearchHit(url=full, title=title, snippet=None, provider="seed.official_url")
+        )
+    return seeds
+
+
+def _dedupe_hits(hits: list[SearchHit]) -> list[SearchHit]:
+    """按 URL 去重，保持首次出现顺序。"""
+    seen: set[str] = set()
+    out: list[SearchHit] = []
+    for h in hits:
+        u = (h.url or "").rstrip("/")
+        if not u or u in seen:
+            continue
+        seen.add(u)
+        out.append(h)
+    return out
+
+
 # ---------- Collector ----------
 
 
@@ -214,7 +329,9 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
     output_model: ClassVar[type[BaseModel]] = CollectorOutput
     required_tools: ClassVar[list[str]] = [
         "search.tavily",
+        "search.duckduckgo",
         "scrape.firecrawl",
+        "scrape.httpx",
         "scrape.playwright",
         "robots_checker",
         "domain_rate_limiter",
@@ -237,10 +354,32 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
         mock: bool = False,
     ) -> None:
         super().__init__(llm=llm, tools=tools, tracer=tracer, mock=mock)
+        self._reset_llm_usage_acc()
+
+    # ----- LLM usage 累加（与 I 窗口 LLMResponse.cost_usd 配套） -----
+
+    def _reset_llm_usage_acc(self) -> None:
+        """每次 invoke 入口都 reset；同一 Collector 实例可能被 Orchestrator 多次调用。"""
+        self._tokens_input_acc: int = 0
+        self._tokens_output_acc: int = 0
+        self._cost_usd_acc: float = 0.0
+
+    def _record_llm_usage(self, resp: Any) -> None:
+        """累计单次 LLM 调用的 token 与成本。
+
+        ``resp`` 通常是 ``LLMResponse``；用 getattr 容错，方便测试 stub
+        以及未来切换到别的 provider 实现时不强耦合。
+        """
+        if resp is None:
+            return
+        self._tokens_input_acc += int(getattr(resp, "tokens_input", 0) or 0)
+        self._tokens_output_acc += int(getattr(resp, "tokens_output", 0) or 0)
+        self._cost_usd_acc += float(getattr(resp, "cost_usd", 0.0) or 0.0)
 
     # ----- Mock -----
 
     def _run_mock(self, inp: CollectorInput) -> CollectorOutput:
+        self._reset_llm_usage_acc()
         sources = get_mock_sources(inp.product_name, inp.dimensions)
         errors: list[AgentError] = []
         coverage = self._compute_coverage(inp.dimensions, sources)
@@ -270,9 +409,9 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             status=status,
             confidence=confidence,
             self_critique=critique,
-            tokens_input=0,
-            tokens_output=0,
-            cost_usd=0.0,
+            tokens_input=self._tokens_input_acc,
+            tokens_output=self._tokens_output_acc,
+            cost_usd=self._cost_usd_acc,
             duration_ms=0,  # BaseAgent 会回填
             errors=errors,
             raw_sources=sources,
@@ -282,15 +421,20 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
     # ----- Real -----
 
     def _run(self, inp: CollectorInput) -> CollectorOutput:
+        self._reset_llm_usage_acc()
         if self.tools is None:
             raise AgentRunError(
                 code="UPSTREAM_MISSING",
                 message="tool registry not provided",
                 retriable=False,
             )
-        search_providers = self._collect_enabled(("search.tavily", "search.serper"), SearchProvider)
+        search_providers = self._collect_enabled(
+            ("search.tavily", "search.serper", "search.duckduckgo"), SearchProvider
+        )
+        # firecrawl 优先（带 markdown + onlyMainContent），playwright 次之（JS 渲染），
+        # httpx 兜底（无 key、无 JS，免费）
         scrape_chain: list[ScrapeProvider] = self._collect_enabled(
-            ("scrape.firecrawl", "scrape.playwright"), ScrapeProvider
+            ("scrape.firecrawl", "scrape.playwright", "scrape.httpx"), ScrapeProvider
         )
         robots = self.tools.get("robots_checker") if self.tools.has("robots_checker") else None
         limiter = (
@@ -350,9 +494,9 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             status=status,
             confidence=confidence,
             self_critique=critique,
-            tokens_input=0,
-            tokens_output=0,
-            cost_usd=0.0,
+            tokens_input=self._tokens_input_acc,
+            tokens_output=self._tokens_output_acc,
+            cost_usd=self._cost_usd_acc,
             duration_ms=0,
             errors=errors,
             raw_sources=all_sources,
@@ -394,21 +538,58 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
         limiter: Any,
     ) -> tuple[list[RawSourceDoc], list[AgentError]]:
         errors: list[AgentError] = []
-        candidates = self._search(
+
+        # REVIEWS 维度走专用路径：LLM 联网搜索（豆包 Seed EP / OpenAI web_search 等）
+        # 一次性拿评分 + 典型评价 + 来源 URL，直接产出 RawSourceDoc。
+        # 不依赖 Tavily/Serper（用户没 key）和 DDG（反爬严格）。
+        if dimension is CollectDimension.REVIEWS:
+            llm_docs, llm_errors = self._collect_reviews_via_llm(inp=inp)
+            errors.extend(llm_errors)
+            if llm_docs:
+                return llm_docs, errors
+            # LLM 路径未拿到结果，落到下面的"搜索 + scrape"通用路径（host seed 兜底）
+
+        searched = self._search(
             search_providers=search_providers,
             product_name=inp.product_name,
             dimension=dimension,
         )
+        seeded = _seed_from_official_url(
+            official_url=inp.official_url,
+            product_name=inp.product_name,
+            dimension=dimension,
+        )
+        # REVIEWS 维度额外加 host-level seed（G2/Capterra/TrustRadius）
+        if dimension is CollectDimension.REVIEWS:
+            seeded = seeded + _seed_review_hosts(inp.product_name)
+        # 合并去重：搜索结果优先（已带 snippet），official_url 兜底补充
+        candidates = _dedupe_hits(searched + seeded)
         if not candidates:
             errors.append(
                 AgentError(
                     code="NO_RELEVANT_RESULTS",
-                    message=f"search returned 0 results for dimension={dimension.value}",
+                    message=(
+                        f"no candidates for dimension={dimension.value} "
+                        f"(search empty and no official_url seed)"
+                    ),
                     severity="warn",
                     retriable=True,
                 )
             )
             return [], errors
+        if not searched:
+            # 搜索全空但还有 seed 候选，记一条降级痕迹，不阻塞
+            errors.append(
+                AgentError(
+                    code="NO_RELEVANT_RESULTS",
+                    message=(
+                        f"search returned 0 results for dimension={dimension.value}; "
+                        f"falling back to official_url seeds ({len(seeded)} candidates)"
+                    ),
+                    severity="warn",
+                    retriable=False,
+                )
+            )
 
         ranked = self._rank(
             hits=candidates,
@@ -417,6 +598,9 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             dimension=dimension,
         )
         kept_sources: list[RawSourceDoc] = []
+        # final_url 级别的二次去重：candidates 可能因为 301/302 redirect 落到同一页面，
+        # 例如 notion.so/ → notion.com/。在 fetch 完成后用 ScrapeResult.final_url 判重。
+        fetched_finals: set[str] = set()
         budget = max(inp.constraints.max_pages_per_dimension, 1)
         for hit, _score in ranked:
             if len(kept_sources) >= budget:
@@ -457,6 +641,11 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
                     )
                 )
                 continue
+            # 301/302 后落到同一 final_url 的，第二次直接跳过
+            final_url_normalized = scrape_result.final_url.rstrip("/")
+            if final_url_normalized in fetched_finals:
+                continue
+            fetched_finals.add(final_url_normalized)
             if scrape_result.detected_paywall and not inp.constraints.allow_paid_content:
                 errors.append(
                     AgentError(
@@ -586,6 +775,7 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
                 temperature=0.1,
                 max_tokens=1500,
             )
+            self._record_llm_usage(resp)
             parsed = _coerce_pydantic(resp, _UrlRankingList)
         except Exception:
             return []
@@ -650,6 +840,173 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
                     return None, cls.confidence
         return _heuristic_classify(url, title)
 
+    # ----- REVIEWS 维度：LLM 联网搜索路径 -----
+
+    def _collect_reviews_via_llm(
+        self, *, inp: CollectorInput
+    ) -> tuple[list[RawSourceDoc], list[AgentError]]:
+        """对 REVIEWS 维度调一次 LLM（依赖 provider 内置联网搜索），把结果
+        转成多条 RawSourceDoc 直接返回。无 LLM 或失败时返回空列表，由上层兜底。
+        """
+        errors: list[AgentError] = []
+        if self.llm is None:
+            return [], errors  # 不报错，落到 search + seed 兜底路径
+
+        try:
+            prompt = (PROMPT_DIR / "reviews_finder.md").read_text(encoding="utf-8")
+        except OSError as e:
+            errors.append(
+                AgentError(
+                    code="TOOL_FAILED",
+                    message=f"reviews_finder.md unreadable: {e}",
+                    severity="error",
+                    retriable=False,
+                )
+            )
+            return [], errors
+
+        system, user_template = _split_prompt(prompt)
+        user = _render(user_template, product_name=inp.product_name)
+        try:
+            resp = self.llm.chat(
+                system=system,
+                messages=[{"role": "user", "content": user}],
+                response_format=_ReviewsFinding,
+                temperature=0.2,
+                max_tokens=1500,
+            )
+            self._record_llm_usage(resp)
+            finding = _coerce_pydantic(resp, _ReviewsFinding)
+        except Exception as e:
+            errors.append(
+                AgentError(
+                    code="TOOL_FAILED",
+                    message=f"reviews_finder llm call failed: {type(e).__name__}: {e}",
+                    severity="warn",
+                    retriable=True,
+                )
+            )
+            return [], errors
+
+        if finding is None:
+            errors.append(
+                AgentError(
+                    code="LLM_SCHEMA_INVALID",
+                    message="reviews_finder returned unparseable response",
+                    severity="warn",
+                    retriable=True,
+                )
+            )
+            return [], errors
+
+        # finding 拿到了，但内容可能完全空（小众产品 LLM 也没搜到）
+        if not finding.sources and finding.overall_rating is None:
+            errors.append(
+                AgentError(
+                    code="NO_RELEVANT_RESULTS",
+                    message=(
+                        f"LLM web search yielded no review data for "
+                        f"{inp.product_name}"
+                    ),
+                    severity="warn",
+                    retriable=True,
+                )
+            )
+            return [], errors
+
+        docs = self._reviews_finding_to_docs(inp=inp, finding=finding)
+        if not docs:
+            errors.append(
+                AgentError(
+                    code="NO_RELEVANT_RESULTS",
+                    message=(
+                        f"LLM returned reviews finding but all source URLs invalid for "
+                        f"{inp.product_name}"
+                    ),
+                    severity="warn",
+                    retriable=False,
+                )
+            )
+        return docs, errors
+
+    def _reviews_finding_to_docs(
+        self,
+        *,
+        inp: CollectorInput,
+        finding: _ReviewsFinding,
+    ) -> list[RawSourceDoc]:
+        """把 LLM 的 _ReviewsFinding 转成 RawSourceDoc 列表。
+
+        - 有 sources：每个 source 一条 RawSourceDoc，raw_text 含该来源摘要 +
+          全局 themes/quotes/rating。
+        - 没 sources 但有 overall_rating：造一条聚合 doc，source_url 用第一个
+          可用的 review host（G2）作为代表，标记 fetch_method='search'。
+        """
+        docs: list[RawSourceDoc] = []
+        common_lines: list[str] = []
+        if finding.overall_rating is not None:
+            common_lines.append(f"Overall rating: {finding.overall_rating:.1f}/5")
+        if finding.review_count:
+            common_lines.append(f"Review count: {finding.review_count}")
+        if finding.positive_themes:
+            common_lines.append("Positive themes: " + "; ".join(finding.positive_themes))
+        if finding.negative_themes:
+            common_lines.append("Negative themes: " + "; ".join(finding.negative_themes))
+        if finding.sample_quotes:
+            common_lines.append(
+                "Sample reviews:\n"
+                + "\n".join(f"- {q}" for q in finding.sample_quotes)
+            )
+        common_text = "\n".join(common_lines)
+
+        sources_to_emit = finding.sources or [
+            _ReviewSource(
+                name="aggregated",
+                url=f"https://www.g2.com/products/{_product_slug(inp.product_name)}/reviews",
+                excerpt="LLM-synthesized aggregate; no individual source URL provided.",
+            )
+        ]
+
+        for src in sources_to_emit:
+            text = (
+                f"Source: {src.name}\n{src.excerpt}\n{common_text}"
+                if common_text
+                else f"Source: {src.name}\n{src.excerpt}"
+            )
+            # 只跳过完全空白的；短文本仍让下游评估
+            if not text.strip():
+                continue
+            try:
+                source_id = "src_" + hashlib.sha1(
+                    f"{inp.product_name}|reviews|{src.url}|{inp.task_id}".encode()
+                ).hexdigest()[:12]
+                doc = RawSourceDoc(
+                    source_id=source_id,
+                    product_name=inp.product_name,
+                    dimension=CollectDimension.REVIEWS,
+                    source_url=src.url,
+                    source_type="user_reviews",
+                    title=f"{inp.product_name} reviews on {src.name}",
+                    raw_html=None,
+                    raw_text=text,
+                    summary=None,
+                    language="en",
+                    collected_at=datetime.now(tz=UTC),
+                    # LLM 联网搜索的产物归类为 "search"：契约层面与 Tavily / Serper
+                    # 等"搜索引擎候选 URL"一致语义。
+                    fetch_method="search",
+                    http_status=None,
+                    robots_allowed=True,
+                    source_authority=0.75,  # 评论站权威性低于官方页（0.95）
+                    detected_paywall=False,
+                    detected_outdated=False,
+                )
+                docs.append(doc)
+            except ValidationError:
+                # URL 不合法 / 字段约束失败 → 跳过这一条，不阻塞其他来源
+                continue
+        return docs
+
     def _llm_classify(
         self, *, url: str, title: str | None, text: str
     ) -> _PageTypeClassification | None:
@@ -671,6 +1028,7 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             temperature=0.0,
             max_tokens=300,
         )
+        self._record_llm_usage(resp)
         return _coerce_pydantic(resp, _PageTypeClassification)
 
     # ----- RawSourceDoc 构造 -----

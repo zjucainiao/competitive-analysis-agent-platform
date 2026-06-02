@@ -85,6 +85,9 @@ def check_entailment(text: str, evidences: list[Evidence]) -> EntailmentResult:
 
 **实现**：让 LLM 把报告中所有事实性陈述抽出来，做两两对比；或用 contradiction NLI 模型。
 
+**评分**：按 severity 累加惩罚（critical=0.20 / major=0.10 / minor=0.04），阈值 0.85。
+设计意图：1 处软冲突（minor）只是提示，不卡 pass；2 处硬冲突（major）才挂掉。
+
 **routing**：
 - 矛盾点定位明确 → 回 Reporter（让它重写涉及段落）
 - 矛盾源头在 Analyst → 回 Analyst
@@ -93,12 +96,16 @@ def check_entailment(text: str, evidences: list[Evidence]) -> EntailmentResult:
 
 **检查**：
 
-- 报告中引用的所有 Evidence 的 `collected_at` 最大年龄
-- 定价 / 版本号 / 功能等敏感字段引用的 Evidence 不能超过 3 个月
+- 优先使用 Evidence.`source_published_at`（源文档发布/最后修改时间）
+- 退化路径：若 `source_published_at` 为 None（Collector 尚未识别），单条贡献**中性 0.7 分**，
+  避免把刚抓的旧文档误判为新鲜
+- 定价 / 版本号 / 功能等敏感字段引用的 Evidence 不能超过 `SENSITIVE_MAX_DAYS=90`
+- 一般字段不能超过 `GENERAL_MAX_DAYS=365`
 
 **routing**：
 - 关键字段引用 stale Evidence → 回 Collector（重新采集该 dimension）
 - 一般字段 stale → 仅在报告中标注"数据采集于 YYYY-MM"
+- 无 `source_published_at` 本身**不开 issue**，但会通过 0.7 中性分提醒补字段
 
 ### 3.6 expression（表达规范性）
 

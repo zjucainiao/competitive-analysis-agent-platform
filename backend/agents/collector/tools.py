@@ -304,6 +304,99 @@ class SerperSearch:
         ]
 
 
+# DDG html 接口对自我标识的 bot User-Agent 直接返回 anomaly 反爬。
+# 这里仅为 SEARCH（公开搜索引擎查询，无登录、无内容获取）使用浏览器风格 UA；
+# 抓取阶段仍用合规 USER_AGENT（自报项目身份）。
+_BROWSER_UA_FOR_SEARCH = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+)
+
+
+@dataclass
+class DuckDuckGoSearch:
+    """DuckDuckGo HTML 接口。零 key 兜底，质量比 Tavily 差但能跑通真实链路。
+
+    端点：https://html.duckduckgo.com/html/
+    结果链接是 DDG 的跳转链 `?uddg=<encoded_real_url>`，需要解出真实 URL。
+    DDG 反爬严格，碰到 anomaly 页时优雅返回空列表，由 Collector 自身的兜底路径处理。
+    """
+
+    http: httpx.Client | None = None
+    timeout: float = DEFAULT_HTTP_TIMEOUT
+    name: str = "search.duckduckgo"
+    enabled: bool = True
+
+    _ENDPOINT: str = field(
+        default="https://html.duckduckgo.com/html/",
+        init=False,
+        repr=False,
+    )
+
+    def search(self, query: str, *, max_results: int = 10) -> list[SearchHit]:
+        client = self.http or httpx.Client(
+            timeout=self.timeout,
+            headers={
+                "User-Agent": _BROWSER_UA_FOR_SEARCH,
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml",
+                "Referer": "https://duckduckgo.com/",
+            },
+            follow_redirects=True,
+        )
+        try:
+            resp = client.post(self._ENDPOINT, data={"q": query, "kl": "us-en"})
+            if resp.status_code >= 400:
+                return []
+            html = resp.text
+            if "anomaly-modal" in html or "anomaly.js" in html:
+                # DDG 反爬触发，不是真实结果页
+                return []
+        except Exception:
+            return []
+        finally:
+            if self.http is None:
+                client.close()
+        return _parse_ddg_results(html, provider_name=self.name, limit=max_results)
+
+
+def _parse_ddg_results(html: str, *, provider_name: str, limit: int) -> list[SearchHit]:
+    """从 DDG HTML 页面抽出搜索结果。"""
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    soup = BeautifulSoup(html, "lxml")
+    hits: list[SearchHit] = []
+    for result in soup.select("div.result")[: limit * 2]:  # 多取一些再过滤
+        a = result.select_one("a.result__a")
+        if a is None:
+            continue
+        href = a.get("href") or ""
+        # DDG 的跳转链：/l/?uddg=<encoded>&...
+        real_url: str | None = None
+        if href.startswith("//"):
+            href = "https:" + href
+        try:
+            parsed = urlparse(href)
+            qs = parse_qs(parsed.query)
+            if "uddg" in qs:
+                real_url = unquote(qs["uddg"][0])
+            elif parsed.netloc and parsed.netloc not in ("duckduckgo.com", "html.duckduckgo.com"):
+                real_url = href
+        except Exception:
+            real_url = None
+        if not real_url or not real_url.startswith("http"):
+            continue
+        title = a.get_text(strip=True) or None
+        snippet_el = result.select_one(".result__snippet")
+        snippet = snippet_el.get_text(strip=True) if snippet_el else None
+        hits.append(
+            SearchHit(url=real_url, title=title, snippet=snippet, provider=provider_name)
+        )
+        if len(hits) >= limit:
+            break
+    return hits
+
+
 # ---------- Scrape providers ----------
 
 
@@ -424,6 +517,107 @@ class HttpxScraper:
 
 
 @dataclass
+class Crawl4AIScraper:
+    """基于 Crawl4AI（Playwright + chromium 渲染）的抓取实现。
+
+    用途：解决 SPA / JS 重渲染页面 httpx 抓不全正文的问题（如 Notion 首页）。
+    挂在 registry 的 `scrape.playwright` 位 —— 名字保持 "scrape.playwright"，
+    Collector 的 fetch_method 推断把它归入 contract Literal "playwright"，
+    契约层面完全干净。
+
+    依赖：
+      - `pip install -e '.[tools-crawl4ai]'`
+      - `python -m playwright install chromium`
+
+    同步接口：内部用 `asyncio.run` 包 AsyncWebCrawler。每次调用启停一次 chromium，
+    冷启动 1-3s。v1 阶段够用，性能瓶颈再上长生命周期 crawler。
+    """
+
+    name: str = "scrape.playwright"
+    enabled: bool = True
+    headless: bool = True
+    page_timeout_ms: int = 60_000
+    word_count_threshold: int = 1
+    verbose: bool = False
+
+    def scrape(self, url: str) -> ScrapeResult:
+        import asyncio
+
+        try:
+            return asyncio.run(self._async_scrape(url))
+        except Exception as e:
+            return ScrapeResult(
+                url=url,
+                final_url=url,
+                http_status=None,
+                fetched_with=self.name,
+                error=f"crawl4ai_failed: {type(e).__name__}: {e}",
+            )
+
+    async def _async_scrape(self, url: str) -> ScrapeResult:
+        # lazy import：crawl4ai 是 optional 依赖，没装时不影响 tools 模块加载
+        from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+
+        browser_cfg = BrowserConfig(
+            browser_type="chromium",
+            headless=self.headless,
+            verbose=self.verbose,
+            user_agent=USER_AGENT,
+        )
+        run_cfg = CrawlerRunConfig(
+            wait_until="domcontentloaded",
+            page_timeout=self.page_timeout_ms,
+            word_count_threshold=self.word_count_threshold,
+            remove_overlay_elements=True,
+            verbose=self.verbose,
+        )
+
+        async with AsyncWebCrawler(config=browser_cfg) as crawler:
+            container = await crawler.arun(url=url, config=run_cfg)
+
+        # arun 返回 CrawlResultContainer，单 URL 时取首条
+        result = container[0] if hasattr(container, "__getitem__") else container
+
+        html = result.cleaned_html or result.html or ""
+        title: str | None = None
+        if result.metadata:
+            title = result.metadata.get("title")
+
+        # 提取正文：优先 crawl4ai 的 markdown（已经做了 LLM-friendly 抽取）
+        markdown_text = ""
+        md = getattr(result, "markdown", None)
+        if md is not None:
+            if hasattr(md, "raw_markdown"):
+                markdown_text = md.raw_markdown or ""
+            elif isinstance(md, str):
+                markdown_text = md
+        if markdown_text and len(markdown_text) > 100:
+            text = markdown_text
+        else:
+            t2, text = extract_main_content(html)
+            if not title:
+                title = t2
+
+        final_url = result.redirected_url or result.url or url
+        status = result.redirected_status_code or result.status_code
+
+        return ScrapeResult(
+            url=url,
+            final_url=final_url,
+            http_status=int(status) if status else None,
+            html=html or None,
+            markdown=markdown_text or None,
+            text=text,
+            title=title,
+            fetched_with=self.name,
+            detected_paywall=detect_paywall(html, text),
+            error=None
+            if result.success and text
+            else (result.error_message or "empty_text"),
+        )
+
+
+@dataclass
 class NoopPlaywrightScraper:
     """Playwright 占位实现。v1 不强制安装 chromium。
 
@@ -471,21 +665,34 @@ def build_default_registry(
     http_client: httpx.Client | None = None,
     enable_playwright: bool = False,
     playwright_impl: ScrapeProvider | None = None,
+    enable_crawl4ai: bool = False,
+    crawl4ai_kwargs: dict[str, Any] | None = None,
     rate_limit_interval: float = DEFAULT_MIN_DOMAIN_INTERVAL,
 ) -> SimpleToolRegistry:
     """根据环境变量构造一个默认 registry。
 
     没有 API key 的 provider 会被注册但 enabled=False，由 Collector 自动跳过。
+
+    `enable_crawl4ai=True`：把 `scrape.playwright` 位换成 `Crawl4AIScraper`（基于 chromium 的
+    JS 渲染抓取）。需要已安装 `crawl4ai` 并运行过 `python -m playwright install chromium`。
+    与 `playwright_impl` 互斥；同时传入时 `playwright_impl` 优先。
     """
     reg = SimpleToolRegistry()
     reg.register("search.tavily", TavilySearch(http=http_client))
     reg.register("search.serper", SerperSearch(http=http_client))
+    reg.register("search.duckduckgo", DuckDuckGoSearch(http=http_client))
     reg.register("scrape.firecrawl", FirecrawlScraper(http=http_client))
     reg.register("scrape.httpx", HttpxScraper(http=http_client))
+
+    playwright_slot: ScrapeProvider
     if enable_playwright and playwright_impl is not None:
-        reg.register("scrape.playwright", playwright_impl)
+        playwright_slot = playwright_impl
+    elif enable_crawl4ai:
+        playwright_slot = Crawl4AIScraper(**(crawl4ai_kwargs or {}))
     else:
-        reg.register("scrape.playwright", NoopPlaywrightScraper())
+        playwright_slot = NoopPlaywrightScraper()
+    reg.register("scrape.playwright", playwright_slot)
+
     reg.register(
         "robots_checker",
         RobotsChecker(http_client=http_client),
@@ -496,7 +703,9 @@ def build_default_registry(
 
 __all__ = [
     "USER_AGENT",
+    "Crawl4AIScraper",
     "DomainRateLimiter",
+    "DuckDuckGoSearch",
     "FirecrawlScraper",
     "HttpxScraper",
     "NoopPlaywrightScraper",

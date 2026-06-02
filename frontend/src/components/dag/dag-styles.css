@@ -1,0 +1,126 @@
+/**
+ * ReactFlow 默认样式覆盖 —— 让 React Flow 接入我们的 OKLCH token 体系。
+ *
+ * 不动 React Flow 自身的布局算法，只改：
+ *  - 背景（去掉默认灰，使用 bg-sunken 暖色）
+ *  - 边线颜色 / 反馈边虚线样式
+ *  - 控件按钮样式
+ *  - minimap 配色
+ *  - background dots 颜色
+ */
+
+.react-flow__container {
+  background: var(--bg-sunken);
+}
+
+/* ── edges ─────────────────────────────────────────────────────────────── */
+
+.react-flow__edge-path {
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+}
+
+.react-flow__edge.feedback .react-flow__edge-path {
+  stroke: var(--rework-base);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--accent-base);
+  stroke-width: 2;
+}
+
+.react-flow__edge.feedback:hover .react-flow__edge-path {
+  stroke: var(--rework-base);
+  stroke-width: 2;
+}
+
+/* ── selected / connectionline ────────────────────────────────────────── */
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--accent-base);
+}
+
+/* ── background dots ──────────────────────────────────────────────────── */
+
+.react-flow__background-pattern {
+  color: var(--border-subtle);
+}
+
+/* ── controls (zoom / fit) ────────────────────────────────────────────── */
+
+.react-flow__controls {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: var(--shadow-popover);
+}
+
+.react-flow__controls-button {
+  background: var(--bg-raised);
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  width: 28px;
+  height: 28px;
+  transition: background-color 120ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.react-flow__controls-button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.react-flow__controls-button:last-child {
+  border-bottom: none;
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor;
+  max-width: 12px;
+  max-height: 12px;
+}
+
+/* ── minimap ──────────────────────────────────────────────────────────── */
+
+.react-flow__minimap {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.react-flow__minimap-mask {
+  fill: var(--accent-base);
+  opacity: 0.08;
+  stroke: var(--accent-border);
+  stroke-width: 1;
+}
+
+/* ── attribution (force hidden, no AI watermark) ──────────────────────── */
+
+.react-flow__attribution {
+  display: none !important;
+}
+
+/* ── node selection ring is on the node itself (border-focus) ─────────── */
+
+.react-flow__node {
+  font-family: inherit;
+}
+
+.react-flow__node:focus-visible,
+.react-flow__node.selected {
+  outline: none;
+}
+
+/* Handle 默认是大圆点，我们在 DagNode 里 inline 缩小并去边框 */
+.react-flow__handle {
+  opacity: 0.4;
+}
+
+.react-flow__node:hover .react-flow__handle {
+  opacity: 0.7;
+}

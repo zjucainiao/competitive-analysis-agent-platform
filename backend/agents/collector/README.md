@@ -16,13 +16,23 @@
 ## 实现链
 
 ```
-search.tavily / search.serper        → URL 候选
+通用维度（HOMEPAGE / FEATURES / PRICING / HELP_DOCS / ...）：
+   search.tavily / search.serper / search.duckduckgo  → URL 候选
+   + official_url seed（按维度拼路径，无搜索 key 也能跑）
+   + 去重（原 URL）
    ├ url_ranker（LLM 可选，启发式 fallback）→ top-K
    ├ robots_checker → 合规过滤（ROBOTS_BLOCKED 入 errors）
    ├ domain_rate_limiter → 单域名 ≤ 1 req/s
-   ├ scrape.firecrawl → scrape.playwright → mock fixtures
+   ├ scrape.firecrawl → scrape.playwright → scrape.httpx → mock fixtures
+   ├ final_url 二次去重（应对 301/302）
    ├ page_type_classifier（LLM 可选，启发式 fallback）→ 维度复核
    └ build RawSourceDoc
+
+REVIEWS 维度（独立路径，依赖 LLM 内置联网搜索）：
+   ├ L1：LLM 联网搜索（豆包 Seed EP / OpenAI web_search / Claude web_search）
+   │     → _ReviewsFinding（overall_rating + themes + sample_quotes + sources）
+   │     → 每个 source 一条 fetch_method='search' 的 RawSourceDoc
+   └ L2 兜底：_seed_review_hosts（G2/Capterra/TrustRadius slug 拼接）→ 走通用 scrape 链
 ```
 
 ## 目录结构
@@ -74,15 +84,23 @@ print(out.status, out.confidence, len(out.raw_sources))
 
 Mock 数据覆盖：**Notion / ClickUp / Asana × HOMEPAGE / FEATURES / PRICING / HELP_DOCS** = 12 个 RawSourceDoc。其他产品 / 维度走 mock 时会返回空 + `NO_RELEVANT_RESULTS` 警告 + 进入 PARTIAL 状态。
 
-### 真实模式
+### 真实模式（零 key 也能跑）
 
 ```python
-from backend.agents.collector import Collector, build_default_registry
+from dotenv import load_dotenv
+from backend.agents.collector import (
+    Collector,
+    OpenAICompatibleLLM,
+    build_default_registry,
+)
 
-registry = build_default_registry()        # 从 env 读 TAVILY_API_KEY / FIRECRAWL_API_KEY 等
+load_dotenv(".env")
+
+llm = OpenAICompatibleLLM.from_env()        # DOUBAO > DEEPSEEK > OPENAI 优先级；都没就返 None
+registry = build_default_registry()          # DDG + httpx 默认启用，Tavily/Firecrawl 缺 key 自动跳过
 agent = Collector(
-    llm=my_llm_provider,                   # 实现 LLMProviderProtocol 的对象
-    tracer=my_tracer,                      # 实现 TracerProtocol 的对象
+    llm=llm,
+    tracer=my_tracer,                        # 实现 TracerProtocol 的对象
     tools=registry,
     mock=False,
 )
@@ -91,14 +109,47 @@ out = agent.invoke(my_input, trace_id="...", span_id="...")
 
 环境变量（详见 [docs/CONVENTIONS.md § 6](../../../docs/CONVENTIONS.md#61-环境变量)）：
 
-- `TAVILY_API_KEY` — 启用 `search.tavily`
-- `SERPER_API_KEY` — 启用 `search.serper`
-- `FIRECRAWL_API_KEY` — 启用 `scrape.firecrawl`
-- 缺 key 的 provider 注册但 `enabled=False`，Collector 自动跳过；若全链拿不到结果且 `fallback_to_mock=True`，回退到 mock fixtures（带 `FELL_BACK_TO_MOCK` 警告）。
+| key | 用途 | 必需性 |
+|---|---|---|
+| `DOUBAO_API_KEY` (`DOUBAO_BASE_URL`, `DOUBAO_MODEL`) | 火山方舟豆包 EP，**带内置联网搜索** —— REVIEWS 维度依赖它 | 推荐 |
+| `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` | LLM 路径（URL ranker / page type classifier） | 可选（无则启发式） |
+| `TAVILY_API_KEY` | 启用 `search.tavily` | 可选（无则用 DDG） |
+| `SERPER_API_KEY` | 启用 `search.serper` | 可选 |
+| `FIRECRAWL_API_KEY` | 启用 `scrape.firecrawl`（带 markdown + onlyMainContent，质量最好） | 可选（无则 httpx 兜底） |
 
-### Playwright（可选）
+**完全零 key 路径**：DuckDuckGo 公开搜索（HTML 接口）+ official_url seed + httpx+readability 抓取 + 启发式 rank/classify。整条真实链能跑，但 DDG 反爬挑战概率较高、httpx 不渲染 JS（SPA 首页可能正文很短）。Demo 推荐至少配 `FIRECRAWL_API_KEY` 提升抓取质量。
 
-`scrape.playwright` 默认是 `NoopPlaywrightScraper` 占位；如需启用，传入实现 `ScrapeProvider` 协议的对象：
+### Crawl4AI（JS 渲染 / SPA 抓取，推荐）
+
+`scrape.playwright` 默认是 `NoopPlaywrightScraper`。装好 Crawl4AI 后开启 `enable_crawl4ai=True`，该位会换成 `Crawl4AIScraper`（基于 chromium 的 JS 渲染抓取），契约上仍归 `fetch_method="playwright"`。
+
+```bash
+# 一次性安装
+pip install -e '.[tools-crawl4ai]'
+python -m playwright install chromium
+```
+
+```python
+registry = build_default_registry(enable_crawl4ai=True)
+# 或自定义参数：
+registry = build_default_registry(
+    enable_crawl4ai=True,
+    crawl4ai_kwargs={"headless": True, "page_timeout_ms": 90_000},
+)
+```
+
+**SPA 抓取效果对比**（同一 URL `https://www.notion.com/`）：
+
+| Scraper | text_len | 备注 |
+|---|---|---|
+| `HttpxScraper` | **38 字** | 拿到的是空壳 HTML，readability 抠不出 |
+| `Crawl4AIScraper` | **9770 字** | 完整渲染后正文（约 **257× 提升**） |
+
+启用 Crawl4AI 后，Collector 主链跑 Notion HOMEPAGE 的真采集：status=SUCCESS, confidence=0.90, fetch_method='playwright', 单页正文 9120 字。
+
+### 自定义 Playwright（不用 Crawl4AI）
+
+如果你已有 Playwright 封装，可以直接注入：
 
 ```python
 registry = build_default_registry(
@@ -106,6 +157,8 @@ registry = build_default_registry(
     playwright_impl=my_playwright_scraper,
 )
 ```
+
+`playwright_impl` 优先于 `enable_crawl4ai`，两个同时传时前者生效。
 
 ## 关键约束
 
@@ -131,7 +184,7 @@ confidence < 0.6 → BaseAgent 强制 `self_critique` 非空（已在 `_build_se
 
 ## 错误码
 
-通用错误码见 [docs/AGENTS.md § 2.5](../../../docs/AGENTS.md#25-错误码约定)。Collector 特有：
+通用错误码见 [docs/AGENTS.md § 2.5](../../../docs/AGENTS.md#25-错误码约定)。REVIEWS 维度遵循同一套错误码（LLM 失败 → `TOOL_FAILED`，无源 → `NO_RELEVANT_RESULTS`，schema 不匹配 → `LLM_SCHEMA_INVALID`）。Collector 特有：
 
 | Code | 含义 | 何时触发 |
 |---|---|---|
@@ -145,10 +198,58 @@ confidence < 0.6 → BaseAgent 强制 `self_critique` 非空（已在 `_build_se
 
 ```bash
 . .venv/bin/activate
-python -m pytest backend/agents/collector/tests -v
+
+# 单元测试（无外部依赖，秒级）
+python -m pytest backend/agents/collector/tests --ignore=backend/agents/collector/tests/test_e2e_real.py -v
+
+# 端到端真采（需要联网；DOUBAO_API_KEY 推荐，REVIEWS 维度必需）
+python -m pytest backend/agents/collector/tests/test_e2e_real.py -v -s
 ```
 
-当前 8 个 case 全绿，覆盖：mock 正常 / mock 缺维度 / 真实模式 robots 阻拦 + fallback / 真实模式全链失败 / firecrawl→playwright 降级 / Schema extra=forbid / paywall 跳过 / rate_limiter 调用。
+**单元测试 11 个全绿**：mock 正常 / mock 缺维度 / 真实模式 robots 阻拦 + fallback / 真实模式无源失败 / firecrawl→playwright 降级 / Schema extra=forbid / paywall 跳过 / rate_limiter 调用 / **REVIEWS LLM 路径 × 3**（emits per source / empty finding 兜底 / LLM 抛异常不阻塞）。
+
+**e2e 测试 4 个全绿**：
+- `test_e2e_real.py` × 2：通用维度真采（HOMEPAGE+PRICING）+ **REVIEWS 维度真采（豆包联网搜 G2/Capterra）**
+- `test_e2e_crawl4ai.py` × 2：crawl4ai vs httpx SPA 抓取对比 + Collector 主链启用 crawl4ai
+
+**REVIEWS 真采输出（豆包 Seed EP `ep-20260514111325-xjmj7` 联网搜索）**：
+
+```
+status   = SUCCESS  confidence = 0.95  duration_ms = 7728
+got 2 review docs:
+  - [search] https://www.g2.com/products/notion/reviews        text_len=816
+    G2评分4.7/5，超3000条评论，用户普遍认可其灵活性与协作能力...
+  - [search] https://www.capterra.com/p/235776/Notion/reviews  text_len=822
+    Capterra评分4.5/5，超2000条评论，用户称赞自定义能力强...
+  Overall rating: 4.6/5, review_count=5000
+  Positive themes: 界面简洁美观; 高度自定义; 集成丰富; 跨多端同步
+  Negative themes: 大页面性能问题; 高级版定价偏高
+```
+
+Extractor 抽 `user_feedback.overall_rating = 4.6` 直接命中（QA `schema_completeness` critical 解除）。
+
+**真采输出（DeepSeek + 无 Tavily/Firecrawl key，纯 httpx）**：
+
+```
+status   = SUCCESS  confidence = 0.80  duration_ms = 34586
+coverage = {'homepage': 2, 'pricing': 2}
+  - [homepage] manual 200 https://www.notion.com/                    text_len=38   (SPA, 受 httpx 限制)
+  - [homepage] manual 200 https://notion.notion.site/                text_len=29
+  - [pricing]  manual 200 https://www.notion.com/pricing             text_len=994  ✓
+  - [pricing]  manual 200 https://www.notion.com/product/projects... text_len=159
+  ! warn TOOL_FAILED: scrape failed for https://www.notion.so/index.html (404, seed 推测路径)
+  self_critique = 正文过短(<200 字符): 3 个页面，可能抓取失败 | 过程告警: TOOL_FAILED
+```
+
+**启用 Crawl4AI 后的同一页面对比**：
+
+```
+status   = SUCCESS  confidence = 0.90  duration_ms = 21095
+  - [homepage] playwright 200 https://www.notion.com/        text_len=9120  ✓ (SPA 渲染后)
+  - [homepage] playwright 200 https://www.notion.so/index.html text_len=28  (404 跳转，正常短)
+```
+
+httpx 38 字 → crawl4ai 9120 字，约 **240× 提升**。这是接入 Crawl4AI 的核心价值。
 
 ## 已知限制 / TODO
 
@@ -160,11 +261,11 @@ python -m pytest backend/agents/collector/tests -v
 ### 给架构窗口的 follow-up（建议下次同步时讨论）
 
 1. **`BaseAgent` 在非 mock 模式强制 `llm` 与 `tracer` 不为 None**：但按 [AGENTS.md § 3.5](../../../docs/AGENTS.md#35-prompt-设计要点)，Collector 的 LLM 是"可选优化项"，启发式 fallback 是一等公民。当前测试通过注入 `NullLLM` / `NullTracer` 绕过，建议把这两个改成 `None` 时退化处理，或者由我提供官方的 `Null*` stub 暴露在 `_base.py`。
-2. **`RawSourceDoc.fetch_method` Literal 缺少 `"httpx"`**：当前 `HttpxScraper` 已实现但 v1 没接入主链，避免破坏契约。如要把它纳入"无 Firecrawl key 也能跑真实抓取"路径，需要在 `schemas/evidence.py` 加一项。
+2. **`RawSourceDoc.fetch_method` Literal 建议加 `"httpx"`**：`HttpxScraper` 已接入主链，目前归到 `"manual"` 是 contract-safe 临时方案；Crawl4AI 走 `"playwright"` 已经完全干净。把 httpx 这条单独标出来更便于 trace 分析。
 3. **`robots_checker` / `domain_rate_limiter` / `pii_sanitizer` 当前在 collector 内自给**：等 I 窗口（基础设施）`backend/tools/` 落地后，统一迁过去，Collector 改为 `from backend.tools import RobotsChecker` 即可。
 4. **ruff 中文标点告警**：当前 `RUF001 / RUF002 / RUF003` 触发 103 次（中文项目正常），建议在 `pyproject.toml [tool.ruff.lint] ignore` 里加这三项。
 5. **`backend/llm/` 还是空目录**：Collector 真实模式跑 LLM 路径暂时用 `NullLLM` 占位，等 I 窗口 `LLMProvider` 落地接入。
 
 ## 责任窗口
 
-C 窗口（本窗口）。v1 已交付：mock 闭环、真实模式抓取链 + 合规过滤 + 自评估 + 8 个测试用例全绿。
+C 窗口（本窗口）。v1 已交付：mock 闭环 + 真实模式抓取链（Tavily/Serper/DDG 搜索 + Firecrawl/Crawl4AI/httpx 抓取 + 豆包/DeepSeek LLM）+ **REVIEWS 维度走 LLM 内置联网搜索独立路径** + 合规过滤 + 自评估 + **15 个测试用例全绿**（11 单元 + 4 e2e，含豆包真采 G2/Capterra 评分）。
