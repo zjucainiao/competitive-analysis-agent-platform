@@ -135,94 +135,108 @@
 | 代码质量与文档 | CONVENTIONS / 全套 docs |
 | 合规、材料与答辩 | COMPLIANCE / 答辩材料（待补） |
 
-## 本地运行
+## Prerequisites
 
-完整体验 = **后端 (FastAPI :8000) + 前端 (Next.js :3000)**。后端默认走零依赖内存模式，不需要起 Postgres / Redis。
+| 工具 | 版本 |
+|---|---|
+| Python | ≥ 3.12 |
+| Node.js | ≥ 20 |
+| npm | ≥ 10 |
 
-### 1. 环境要求
+可选：Docker + Docker Compose（仅在使用 Postgres / Redis 持久化时需要；默认走内存模式）。
 
-| 工具 | 最低版本 | 备注 |
-|---|---|---|
-| Python | 3.12 | 用 `python3.12 -m venv` 建虚拟环境 |
-| Node.js | 20 LTS | 推荐 22；Next.js 16 + React 19.2 |
-| npm | 10 | 或 pnpm / yarn 均可 |
-
-至少一组 LLM key（任选其一）：
-- **Doubao**（火山方舟，**推荐**，自带联网搜索插件 EP）
-- DeepSeek / OpenAI / Anthropic — backend 已抽象 `LLMProvider`，但 v1 默认配的是 Doubao
-
-可选的外部检索：Tavily / Serper（更好的 search）· Firecrawl（SPA 渲染）。空着也能跑，Collector 会退到 httpx + Playwright。
-
-### 2. 启动后端
+## Installation
 
 ```bash
-# 在仓库根目录
-python3.12 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-
-# 配 .env（key 不会进 git，.env 已被 .gitignore 屏蔽）
-cp .env.example .env
-# 编辑 .env，最少填：
-#   DOUBAO_API_KEY=...
-#   DOUBAO_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-#   DOUBAO_MODEL=ep-...   # 火山方舟带「联网搜索」插件的 EP
-# 其它 key 见 .env.example 注释
-
-# 启动（zero-infra 内存模式，进程退出数据清空）
-uvicorn backend.api.app:app --reload --port 8000
-
-# health check
-curl http://localhost:8000/health
+git clone <repo-url>
+cd competitive-analysis-agent-platform
 ```
 
-> 想用持久化 Postgres / Redis：`docker compose up -d postgres redis`，然后 .env 里 `STORAGE_MODE=postgres`。
+### Backend
 
-### 3. 启动前端
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+```
+
+可选 extras：
+
+```bash
+pip install -e ".[dev,tools-search]"          # Playwright 抓取兜底
+pip install -e ".[dev,tools-crawl4ai]"        # Crawl4AI（SPA 站点），装完跑：
+python -m playwright install chromium
+
+pip install -e ".[dev,export-pdf-docx]"       # 让 GET /api/projects/{id}/export?format=pdf|docx 生效
+```
+
+### Frontend
 
 ```bash
 cd frontend
-npm install                          # 或 pnpm install / yarn
-
-cp .env.local.example .env.local
-# 默认指向 http://localhost:8000，本地后端默认端口正好，多数情况无需改
-
-npm run dev                          # http://localhost:3000
+npm install
+cd ..
 ```
 
-打开 [http://localhost:3000/projects](http://localhost:3000/projects)：
-- 没有真实项目时点 **+ New analysis** 建一个 → 自动跳转 workspace
-- 想直接看完整 UI 效果（设计预览，无后端依赖）：[/projects/demo/runs/01](http://localhost:3000/projects/demo/runs/01?tab=dag)
+## Configuration
 
-### 4. 触发一次完整链路（5-10 分钟）
-
-UI 路径：填写 wizard → 提交 → workspace 自动开始 run，DAG 节点实时刷新（WebSocket 推流）。
-
-或者 API 直接打：
+### 后端 `.env`
 
 ```bash
-# 创建项目
-curl -X POST http://localhost:8000/api/projects \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "project_name": "demo",
-    "owner": "u",
-    "target_product": "Notion",
-    "competitors": ["Asana"],
-    "industry": "collaboration_saas"
-  }'
-
-# 启动 run（异步）
-curl -X POST http://localhost:8000/api/projects/<pid>/run
-
-# 实时事件流
-wscat -c ws://localhost:8000/api/projects/<pid>/events
-
-# 完整状态 dump
-curl http://localhost:8000/api/projects/<pid>/state | jq
+cp .env.example .env
 ```
 
-切到 docker-compose 全栈（PG + Redis + Jaeger）/ 生产部署见 [docs/DEPLOY.md](docs/DEPLOY.md)。
-真实链路诊断与已知问题见 [docs/E2E_INTEGRATION_LOG.md](docs/E2E_INTEGRATION_LOG.md)。
+必填（至少一组 LLM provider，默认走 Doubao）：
+
+| 变量 | 说明 |
+|---|---|
+| `DOUBAO_API_KEY` | 火山方舟 API key |
+| `DOUBAO_BASE_URL` | `https://ark.cn-beijing.volces.com/api/v3` |
+| `DOUBAO_MODEL` | 推理接入点 ID（`ep-...`），推荐带「联网搜索」插件 |
+
+可选：
+
+| 变量 | 用途 |
+|---|---|
+| `TAVILY_API_KEY` / `SERPER_API_KEY` | 外部 Web 搜索；不填走 Doubao 自带 |
+| `FIRECRAWL_API_KEY` | SPA 抓取；不填走 httpx + Playwright |
+| `STORAGE_MODE` | `memory`（默认）/ `postgres` |
+| `POSTGRES_DSN` / `REDIS_URL` | 仅 `STORAGE_MODE=postgres` 时需要 |
+| `QA_MAX_ROUNDS` | QA 反馈循环上限，默认 `3` |
+
+`.env` 已被 `.gitignore` 屏蔽，不会进版本控制。
+
+### 前端 `frontend/.env.local`
+
+```bash
+cd frontend
+cp .env.local.example .env.local
+```
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `NEXT_PUBLIC_API_BASE` | `http://localhost:8000` | 后端 FastAPI 地址 |
+| `NEXT_PUBLIC_WS_BASE` | 从 API base 派生 | 跨域 / TLS 场景手动覆盖 |
+
+## Running
+
+需要两个终端：
+
+```bash
+# Terminal 1 — backend
+source .venv/bin/activate
+uvicorn backend.api.app:app --reload --port 8000
+```
+
+```bash
+# Terminal 2 — frontend
+cd frontend
+npm run dev
+```
+
+访问 [http://localhost:3000](http://localhost:3000)。
+
+> 持久化模式：`docker compose up -d postgres redis`，详见 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
 ## 测试
 
