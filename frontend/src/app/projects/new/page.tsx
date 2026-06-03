@@ -1,28 +1,27 @@
 import Link from "next/link";
 import { ArrowLeftIcon } from "lucide-react";
-import { GlobalNav } from "@/components/layout/global-nav";
+import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { WizardLayout } from "@/components/wizard";
 
 /**
- * /projects/new · 真实 4 步创建向导。
- * Sprint 2 接入 ProjectService.create()。
+ * /projects/new · 4 步创建向导。
  */
 export default function NewProjectPage() {
   return (
-    <div className="min-h-full bg-background">
-      <GlobalNav />
-      <div className="mx-auto max-w-5xl px-10 py-10">
+    <SidebarShell
+      topBarLeft={
         <Link
           href="/projects"
-          className="inline-flex items-center gap-1 text-xs text-text-muted transition-colors duration-120 ease-out-quart hover:text-text-secondary"
+          className="inline-flex items-center gap-1 text-xs text-text-muted transition-colors duration-120 hover:text-text-secondary"
         >
           <ArrowLeftIcon className="h-3 w-3" />
-          <span>Back to Projects</span>
+          <span>返回 我的项目</span>
         </Link>
-        <div className="mt-6">
-          <WizardLayout />
-        </div>
+      }
+    >
+      <div className="mx-auto max-w-5xl">
+        <WizardLayout />
       </div>
-    </div>
+    </SidebarShell>
   );
 }

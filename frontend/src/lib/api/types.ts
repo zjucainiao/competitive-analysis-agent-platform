@@ -112,11 +112,18 @@ export interface ProjectListResponse {
   projects: Project[];
 }
 
+/** 分析模式 —— wizard 第一步选择。 */
+export type AnalysisMode =
+  | "competitive_compare"  // 多竞品对比（默认，1+ 竞品）
+  | "single_research"      // 单产品调研（0 竞品）
+  | "auto_discover";       // 自动发现竞品（前端先调 /api/discover-competitors）
+
 export interface ProjectCreateRequest {
   project_name: string;
   owner: string;
   target_product: string;
   competitors: string[];
+  analysis_mode?: AnalysisMode;
   industry: string;
   industry_schema_version?: string;
   analysis_dimensions?: AnalysisDimension[];
@@ -124,6 +131,27 @@ export interface ProjectCreateRequest {
   target_audience?: string | null;
   mode?: "real";
   collect_constraints?: Partial<CollectConstraints>;
+}
+
+/* ── auto-discover competitors ──────────────────────────────────────── */
+
+export interface DiscoverCompetitorsRequest {
+  target_product: string;
+  industry?: string;
+  max_competitors?: number;
+}
+
+export interface DiscoveredCompetitor {
+  name: string;
+  reason: string;
+  official_url: string | null;
+}
+
+export interface DiscoverCompetitorsResponse {
+  target_product: string;
+  industry: string;
+  competitors: DiscoveredCompetitor[];
+  error: string | null;
 }
 
 export interface RunStartedResponse {

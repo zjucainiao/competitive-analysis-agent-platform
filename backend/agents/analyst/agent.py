@@ -241,14 +241,43 @@ class Analyst(BaseAgent[AnalystInput, AnalystOutput]):
         if not prompt_path.exists():
             return None
         system, user_template = _split_prompt(prompt_path.read_text(encoding="utf-8"))
+
+        # QA 反馈块：当且仅当本节点是 ``analyst_v{n+1}``（FeedbackRouter 派生）时
+        # inp.qa_feedback 非空。把上一轮 verdict 里 target_agent=="analyst" 的 issue
+        # 渲染成强标记块进 prompt，让 LLM 在重做时针对性改 claim / evidence 选择，
+        # 而不是只是版本号 bump 后照旧重出。
+        from backend.agents._qa_feedback import render_qa_feedback_block
+
+        qa_block = render_qa_feedback_block(
+            inp.qa_feedback,
+            closing_instruction=(
+                f"Apply the fixes above when re-emitting this dimension "
+                f"({dimension.value}). Only address issues whose ``location`` "
+                f"references this dimension or its claims; other dimensions are "
+                f"regenerated separately. Do NOT re-introduce dropped evidence_ids "
+                f"or claims flagged by QA."
+            ),
+        )
+
         user = _render(
             user_template,
             target=inp.target_product,
-            competitors=", ".join(inp.competitors),
+            competitors=", ".join(inp.competitors) if inp.competitors else "(none — single-product research)",
             dimension=dimension.value,
             valid_evidence_ids=", ".join(sorted(valid_pool)),
             profiles_json=_compact_profiles(inp.profiles),
+            qa_feedback_block=qa_block,
         )
+
+        # 单产品调研模式：在 user prompt 顶部加一行强提示，让 LLM 不要幻觉对比
+        if not inp.competitors:
+            user = (
+                "## NOTE: Single-product research mode\n"
+                "There are NO competitors in this run. Do NOT invent comparison claims. "
+                "Describe ONLY the target product based on its profile + cited evidence. "
+                "Skip any 'X is better/worse than Y' framing.\n\n"
+                + user
+            )
         resp = self.llm.chat(
             system=system,
             messages=[{"role": "user", "content": user}],

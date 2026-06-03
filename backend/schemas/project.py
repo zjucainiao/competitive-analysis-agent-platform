@@ -28,6 +28,22 @@ class ProjectStatus(str, Enum):
     DELETED = "deleted"
 
 
+class AnalysisMode(str, Enum):
+    """分析模式 —— wizard 第一步选择，决定 Planner DAG 形态 + Reporter 模板基调。
+
+    - ``competitive_compare``：标准对比模式，1+ 竞品，跑全部维度
+    - ``single_research``：单产品深度调研，0 竞品；Planner 跳过对比维度，
+      Reporter 走 ``single_research_v1`` 模板（调研基调而非对比基调）
+    - ``auto_discover``：用户只输 target_product，调用
+      ``POST /api/discover-competitors`` 让 LLM 填 3-5 个常见竞品，然后退化为
+      ``competitive_compare`` 流程
+    """
+
+    COMPETITIVE_COMPARE = "competitive_compare"
+    SINGLE_RESEARCH = "single_research"
+    AUTO_DISCOVER = "auto_discover"
+
+
 class ProjectMetricsSnapshot(BaseModel):
     """一份指标快照 + 取样时间，用于时间序列。"""
 
@@ -89,6 +105,9 @@ class Project(BaseModel):
 
     target_product: str
     competitors: list[str]
+    # 分析模式 —— 决定 Planner DAG 形态 + Reporter 模板基调 + Analyst 启发式分支。
+    # 默认 competitive_compare 保持向后兼容（已有 fixtures / Project JSON 不需要补字段）。
+    analysis_mode: AnalysisMode = AnalysisMode.COMPETITIVE_COMPARE
     industry: str = Field(description="industry_id, e.g. 'collaboration_saas'")
     industry_schema_version: str = "1.0.0"
 

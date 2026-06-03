@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -386,3 +388,62 @@ def test_real_mode_with_failing_llm_falls_back_to_heuristic() -> None:
     assert pricing.claims  # heuristic 应产出 claim
     # 每条 LLM 失败都记一条 warn（LLM_SCHEMA_INVALID）
     assert any(e.code == "LLM_SCHEMA_INVALID" for e in out.errors)
+
+
+# ---------- 12. QA feedback 进 prompt 端到端 ----------
+
+
+def test_qa_feedback_reaches_analyst_llm_prompt() -> None:
+    """端到端：把 qa_feedback 塞进 AnalystInput，跑真实 LLM 路径，
+    断言 CaptureLLM 收到的 user prompt 里能看到 issue 文本。
+
+    覆盖 QA → Analyst 反馈环：``analyst_v{n+1}`` 节点要拿到上一轮 verdict 的
+    具体反馈，而不是只接到 ``revision`` 编号 bump 后照旧重出。
+    """
+    captured: list[str] = []
+
+    class CaptureLLM:
+        def chat(self, *, system: str, messages: list[dict], **kwargs: Any) -> Any:
+            uc = next((m["content"] for m in messages if m["role"] == "user"), "")
+            captured.append(uc)
+            raise RuntimeError("capture done")  # fallback heuristic
+
+        def embed(self, texts: list[str], **kwargs: Any) -> list[list[float]]:
+            return [[0.0] * 8 for _ in texts]
+
+    qa_feedback = {
+        "from_verdict_id": "v_test_analyst",
+        "revision": 1,
+        "instructions": "PRICING 维度 claim cl_xx 引用的 evidence 已被剔除，重做",
+        "must_address": ["iss_analyst_pricing"],
+        "issues": [
+            {
+                "issue_id": "iss_analyst_pricing",
+                "dimension": "logic_consistency",
+                "severity": "major",
+                "location": "analysis.dimensions[pricing_comparison].claims[cl_xx]",
+                "problem": "claim cl_xx 引用了已被 disputed 的 evidence ev_n_p1",
+                "suggested_fix": "重选 evidence 或弱化结论",
+                "target_agent": "analyst",
+                "required_inputs": {"avoid_evidence_ids": ["ev_n_p1"]},
+            }
+        ],
+    }
+
+    inp_base = load_demo_input(
+        target="Notion",
+        competitors=["ClickUp"],
+        dimensions=[AnalysisDimension.PRICING_COMPARISON],
+    )
+    inp = inp_base.model_copy(update={"qa_feedback": qa_feedback})
+
+    agent = Analyst(llm=CaptureLLM(), tracer=NullTracer(), mock=False)
+    agent.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id)
+
+    assert captured, "Analyst 没调到 LLM，wiring 未触达"
+    joined = "\n".join(captured)
+    assert "QA Feedback" in joined
+    assert "PRICING 维度 claim cl_xx" in joined
+    assert "iss_analyst_pricing" in joined
+    assert "avoid_evidence_ids" in joined
+    assert "ev_n_p1" in joined

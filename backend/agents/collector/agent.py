@@ -866,7 +866,29 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             return [], errors
 
         system, user_template = _split_prompt(prompt)
-        user = _render(user_template, product_name=inp.product_name)
+
+        # QA 反馈块：QA 标 freshness / evidence_completeness 时，本节点会以
+        # ``collect.<product>.reviews_v{n+1}`` 形式重跑，inp.qa_feedback 非空。
+        # 把上一轮 issue 渲染进 prompt，提示 LLM 改变搜索策略（如换 fresher 来源、
+        # 避开被 disputed 的 source）。
+        from backend.agents._qa_feedback import render_qa_feedback_block
+
+        qa_block = render_qa_feedback_block(
+            inp.qa_feedback,
+            closing_instruction=(
+                "Apply the fixes above when re-collecting reviews: if a source "
+                "was flagged stale or disputed, prefer alternative review sites "
+                "or newer dates; if a specific dimension was reported missing, "
+                "expand coverage to surface relevant quotes. Do NOT re-emit "
+                "the exact URLs / sources that QA flagged."
+            ),
+        )
+
+        user = _render(
+            user_template,
+            product_name=inp.product_name,
+            qa_feedback_block=qa_block,
+        )
         try:
             resp = self.llm.chat(
                 system=system,

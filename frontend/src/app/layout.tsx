@@ -18,9 +18,9 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Atlas · 竞品分析 Agent 协作平台",
+  title: "Atlas · 竞品分析",
   description:
-    "AI 驱动的 B 端 SaaS 竞品分析平台：5 个专职 Agent · DAG 编排 · 证据链可溯源 · 质检反馈闭环 · 全链路可观测",
+    "几分钟拿到一份带原文引用的竞品对比报告，每条结论都能追溯到来源。",
 };
 
 /**
@@ -56,7 +56,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: themeInitScript }}
         />
       </head>
-      <body className="bg-background text-foreground min-h-full flex flex-col">
+      <body className="text-foreground min-h-full flex flex-col">
         <TooltipProvider delay={150}>{children}</TooltipProvider>
         <ShortcutsHelp />
         <Toaster />

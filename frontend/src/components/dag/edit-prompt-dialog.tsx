@@ -82,8 +82,7 @@ export function EditPromptDialog() {
               <SheetDescription className="text-xs text-text-secondary">
                 <code className="font-mono">{state.nodeId}</code> · agent{" "}
                 <code className="font-mono">{state.agentName}</code> ·
-                提交后该节点 + 全部传递下游会重置为 PENDING，等下次 dispatch
-                轮触发重跑。
+                提交后该节点和它影响到的所有下游会重新执行。
               </SheetDescription>
             </SheetHeader>
 
@@ -103,8 +102,7 @@ export function EditPromptDialog() {
                   className="font-mono text-xs leading-relaxed"
                 />
                 <p className="mt-1.5 text-[11px] text-text-muted leading-relaxed">
-                  这段文本会写入节点 metadata.user_prompt_override · Agent 在重跑时
-                  优先读取该字段（具体生效程度取决于 Agent 实现）。
+                  保存后会按这段文字重新执行该节点 · 实际生效程度取决于具体节点的处理逻辑。
                 </p>
               </div>
             </div>

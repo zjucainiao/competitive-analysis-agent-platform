@@ -480,3 +480,76 @@ def test_mock_mode_reports_zero_token_usage() -> None:
     assert out.tokens_input == 0
     assert out.tokens_output == 0
     assert out.cost_usd == 0.0
+
+
+# ---------- QA feedback 进 reviews_finder prompt ----------
+
+
+def test_qa_feedback_reaches_reviews_finder_prompt(make_registry) -> None:
+    """端到端：把 qa_feedback 塞进 CollectorInput，REVIEWS 维度 LLM 路径触发，
+    断言 FakeLLM.call_log 里 user prompt 含 issue 文本。
+
+    覆盖 QA → Collector reviews_finder 反馈环：``collect.<p>.reviews_v{n+1}`` 节点
+    要能看到上一轮 verdict（如 freshness fail）并据此换搜索策略。
+    """
+    finding = _ReviewsFinding(
+        overall_rating=4.5,
+        review_count=100,
+        positive_themes=["x"],
+        negative_themes=["y"],
+        sample_quotes=["q"],
+        sources=[
+            _ReviewSource(
+                name="G2",
+                url="https://www.g2.com/products/notion/reviews",
+                excerpt="ok",
+            )
+        ],
+    )
+    fake_llm = FakeLLM(by_response_format={_ReviewsFinding: finding})
+    reg = make_registry()
+    agent = Collector(llm=fake_llm, tools=reg, tracer=NullTracer(), mock=False)
+
+    qa_feedback = {
+        "from_verdict_id": "v_collector_test",
+        "revision": 1,
+        "instructions": "上轮 G2 评论时间已超过 2 年，需要更新的来源",
+        "must_address": ["iss_stale_reviews"],
+        "issues": [
+            {
+                "issue_id": "iss_stale_reviews",
+                "dimension": "freshness",
+                "severity": "major",
+                "location": "evidence[ev_notion_reviews_g2_old]",
+                "problem": "G2 评论 last_updated 已是 2 年前，需要 fresher 来源",
+                "suggested_fix": "搜索 last 6 months 的评论，或换 Capterra/TrustRadius",
+                "target_agent": "collector",
+                "required_inputs": {"avoid_evidence_ids": ["ev_notion_reviews_g2_old"]},
+            }
+        ],
+    }
+
+    inp_base = make_collector_input(
+        product_name="Notion",
+        dimensions=[CollectDimension.REVIEWS],
+        fallback_to_mock=False,
+    )
+    inp = inp_base.model_copy(update={"qa_feedback": qa_feedback})
+
+    agent.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id)
+
+    # 找 reviews_finder 那次 chat（response_format == _ReviewsFinding）
+    reviews_calls = [
+        c for c in fake_llm.call_log if c["response_format"] is _ReviewsFinding
+    ]
+    assert reviews_calls, "reviews_finder LLM 路径未触达"
+    user_content = next(
+        (m["content"] for m in reviews_calls[0]["messages"] if m["role"] == "user"),
+        "",
+    )
+    assert "QA Feedback" in user_content
+    assert "G2 评论时间已超过 2 年" in user_content
+    assert "iss_stale_reviews" in user_content
+    assert "freshness" in user_content
+    assert "avoid_evidence_ids" in user_content
+    assert "ev_notion_reviews_g2_old" in user_content

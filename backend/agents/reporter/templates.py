@@ -253,12 +253,123 @@ PM_V1 = ReportTemplate(
 )
 
 
+# ---------- single_research_v1：单产品调研视角（无竞品对比） ----------
+#
+# 设计原则：包含全部 6 个维度的章节，按需消费 Analyst 的 dimension 输出 ——
+# 用户在 wizard 选了什么维度就会得到对应章节的真实内容；没选的维度
+# Reporter 会产 soft 占位段（与 investor_v1 / pm_v1 缺失维度的处理一致）。
+#
+# 所有章节标题用"调研"基调，不出现"对比"字样；style 反复强调"聚焦自身"。
+
+SINGLE_RESEARCH_V1 = ReportTemplate(
+    template_id="single_research_v1",
+    target_audience="产品经理",
+    summary_style=(
+        "客观、聚焦目标产品本身，不做对比；用'调研'而非'对比'的基调"
+    ),
+    sections=[
+        ReportSectionTemplate(
+            section_id="sec_overview",
+            title="1. 产品概况",
+            order=1,
+            dimension=None,
+            style=(
+                "1-2 段介绍目标产品（不提竞品）：所属行业、定位、目标用户、本次调研覆盖维度与数据时点。"
+            ),
+            min_paragraphs=1,
+            is_overview=True,
+        ),
+        ReportSectionTemplate(
+            section_id="sec_features",
+            title="2. 功能能力速览",
+            order=2,
+            dimension=AnalysisDimension.FEATURE_COMPARISON,
+            style=(
+                "描述目标产品自身的功能模块和能力成熟度，不做对比。"
+                "用 AnalysisClaim 给出的能力点 + maturity 描述写段。"
+                "禁止出现「相比 X / vs Y / 优于」等对比表述。"
+            ),
+            min_paragraphs=1,
+        ),
+        ReportSectionTemplate(
+            section_id="sec_pricing",
+            title="3. 定价档位画像",
+            order=3,
+            dimension=AnalysisDimension.PRICING_COMPARISON,
+            style=(
+                "逐档介绍目标产品的定价计划与适用人群。不做对比。"
+                "含数字段落（价格 / 百分比）必须 is_quantitative=True 并能在 evidence 中找到原值。"
+            ),
+            min_paragraphs=1,
+        ),
+        ReportSectionTemplate(
+            section_id="sec_positioning",
+            title="4. 定位与目标用户",
+            order=4,
+            dimension=AnalysisDimension.POSITIONING,
+            style=(
+                "聚焦目标产品自身的 positioning 陈述 + target_users。"
+                "不要做'相比 X'的对比；如果只能找到一条 evidence，"
+                "用定性表述并 is_soft_conclusion=True。"
+            ),
+            min_paragraphs=1,
+        ),
+        ReportSectionTemplate(
+            section_id="sec_userfeedback",
+            title="5. 用户口碑与典型评价",
+            order=5,
+            dimension=AnalysisDimension.USER_FEEDBACK,
+            style=(
+                "汇总用户反馈：正向 themes、痛点、典型评论。"
+                "含数字段落（评分 / 评论数）必须 is_quantitative=True 并能在 evidence 中找到原值。"
+            ),
+            min_paragraphs=1,
+        ),
+        ReportSectionTemplate(
+            section_id="sec_swot",
+            title="6. 自评估（Strengths / Weaknesses）",
+            order=6,
+            dimension=AnalysisDimension.SWOT,
+            style=(
+                "单产品调研只评 Strengths + Weaknesses 两象限（Opportunities/Threats "
+                "需要对比组才有意义，单产品场景跳过）。qualifier 标注象限。"
+            ),
+            min_paragraphs=1,
+        ),
+        ReportSectionTemplate(
+            section_id="sec_differentiation",
+            title="7. 差异化定位",
+            order=7,
+            dimension=AnalysisDimension.DIFFERENTIATION,
+            style=(
+                "基于 highlights 描述目标产品的差异化定位与核心能力锚点；"
+                "不与具体竞品对比，写'自身亮点'。"
+            ),
+            min_paragraphs=1,
+        ),
+        ReportSectionTemplate(
+            section_id="sec_source",
+            title="8. 数据来源声明",
+            order=8,
+            dimension=None,
+            style="逐字使用 template.disclaimer",
+            min_paragraphs=1,
+            is_disclaimer=True,
+        ),
+    ],
+    banned_terms_extra=_DEFAULT_BANNED_EXTRA,
+    disclaimer=_DEFAULT_DISCLAIMER,
+    min_total_paragraphs=3,
+)
+
+
 # ---------- 注册表 ----------
 
 TEMPLATES: dict[str, ReportTemplate] = {
     STANDARD_V1.template_id: STANDARD_V1,
     INVESTOR_V1.template_id: INVESTOR_V1,
     PM_V1.template_id: PM_V1,
+    SINGLE_RESEARCH_V1.template_id: SINGLE_RESEARCH_V1,
 }
 
 

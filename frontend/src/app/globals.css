@@ -126,235 +126,269 @@
 
 /* ============================================================================
  * Raw token values. **This is the only place OKLCH values are written.**
- * See DESIGN.md for the authoritative table.
+ *
+ * 2026-06-03 完全重置：朱漆橙 (hue 38) → 紫罗兰 (hue 285)，Similarweb 风格。
+ * 不再走"Luxury 中式"叙事；现在是"明亮 ToB 数据工具"。
  * ========================================================================= */
 :root {
   /* shadcn-compatible aliases (so out-of-box components Just Work) */
-  --background: oklch(98.5% 0.005 80);
-  --foreground: oklch(18% 0.012 60);
+  --background: oklch(98.5% 0.005 285);
+  --foreground: oklch(20% 0.02 280);
   --card: oklch(100% 0 0);
-  --card-foreground: oklch(18% 0.012 60);
-  --popover: oklch(99% 0.004 80);
-  --popover-foreground: oklch(18% 0.012 60);
-  --primary: oklch(64% 0.20 38);
-  --primary-foreground: oklch(99% 0.005 80);
-  --secondary: oklch(96% 0.006 80);
-  --secondary-foreground: oklch(18% 0.012 60);
-  --muted: oklch(96% 0.006 80);
-  --muted-foreground: oklch(58% 0.01 70);
-  --accent: oklch(94% 0.008 60);
-  --accent-foreground: oklch(18% 0.012 60);
+  --card-foreground: oklch(20% 0.02 280);
+  --popover: oklch(99% 0.004 285);
+  --popover-foreground: oklch(20% 0.02 280);
+  --primary: oklch(58% 0.22 285);
+  --primary-foreground: oklch(99% 0.005 285);
+  --secondary: oklch(96% 0.01 285);
+  --secondary-foreground: oklch(20% 0.02 280);
+  --muted: oklch(96% 0.01 285);
+  --muted-foreground: oklch(58% 0.015 280);
+  --accent: oklch(94% 0.025 280);
+  --accent-foreground: oklch(20% 0.02 280);
   --destructive: oklch(56% 0.21 25);
-  --border: oklch(88% 0.01 80);
-  --input: oklch(88% 0.01 80);
-  --ring: oklch(64% 0.20 38);
+  --border: oklch(90% 0.012 285);
+  --input: oklch(90% 0.012 285);
+  --ring: oklch(58% 0.22 285);
 
-  /* chart palette (viz-1 = primary = 朱漆橙 → target product, always) */
-  --chart-1: oklch(64% 0.20 38);
-  --chart-2: oklch(58% 0.16 215);
+  /* chart palette (viz-1 = primary = 紫罗兰 → target product, always) */
+  --chart-1: oklch(58% 0.22 285);
+  --chart-2: oklch(62% 0.16 215);
   --chart-3: oklch(58% 0.16 150);
-  --chart-4: oklch(64% 0.18 295);
-  --chart-5: oklch(70% 0.17 85);
-  --chart-6: oklch(54% 0.01 70);
+  --chart-4: oklch(64% 0.20 320);
+  --chart-5: oklch(72% 0.17 60);
+  --chart-6: oklch(54% 0.015 280);
 
-  /* sidebar — slightly sunken vs main surface */
-  --sidebar: oklch(96% 0.006 80);
-  --sidebar-foreground: oklch(18% 0.012 60);
-  --sidebar-primary: oklch(64% 0.20 38);
-  --sidebar-primary-foreground: oklch(99% 0.005 80);
-  --sidebar-accent: oklch(94% 0.008 60);
-  --sidebar-accent-foreground: oklch(18% 0.012 60);
-  --sidebar-border: oklch(93% 0.008 80);
-  --sidebar-ring: oklch(64% 0.20 38);
+  /* sidebar — pure white with subtle violet ring */
+  --sidebar: oklch(100% 0 0);
+  --sidebar-foreground: oklch(20% 0.02 280);
+  --sidebar-primary: oklch(58% 0.22 285);
+  --sidebar-primary-foreground: oklch(99% 0.005 285);
+  --sidebar-accent: oklch(95% 0.04 275);
+  --sidebar-accent-foreground: oklch(46% 0.22 285);
+  --sidebar-border: oklch(93% 0.01 285);
+  --sidebar-ring: oklch(58% 0.22 285);
 
-  --radius: 0.5rem;
+  --radius: 0.625rem;
 
   /* ── DESIGN.md token system (authoritative) ──────────────────────── */
-  /* background */
-  --bg-base: oklch(98.5% 0.005 80);
+  /* background — main app surface is lavender-tinted wash */
+  --bg-base: oklch(98% 0.012 285);
   --bg-raised: oklch(100% 0 0);
-  --bg-sunken: oklch(96% 0.006 80);
-  --bg-overlay: oklch(99% 0.004 80);
-  --bg-hover: oklch(94% 0.008 60);
-  --bg-selected: oklch(92% 0.04 40);
+  --bg-sunken: oklch(96% 0.018 285);
+  --bg-overlay: oklch(99% 0.008 285);
+  --bg-hover: oklch(95% 0.04 275);
+  --bg-selected: oklch(93% 0.06 280);
 
   /* border */
-  --border-subtle: oklch(93% 0.008 80);
-  --border-default: oklch(88% 0.01 80);
-  --border-strong: oklch(82% 0.015 80);
-  --border-focus: oklch(64% 0.20 38);
+  --border-subtle: oklch(94% 0.012 285);
+  --border-default: oklch(90% 0.015 285);
+  --border-strong: oklch(82% 0.02 285);
+  --border-focus: oklch(58% 0.22 285);
 
   /* text */
-  --text-primary: oklch(18% 0.012 60);
-  --text-secondary: oklch(38% 0.012 65);
-  --text-muted: oklch(58% 0.01 70);
-  --text-inverse: oklch(99% 0.005 80);
-  --text-accent: oklch(54% 0.22 38);
+  --text-primary: oklch(20% 0.02 280);
+  --text-secondary: oklch(40% 0.018 280);
+  --text-muted: oklch(58% 0.015 280);
+  --text-inverse: oklch(99% 0.005 285);
+  --text-accent: oklch(50% 0.22 285);
 
-  /* accent (朱漆橙) */
-  --accent-base: oklch(64% 0.20 38);
-  --accent-hover: oklch(58% 0.22 36);
-  --accent-active: oklch(52% 0.23 35);
-  --accent-bg: oklch(96% 0.04 40);
-  --accent-border: oklch(76% 0.16 42);
+  /* accent (紫罗兰) */
+  --accent-base: oklch(58% 0.22 285);
+  --accent-hover: oklch(52% 0.24 285);
+  --accent-active: oklch(46% 0.24 285);
+  --accent-bg: oklch(95% 0.04 275);
+  --accent-border: oklch(74% 0.16 285);
 
   /* semantic states */
   --success-base: oklch(58% 0.16 150);
   --success-bg: oklch(96% 0.035 150);
   --success-border: oklch(78% 0.13 150);
 
-  --warning-base: oklch(70% 0.17 85);
-  --warning-bg: oklch(97% 0.04 85);
-  --warning-border: oklch(82% 0.14 85);
+  --warning-base: oklch(72% 0.16 70);
+  --warning-bg: oklch(97% 0.04 70);
+  --warning-border: oklch(82% 0.14 70);
 
   --error-base: oklch(56% 0.21 25);
   --error-bg: oklch(96% 0.04 25);
   --error-border: oklch(78% 0.15 25);
 
-  --running-base: oklch(62% 0.16 220);
-  --running-bg: oklch(96% 0.03 220);
-  --running-border: oklch(78% 0.13 220);
+  --running-base: oklch(60% 0.18 230);
+  --running-bg: oklch(96% 0.04 230);
+  --running-border: oklch(78% 0.14 230);
 
-  --rework-base: oklch(64% 0.18 50);
-  --rework-bg: oklch(96% 0.035 50);
-  --rework-border: oklch(80% 0.14 50);
+  --rework-base: oklch(64% 0.20 35);
+  --rework-bg: oklch(96% 0.04 35);
+  --rework-border: oklch(80% 0.14 35);
 
-  --neutral-base: oklch(54% 0.01 70);
-  --neutral-bg: oklch(94% 0.005 70);
-  --neutral-border: oklch(86% 0.008 70);
+  --neutral-base: oklch(56% 0.012 280);
+  --neutral-bg: oklch(94% 0.008 280);
+  --neutral-border: oklch(86% 0.012 280);
 
   /* viz */
-  --viz-1: oklch(64% 0.20 38);
-  --viz-2: oklch(58% 0.16 215);
+  --viz-1: oklch(58% 0.22 285);
+  --viz-2: oklch(62% 0.16 215);
   --viz-3: oklch(58% 0.16 150);
-  --viz-4: oklch(64% 0.18 295);
-  --viz-5: oklch(70% 0.17 85);
-  --viz-6: oklch(54% 0.01 70);
+  --viz-4: oklch(64% 0.20 320);
+  --viz-5: oklch(72% 0.17 60);
+  --viz-6: oklch(56% 0.012 280);
 
-  /* warm-tinted shadows (not cold gray) */
+  /* shadows — cool violet-tinted */
   --shadow-drawer:
-    0 0 0 1px oklch(82% 0.015 80 / 0.5),
-    -8px 0 24px -8px oklch(60% 0.05 80 / 0.08);
+    0 0 0 1px oklch(82% 0.02 285 / 0.5),
+    -8px 0 24px -8px oklch(46% 0.10 285 / 0.10);
   --shadow-popover:
-    0 0 0 1px oklch(82% 0.015 80 / 0.5),
-    0 4px 12px -2px oklch(60% 0.05 80 / 0.08);
+    0 0 0 1px oklch(82% 0.02 285 / 0.5),
+    0 4px 12px -2px oklch(46% 0.10 285 / 0.10);
+  --shadow-card:
+    0 1px 2px oklch(46% 0.10 285 / 0.04),
+    0 8px 24px -8px oklch(46% 0.10 285 / 0.08);
+
+  /* hero gradient — Similarweb-style 浅蓝紫 wash + 角落柔光 */
+  --hero-wash:
+    radial-gradient(
+      ellipse 1200px 600px at 0% 0%,
+      oklch(95% 0.06 280 / 0.6) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse 1000px 500px at 100% 0%,
+      oklch(94% 0.07 295 / 0.5) 0%,
+      transparent 60%
+    ),
+    linear-gradient(
+      180deg,
+      oklch(98% 0.015 285) 0%,
+      oklch(99% 0.008 285) 100%
+    );
 }
 
 /* ============================================================================
- * Dark theme · "luxury Chinese modern" 暖黑底 + 朱漆橙 accent
+ * Dark theme · 紫罗兰低调版（Similarweb 风格的 dark 对应）
  *
- * 设计原则（与 light 形成对照）：
- *  - bg.base 不是纯黑：oklch(14% 0.008 60)，朝暖偏 0.008 chroma，避免冷感
- *  - 朱漆橙 accent 保持不变（在暖黑底上更醒目）
- *  - state 色提亮 5-10% L 以保证暗底对比度
- *  - 阴影不再是「微微暖」，改为「向下 alpha 加深」
+ * 2026-06-03 完整重写：原暖黑 + 朱漆橙 → 紫罗兰冷黑 + 紫 accent。
+ *  - bg.base 是低饱和深紫黑：oklch(16% 0.015 280)，不是中性灰
+ *  - 紫 accent 在暗底提亮：oklch(70% 0.22 285)
+ *  - state 色提亮 5-10% L 保证对比度
  *
- * 用户偏好：light-first；dark 是可选项，需手动切（Ctrl/⌘ +Shift+L 或 nav button）。
+ * 用户支持手动 toggle，主推 light（Similarweb 也是 light-first）。
  * ========================================================================= */
 .dark {
   /* shadcn-compatible aliases */
-  --background: oklch(14% 0.008 60);
-  --foreground: oklch(96% 0.005 80);
-  --card: oklch(18% 0.008 60);
-  --card-foreground: oklch(96% 0.005 80);
-  --popover: oklch(20% 0.008 60);
-  --popover-foreground: oklch(96% 0.005 80);
-  --primary: oklch(68% 0.20 38);
-  --primary-foreground: oklch(99% 0.005 80);
-  --secondary: oklch(22% 0.008 60);
-  --secondary-foreground: oklch(96% 0.005 80);
-  --muted: oklch(22% 0.008 60);
-  --muted-foreground: oklch(72% 0.012 70);
-  --accent: oklch(24% 0.014 50);
-  --accent-foreground: oklch(96% 0.005 80);
+  --background: oklch(16% 0.015 280);
+  --foreground: oklch(96% 0.008 285);
+  --card: oklch(20% 0.018 280);
+  --card-foreground: oklch(96% 0.008 285);
+  --popover: oklch(22% 0.018 280);
+  --popover-foreground: oklch(96% 0.008 285);
+  --primary: oklch(70% 0.22 285);
+  --primary-foreground: oklch(16% 0.015 280);
+  --secondary: oklch(24% 0.02 280);
+  --secondary-foreground: oklch(96% 0.008 285);
+  --muted: oklch(24% 0.02 280);
+  --muted-foreground: oklch(72% 0.015 280);
+  --accent: oklch(28% 0.05 285);
+  --accent-foreground: oklch(96% 0.008 285);
   --destructive: oklch(70% 0.21 25);
-  --border: oklch(28% 0.008 60);
-  --input: oklch(28% 0.008 60);
-  --ring: oklch(68% 0.20 38);
+  --border: oklch(30% 0.02 280);
+  --input: oklch(30% 0.02 280);
+  --ring: oklch(70% 0.22 285);
 
-  /* chart palette - slightly lifted for dark contrast */
-  --chart-1: oklch(70% 0.20 38);
+  --chart-1: oklch(72% 0.22 285);
   --chart-2: oklch(70% 0.16 215);
   --chart-3: oklch(70% 0.16 150);
-  --chart-4: oklch(72% 0.18 295);
-  --chart-5: oklch(78% 0.17 85);
-  --chart-6: oklch(68% 0.01 70);
+  --chart-4: oklch(72% 0.20 320);
+  --chart-5: oklch(78% 0.17 60);
+  --chart-6: oklch(68% 0.015 280);
 
-  /* sidebar */
-  --sidebar: oklch(16% 0.008 60);
-  --sidebar-foreground: oklch(96% 0.005 80);
-  --sidebar-primary: oklch(68% 0.20 38);
-  --sidebar-primary-foreground: oklch(99% 0.005 80);
-  --sidebar-accent: oklch(24% 0.014 50);
-  --sidebar-accent-foreground: oklch(96% 0.005 80);
-  --sidebar-border: oklch(26% 0.008 60);
-  --sidebar-ring: oklch(68% 0.20 38);
+  --sidebar: oklch(18% 0.018 280);
+  --sidebar-foreground: oklch(96% 0.008 285);
+  --sidebar-primary: oklch(72% 0.22 285);
+  --sidebar-primary-foreground: oklch(16% 0.015 280);
+  --sidebar-accent: oklch(30% 0.06 285);
+  --sidebar-accent-foreground: oklch(85% 0.10 285);
+  --sidebar-border: oklch(26% 0.02 280);
+  --sidebar-ring: oklch(72% 0.22 285);
 
   /* ── DESIGN.md token system · dark ─────────────────────────────────── */
-  --bg-base: oklch(14% 0.008 60);
-  --bg-raised: oklch(18% 0.008 60);
-  --bg-sunken: oklch(11% 0.008 60);
-  --bg-overlay: oklch(20% 0.008 60);
-  --bg-hover: oklch(24% 0.014 50);
-  --bg-selected: oklch(28% 0.04 40);
+  --bg-base: oklch(16% 0.015 280);
+  --bg-raised: oklch(20% 0.018 280);
+  --bg-sunken: oklch(13% 0.015 280);
+  --bg-overlay: oklch(22% 0.018 280);
+  --bg-hover: oklch(28% 0.05 285);
+  --bg-selected: oklch(32% 0.08 285);
 
-  --border-subtle: oklch(24% 0.008 60);
-  --border-default: oklch(30% 0.01 60);
-  --border-strong: oklch(38% 0.012 60);
-  --border-focus: oklch(68% 0.20 38);
+  --border-subtle: oklch(26% 0.02 280);
+  --border-default: oklch(32% 0.022 280);
+  --border-strong: oklch(40% 0.025 280);
+  --border-focus: oklch(72% 0.22 285);
 
-  --text-primary: oklch(96% 0.005 80);
-  --text-secondary: oklch(78% 0.008 70);
-  --text-muted: oklch(60% 0.012 70);
-  --text-inverse: oklch(14% 0.008 60);
-  --text-accent: oklch(76% 0.20 38);
+  --text-primary: oklch(96% 0.008 285);
+  --text-secondary: oklch(78% 0.012 280);
+  --text-muted: oklch(60% 0.015 280);
+  --text-inverse: oklch(16% 0.015 280);
+  --text-accent: oklch(80% 0.18 285);
 
-  --accent-base: oklch(68% 0.20 38);
-  --accent-hover: oklch(74% 0.22 38);
-  --accent-active: oklch(80% 0.22 38);
-  --accent-bg: oklch(24% 0.06 40);
-  --accent-border: oklch(40% 0.14 40);
+  --accent-base: oklch(72% 0.22 285);
+  --accent-hover: oklch(78% 0.22 285);
+  --accent-active: oklch(84% 0.20 285);
+  --accent-bg: oklch(30% 0.08 285);
+  --accent-border: oklch(46% 0.18 285);
 
-  /* states - lifted ~5% L for dark visibility */
   --success-base: oklch(70% 0.16 150);
   --success-bg: oklch(22% 0.03 150);
   --success-border: oklch(38% 0.10 150);
 
-  --warning-base: oklch(78% 0.17 85);
-  --warning-bg: oklch(24% 0.04 85);
-  --warning-border: oklch(40% 0.12 85);
+  --warning-base: oklch(78% 0.16 70);
+  --warning-bg: oklch(24% 0.04 70);
+  --warning-border: oklch(40% 0.12 70);
 
   --error-base: oklch(70% 0.21 25);
   --error-bg: oklch(22% 0.04 25);
   --error-border: oklch(38% 0.14 25);
 
-  --running-base: oklch(70% 0.16 220);
-  --running-bg: oklch(22% 0.03 220);
-  --running-border: oklch(38% 0.11 220);
+  --running-base: oklch(70% 0.18 230);
+  --running-bg: oklch(22% 0.04 230);
+  --running-border: oklch(38% 0.12 230);
 
-  --rework-base: oklch(74% 0.18 50);
-  --rework-bg: oklch(24% 0.04 50);
-  --rework-border: oklch(40% 0.12 50);
+  --rework-base: oklch(74% 0.20 35);
+  --rework-bg: oklch(24% 0.05 35);
+  --rework-border: oklch(40% 0.14 35);
 
-  --neutral-base: oklch(60% 0.01 70);
-  --neutral-bg: oklch(22% 0.005 70);
-  --neutral-border: oklch(34% 0.008 70);
+  --neutral-base: oklch(60% 0.015 280);
+  --neutral-bg: oklch(22% 0.012 280);
+  --neutral-border: oklch(34% 0.018 280);
 
-  /* viz · dark */
-  --viz-1: oklch(70% 0.20 38);
+  --viz-1: oklch(72% 0.22 285);
   --viz-2: oklch(70% 0.16 215);
   --viz-3: oklch(70% 0.16 150);
-  --viz-4: oklch(72% 0.18 295);
-  --viz-5: oklch(78% 0.17 85);
-  --viz-6: oklch(60% 0.01 70);
+  --viz-4: oklch(72% 0.20 320);
+  --viz-5: oklch(78% 0.17 60);
+  --viz-6: oklch(60% 0.015 280);
 
-  /* shadows · dark 用更深 / 更不暖 */
   --shadow-drawer:
-    0 0 0 1px oklch(38% 0.012 60 / 0.6),
+    0 0 0 1px oklch(40% 0.025 280 / 0.6),
     -8px 0 24px -8px oklch(0% 0 0 / 0.4);
   --shadow-popover:
-    0 0 0 1px oklch(38% 0.012 60 / 0.6),
+    0 0 0 1px oklch(40% 0.025 280 / 0.6),
     0 4px 12px -2px oklch(0% 0 0 / 0.4);
+  --shadow-card:
+    0 1px 2px oklch(0% 0 0 / 0.2),
+    0 8px 24px -8px oklch(0% 0 0 / 0.3);
+
+  /* dark hero wash — 深紫 + 角落极淡光 */
+  --hero-wash:
+    radial-gradient(
+      ellipse 1200px 600px at 0% 0%,
+      oklch(28% 0.10 285 / 0.4) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse 1000px 500px at 100% 0%,
+      oklch(30% 0.10 295 / 0.3) 0%,
+      transparent 60%
+    ),
+    oklch(16% 0.015 280);
 }
 
 @layer base {
@@ -367,8 +401,31 @@
     font-feature-settings: "cv11", "ss01";
   }
 
+  /* 全局 Similarweb 风渐变 ribbons —— 挂在 html 上确保始终在最底层，
+   * body 设 transparent 让 html 的背景透上来。颜色调到肉眼明显可见的饱和度。 */
+  html {
+    background-color: var(--bg-base);
+    background-image:
+      radial-gradient(ellipse 900px 520px at 0% 0%, oklch(88% 0.14 290 / 0.75) 0%, transparent 60%),
+      radial-gradient(ellipse 800px 460px at 100% 6%, oklch(89% 0.12 320 / 0.65) 0%, transparent 60%),
+      radial-gradient(ellipse 700px 380px at 12% 100%, oklch(92% 0.11 30 / 0.60) 0%, transparent 65%),
+      radial-gradient(ellipse 800px 420px at 100% 100%, oklch(90% 0.13 270 / 0.55) 0%, transparent 65%);
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+  }
+
+  .dark html {
+    background-color: var(--bg-base);
+    background-image:
+      radial-gradient(ellipse 900px 520px at 0% 0%, oklch(32% 0.14 285 / 0.55) 0%, transparent 60%),
+      radial-gradient(ellipse 800px 460px at 100% 6%, oklch(32% 0.13 295 / 0.45) 0%, transparent 60%),
+      radial-gradient(ellipse 700px 380px at 12% 100%, oklch(30% 0.10 30 / 0.35) 0%, transparent 65%),
+      radial-gradient(ellipse 800px 420px at 100% 100%, oklch(32% 0.12 270 / 0.40) 0%, transparent 65%);
+  }
+
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground;
+    background: transparent !important;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -379,11 +436,28 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* selection uses accent-bg (subtle warm wash, not browser blue) */
+  /* selection uses accent-bg (subtle violet wash, not browser blue) */
   ::selection {
     background-color: var(--accent-bg);
     color: var(--text-primary);
   }
+}
+
+/* ============================================================================
+ * Utility classes for the new design system
+ * ========================================================================= */
+
+/* hero gradient background — apply to home/landing hero sections */
+.bg-hero-wash {
+  background: var(--hero-wash);
+}
+
+/* card with violet-tinted soft shadow (replaces flat border-only cards) */
+.card-soft {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
 }
 
 /* ============================================================================

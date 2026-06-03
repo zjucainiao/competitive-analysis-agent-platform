@@ -73,11 +73,9 @@ export function DiffSheet({
 
           <p className="mt-4 text-[11px] text-text-muted leading-relaxed">
             高亮行：<span className="text-success-base font-medium">绿 +</span> v2
-            新增（QA FEEDBACK 章节）·{" "}
+            新增（重写时根据质检反馈调整）·{" "}
             <span className="text-error-base font-medium">红 −</span> v2
-            删除（本次为零） · 灰色为未变行。
-            v2 的额外内容直接来自 QA verdict_id <code>qa_revise_001</code>，
-            由 Orchestrator FeedbackRouter 注入。
+            删除 · 灰色为未变行。
           </p>
         </div>
       </SheetContent>

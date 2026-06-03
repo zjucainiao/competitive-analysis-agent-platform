@@ -9,21 +9,37 @@ import {
 } from "@/lib/workspace-actions";
 import { useWorkspaceApi } from "@/lib/workspace-api-context";
 import type { DagNodeData } from "@/lib/dag-mock";
+import { phaseOf } from "@/lib/agent-phases";
 
 /**
- * DAG 节点视觉 + 动作。
+ * DAG 节点视觉 + 动作（Q 版横向流水线）。
  *
- * 视觉规范见 DESIGN.md § DAG 节点视觉
- *   156 × 72 · rounded-md (6px) · bg-raised + status border + status dot
- *   running: ● pulse
- *   selected: ring accent + shadow-popover
- *   v>=2: 右上角 v2 角标
+ * 视觉规范：
+ *  - 220 × 88，rounded-2xl（16px）—— 比 v1 (156×72/6px) 更圆更胖
+ *  - 双层背景：白底卡片 + 状态色超浅 wash（不喧宾夺主）
+ *  - 大状态点（10px）位于左上，与圆角呼应
+ *  - 软影常驻 hover 时加深
+ *  - running 节点 ring pulse；selected 节点 accent ring
+ *  - revision >1 / rework 角标：仍走右上角徽章
  *
- * 交互（修复"viewer 不是 product"的关键）：
- *   - 节点被选中 OR status ∈ {rework, error}：NodeToolbar 右侧展开 action chips
- *   - rework 节点：chip 「Override · accept v1」以朱漆橙 fill 主调
- *   - chip 点击 stopPropagation，防止重开 Sheet
+ * 横向流水线交互：
+ *  - Handle 在左右（target=Left, source=Right）
+ *  - NodeToolbar 在节点下方展开（不挡同行邻居）
+ *
+ * 评分项「人工介入修正」核心：
+ *  - 选中、rework、error 时露出 action chips（Override / Retry / Skip…）
+ *  - 朱漆橙时代是 accent fill；现在紫罗兰 accent
  */
+
+/* 极浅 wash（每个状态都是 var(--*-bg) 但再淡一点，让卡片白底为主） */
+const STATUS_TINT: Record<string, string> = {
+  success: "bg-success-bg/30",
+  running: "bg-running-bg/40",
+  rework: "bg-rework-bg/40",
+  warning: "bg-warning-bg/40",
+  error: "bg-error-bg/40",
+  neutral: "bg-neutral-bg/20",
+};
 
 const STATUS_BORDER: Record<string, string> = {
   success: "border-success-border",
@@ -41,6 +57,33 @@ const STATUS_DOT: Record<string, string> = {
   warning: "bg-warning-base",
   error: "bg-error-base",
   neutral: "bg-neutral-base",
+};
+
+const STATUS_TEXT: Record<string, string> = {
+  success: "text-success-base",
+  running: "text-running-base",
+  rework: "text-rework-base",
+  warning: "text-warning-base",
+  error: "text-error-base",
+  neutral: "text-text-muted",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  success: "ok",
+  running: "running",
+  rework: "rework",
+  warning: "warning",
+  error: "failed",
+  neutral: "pending",
+};
+
+/** 阶段徽章 tone → tailwind class（柔和底色，不喧宾夺主于 status 颜色） */
+const PHASE_BADGE_TONE: Record<string, string> = {
+  "viz-1": "bg-viz-1/15 text-viz-1",
+  "viz-2": "bg-viz-2/15 text-viz-2",
+  "viz-3": "bg-viz-3/15 text-viz-3",
+  accent: "bg-accent-bg text-accent-base",
+  muted: "bg-neutral-bg text-text-muted",
 };
 
 function formatDuration(ms: number | null): string {
@@ -77,7 +120,6 @@ export function DagNode({
   id,
 }: NodeProps & { data: DagNodeData }) {
   const isControl = data.agent === "control";
-  /* 选中、rework、failed 时露出 action chips —— 让"需要人工介入"的节点天然显眼 */
   const toolbarVisible =
     !!selected || data.status === "rework" || data.status === "error";
 
@@ -90,15 +132,19 @@ export function DagNode({
     api,
   });
 
+  // 4 阶段流水线呈现：collector + extractor 同属阶段 1「采集与结构化」，
+  // 内部 agent 名（collector / extractor）放第三行 mono 小字保留可追溯性。
+  const phase = phaseOf(data.agent);
+
   return (
     <>
       <NodeToolbar
         isVisible={toolbarVisible}
-        position={Position.Right}
-        offset={10}
+        position={Position.Bottom}
+        offset={12}
         align="center"
       >
-        <div className="flex flex-col items-stretch gap-1.5">
+        <div className="flex flex-wrap items-center justify-center gap-1.5">
           {actions.map((a) => (
             <ActionChip key={a.id} action={a} />
           ))}
@@ -107,33 +153,36 @@ export function DagNode({
 
       <div
         className={cn(
-          "relative w-[156px] rounded-md border bg-bg-raised px-3 py-2.5",
-          "transition-shadow duration-180 ease-out-quart",
+          "group relative w-[220px] rounded-2xl border-2 bg-bg-raised px-4 py-3",
+          "shadow-card transition-all duration-180 ease-out-quart",
+          "hover:-translate-y-0.5 hover:shadow-popover",
           STATUS_BORDER[data.status] ?? "border-border-default",
-          selected
-            ? "ring-2 ring-accent-base/40 shadow-popover"
-            : "shadow-none hover:shadow-popover",
-          isControl && "bg-bg-sunken",
-          /* rework / error 微高光：边框更显眼 */
-          data.status === "rework" && "ring-2 ring-rework-base/15",
-          data.status === "error" && "ring-2 ring-error-base/15"
+          STATUS_TINT[data.status],
+          selected && "ring-4 ring-accent-base/25",
+          /* rework / error 微高光 */
+          data.status === "rework" && "ring-4 ring-rework-base/15",
+          data.status === "error" && "ring-4 ring-error-base/15",
+          /* running 节点呼吸感 */
+          data.status === "running" && "ring-4 ring-running-base/15"
         )}
       >
+        {/* 横向：target 在左，source 在右 */}
         <Handle
           type="target"
-          position={Position.Top}
-          className="!h-1 !w-1 !min-w-0 !border-0 !bg-border-default"
+          position={Position.Left}
+          className="!h-2.5 !w-2.5 !min-w-0 !border-2 !border-bg-raised !bg-border-strong"
         />
         <Handle
           type="source"
-          position={Position.Bottom}
-          className="!h-1 !w-1 !min-w-0 !border-0 !bg-border-default"
+          position={Position.Right}
+          className="!h-2.5 !w-2.5 !min-w-0 !border-2 !border-bg-raised !bg-border-strong"
         />
 
-        <div className="flex items-center gap-1.5">
+        {/* 顶行：大状态点 + label + 状态文字 */}
+        <div className="flex items-center gap-2">
           <span
             className={cn(
-              "h-2 w-2 shrink-0 rounded-pill",
+              "h-2.5 w-2.5 shrink-0 rounded-pill ring-2 ring-bg-raised",
               STATUS_DOT[data.status] ?? "bg-neutral-base",
               data.status === "running" && "animate-pulse-soft"
             )}
@@ -141,37 +190,73 @@ export function DagNode({
           />
           <span
             className={cn(
-              "truncate text-sm font-medium",
+              "min-w-0 flex-1 truncate text-sm font-semibold",
               isControl ? "text-text-muted" : "text-text-primary"
             )}
           >
             {data.label}
           </span>
+          <span
+            className={cn(
+              "shrink-0 text-[10px] font-medium uppercase tracking-wider",
+              STATUS_TEXT[data.status]
+            )}
+          >
+            {STATUS_LABEL[data.status]}
+          </span>
         </div>
 
+        {/* 第二行：阶段徽章 + agent 内部代号 */}
+        <div className="mt-1 ml-4.5 flex items-center gap-1.5 text-[11px]">
+          {!isControl && phase.order > 0 ? (
+            <span
+              className={cn(
+                "shrink-0 rounded-pill px-1.5 py-0 font-medium text-text-secondary",
+                PHASE_BADGE_TONE[phase.tone]
+              )}
+            >
+              阶段 {phase.order} · {phase.label}
+            </span>
+          ) : null}
+          <span className="truncate font-mono text-[10px] text-text-muted">
+            {data.agent}
+            {data.revision > 1 ? ` · v${data.revision}` : null}
+          </span>
+        </div>
+
+        {/* 第三行：metrics */}
         <div
-          className="mt-1.5 truncate font-mono text-[11px] tabular-nums text-text-muted"
+          className="mt-2 flex items-center gap-3 font-mono text-[11px] tabular-nums text-text-muted"
           data-num
         >
           {data.status === "neutral" ? (
-            <span className="italic">pending</span>
+            <span className="italic">awaiting upstream</span>
           ) : (
             <>
-              {formatDuration(data.durationMs)} · {formatTokens(data.tokens)} tok
+              <span>{formatDuration(data.durationMs)}</span>
+              <span className="text-border-default">·</span>
+              <span>{formatTokens(data.tokens)} tok</span>
+              {data.costUsd != null && data.costUsd > 0 ? (
+                <>
+                  <span className="text-border-default">·</span>
+                  <span>${data.costUsd.toFixed(2)}</span>
+                </>
+              ) : null}
             </>
           )}
         </div>
 
+        {/* 角标 */}
         {data.revision > 1 ? (
-          <div className="absolute -top-1.5 -right-1.5 rounded-pill bg-rework-base px-1.5 py-px text-[9px] font-medium leading-tight text-text-inverse">
+          <div className="absolute -top-2 -right-2 rounded-pill bg-rework-base px-2 py-0.5 text-[10px] font-semibold leading-tight text-text-inverse shadow-popover">
             v{data.revision}
           </div>
         ) : null}
 
-        {/* rework 节点角标：⚠ 需要人工裁决 */}
         {data.status === "rework" && !data.parentNodeId ? (
-          <div className="absolute -top-1.5 -left-1.5 rounded-pill bg-rework-base px-1.5 py-px text-[9px] font-medium leading-tight text-text-inverse">
-            ⚠ action
+          <div className="absolute -top-2 left-3 inline-flex items-center gap-1 rounded-pill bg-rework-base px-2 py-0.5 text-[10px] font-semibold leading-tight text-text-inverse shadow-popover">
+            <span>⚠</span>
+            <span>需介入</span>
           </div>
         ) : null}
       </div>
@@ -195,7 +280,7 @@ function ActionChip({ action }: { action: ActionDef }) {
       }}
       title={action.hint ?? action.label}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium",
+        "inline-flex items-center gap-1.5 rounded-pill border px-2.5 py-1 text-[11px] font-medium",
         "shadow-popover transition-colors duration-120 ease-out-quart",
         "whitespace-nowrap",
         isPrimary && [

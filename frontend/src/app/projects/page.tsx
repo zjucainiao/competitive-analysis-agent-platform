@@ -1,17 +1,23 @@
-import { GlobalNav } from "@/components/layout/global-nav";
+import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { ProjectsList } from "@/components/projects-list";
 
 /**
- * Project 列表页 · v1 mock 多卡片 + 过滤 + 排序 + 搜索 + 快捷动作。
- * Sprint 2 接入 ProjectService.list()。
+ * Project 列表页。
+ *
+ * 用新 SidebarShell（左侧 nav + slim 顶栏）替换旧 GlobalNav 顶部布局。
  */
 export default function ProjectsPage() {
   return (
-    <div className="min-h-full bg-background">
-      <GlobalNav />
-      <div className="mx-auto max-w-6xl px-10 py-12">
+    <SidebarShell
+      topBarLeft={
+        <div className="text-xs text-text-muted">
+          <span className="font-medium text-text-secondary">我的项目</span>
+        </div>
+      }
+    >
+      <div className="mx-auto max-w-6xl">
         <ProjectsList />
       </div>
-    </div>
+    </SidebarShell>
   );
 }

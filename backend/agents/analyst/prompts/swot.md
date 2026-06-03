@@ -25,4 +25,6 @@ Compact profiles:
 {{ profiles_json }}
 ```
 
+{{ qa_feedback_block }}
+
 Produce the `DimensionAnalysis` now.

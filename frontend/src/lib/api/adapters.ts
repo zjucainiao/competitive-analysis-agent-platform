@@ -37,13 +37,14 @@ const STATUS_MAP: Record<NodeStatus, DagNodeStatus> = {
   skipped: "neutral",
 };
 
-/** Cell width / row gap for auto-layout. */
-const COL_WIDTH = 220;
-const ROW_HEIGHT = 130;
+/** 横向布局：depth 决定 X，分支序号决定 Y。 */
+const STAGE_GAP = 260;  // 同一管线相邻 stage 的 X 间距
+const BRANCH_GAP = 180; // 同一 stage 内相邻并行分支的 Y 间距
 
 /**
  * 拓扑分层：BFS depth-from-start。
- * 每个 depth 内同级节点按出现顺序水平排开。
+ * 横向版：depth → X 偏移；同 depth 内节点按出现顺序在 Y 轴上排开。
+ * feedback 子节点（parent_node_id ≠ null）放在 parent 同 X、Y 下移 BRANCH_GAP。
  */
 function computeLayout(nodes: DAGNode[], edges: DAGEdge[]): Record<string, { x: number; y: number }> {
   const adj: Record<string, string[]> = {};
@@ -79,14 +80,15 @@ function computeLayout(nodes: DAGNode[], edges: DAGEdge[]): Record<string, { x: 
     }
   }
 
-  /* feedback children (parent_node_id ≠ null) override depth → 与 parent 同级 +0.5 */
+  /* feedback children (parent_node_id ≠ null) 用 parent depth + 0.5
+   * 这样横向上 feedback 节点会落在 parent 与下一 stage 中间，避免和 parent 重叠 */
   nodes.forEach((n) => {
     if (n.parent_node_id && depth[n.parent_node_id] != null) {
       depth[n.node_id] = depth[n.parent_node_id]! + 0.5;
     }
   });
 
-  /* group by depth */
+  /* group by depth → 决定 X */
   const byDepth = new Map<number, DAGNode[]>();
   nodes.forEach((n) => {
     const d = depth[n.node_id] ?? 0;
@@ -96,35 +98,48 @@ function computeLayout(nodes: DAGNode[], edges: DAGEdge[]): Record<string, { x: 
   });
   const sortedDepths = Array.from(byDepth.keys()).sort((a, b) => a - b);
 
+  /* feedback 节点放在分支行（Y 下移）：parent_node_id ≠ null → branch_offset +1 */
   const pos: Record<string, { x: number; y: number }> = {};
   sortedDepths.forEach((d) => {
-    const row = byDepth.get(d)!;
-    row.forEach((n, i) => {
+    const col = byDepth.get(d)!;
+    col.forEach((n, i) => {
+      const isFeedback = n.parent_node_id !== null;
       pos[n.node_id] = {
-        x: i * COL_WIDTH - ((row.length - 1) * COL_WIDTH) / 2,
-        y: d * ROW_HEIGHT,
+        x: d * STAGE_GAP,
+        y:
+          i * BRANCH_GAP -
+          ((col.length - 1) * BRANCH_GAP) / 2 +
+          (isFeedback ? BRANCH_GAP * 1.5 : 0),
       };
     });
   });
 
-  /* normalize: shift so min x is 60 */
-  const allX = Object.values(pos).map((p) => p.x);
-  const minX = allX.length > 0 ? Math.min(...allX) : 0;
+  /* normalize: shift so min y is 60 (留出 sheet 关闭按钮空间) */
+  const allY = Object.values(pos).map((p) => p.y);
+  const minY = allY.length > 0 ? Math.min(...allY) : 0;
   Object.values(pos).forEach((p) => {
-    p.x -= minX - 60;
+    p.y -= minY - 60;
   });
 
   return pos;
 }
 
-/** node_id → 可读 label（fallback 到 node_id 本身） */
+/** node_id → 可读 label。
+ *
+ * Agent 节点保留原 id（如 `collect.notion` / `reporter_v2`），用户可一眼定位。
+ * Control 节点（START / END / PARALLEL_JOIN / PARALLEL_FORK）改成中文 plumbing 提示，
+ * 避免用户把 `join_extract` 误读成「联合抽取」业务步骤。
+ */
 function nodeLabel(n: DAGNode): string {
-  if (n.agent_name && n.node_id.includes(".")) {
-    return n.node_id; // e.g. "collect.notion"
-  }
   if (n.agent_name) {
-    return n.node_id; // e.g. "reporter" / "reporter_v2"
+    return n.node_id;
   }
+  // control 节点：按 node_type 给中文短词
+  const nt = n.node_type;
+  if (nt === "start") return "开始";
+  if (nt === "end") return "结束";
+  if (nt === "parallel_join") return `汇合 · ${n.node_id}`;
+  if (nt === "parallel_fork") return `分发 · ${n.node_id}`;
   return n.node_id;
 }
 
@@ -197,6 +212,61 @@ function summarizeOutput(out: AnyAgentOutput): DagNodeData["outputs"] {
   return result;
 }
 
+/** DAG 视图把 control 节点（start / end / parallel_join / parallel_fork）
+ *  从用户视野里完全隐藏 —— 它们只是 Orchestrator plumbing，用户视角看到
+ *  的应该是 4 阶段流水线（采集与结构化 / 分析 / 撰写 / 质检）。
+ *
+ *  隐藏后的边重连：跨过 control 的路径要透传，比如
+ *    extract.notion → join_extract → analyst  →→  extract.notion → analyst
+ *    extract.clickup → join_extract → analyst →→  extract.clickup → analyst
+ *
+ *  这样多竞品下视觉变成「N 个 extract 直接 fan-in 到 analyst」，省一层 plumbing。
+ *
+ *  需要看完整拓扑的高级用户可以走 GET /api/projects/{id}/state 看原始 plan。
+ */
+const _CONTROL_NODE_TYPES = new Set([
+  "start",
+  "end",
+  "parallel_join",
+  "parallel_fork",
+]);
+
+function _isControlNode(n: DAGNode): boolean {
+  return _CONTROL_NODE_TYPES.has(n.node_type);
+}
+
+/** 在边图上把所有 control 节点折叠掉：给定一组 source（business 节点），
+ *  沿边 BFS 找到所有可达的非 control 节点。 */
+function _businessReachable(
+  fromIds: string[],
+  edges: DAGEdge[],
+  controlIds: Set<string>
+): string[] {
+  const adj = new Map<string, string[]>();
+  for (const e of edges) {
+    if (!adj.has(e.from_node)) adj.set(e.from_node, []);
+    adj.get(e.from_node)!.push(e.to_node);
+  }
+  const result: string[] = [];
+  const seen = new Set<string>();
+  const stack = [...fromIds];
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    if (!controlIds.has(cur)) {
+      // 业务节点：作为目标返回，不再继续往下追
+      result.push(cur);
+      continue;
+    }
+    // control 节点：透传，继续找下游
+    for (const next of adj.get(cur) ?? []) {
+      stack.push(next);
+    }
+  }
+  return result;
+}
+
 export function apiStateToDagData(state: ProjectStateResponse): {
   nodes: DagNodeRecord[];
   edges: DagEdgeRecord[];
@@ -204,9 +274,41 @@ export function apiStateToDagData(state: ProjectStateResponse): {
   const plan = state.plan;
   if (!plan) return { nodes: [], edges: [] };
 
+  const controlIds = new Set(
+    plan.nodes.filter(_isControlNode).map((n) => n.node_id)
+  );
+  const businessNodes = plan.nodes.filter((n) => !_isControlNode(n));
+
+  // 边重连：跨过所有 control，业务节点之间直连。同 source 多 target 用 set 去重。
+  const seenEdgeKeys = new Set<string>();
+  const rewiredEdges: DagEdgeRecord[] = [];
+  for (const e of plan.edges) {
+    if (controlIds.has(e.from_node)) {
+      // from 是 control → 由它的上游业务节点接管，这条边等会儿会通过别的入口被加
+      continue;
+    }
+    // from 是业务节点；找下游可达的所有业务节点
+    const targets = controlIds.has(e.to_node)
+      ? _businessReachable([e.to_node], plan.edges, controlIds)
+      : [e.to_node];
+    for (const t of targets) {
+      const key = `${e.from_node}→${t}`;
+      if (seenEdgeKeys.has(key)) continue;
+      seenEdgeKeys.add(key);
+      rewiredEdges.push({
+        id: `${e.edge_id}::${t}`,
+        source: e.from_node,
+        target: t,
+        type: e.edge_type === "feedback" ? "feedback" : "dependency",
+      });
+    }
+  }
+
+  // 布局算法仍喂原始 plan（保持 control 节点在图里参与拓扑排序、给出业务节点合理坐标），
+  // 渲染时只暴露业务节点。
   const pos = computeLayout(plan.nodes, plan.edges);
 
-  const nodes: DagNodeRecord[] = plan.nodes.map((n) => {
+  const nodes: DagNodeRecord[] = businessNodes.map((n) => {
     const out = state.outputs[n.node_id];
     const baseData: DagNodeData = {
       label: nodeLabel(n),
@@ -231,14 +333,7 @@ export function apiStateToDagData(state: ProjectStateResponse): {
     };
   });
 
-  const edges: DagEdgeRecord[] = plan.edges.map((e) => ({
-    id: e.edge_id,
-    source: e.from_node,
-    target: e.to_node,
-    type: e.edge_type === "feedback" ? "feedback" : "dependency",
-  }));
-
-  return { nodes, edges };
+  return { nodes, edges: rewiredEdges };
 }
 
 /* ── Reporter outputs → 最新 reporter version (节点 id) ───────────────── */

@@ -1,17 +1,21 @@
-import { GlobalNav } from "@/components/layout/global-nav";
+import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { GlobalMetricsDashboard } from "@/components/metrics/global-metrics-dashboard";
 
 /**
  * /metrics · 全局指标仪表盘（跨项目 / 跨时间）。
- * v1 mock · Sprint 2 接 GlobalMetricsService.aggregate()。
  */
 export default function MetricsPage() {
   return (
-    <div className="min-h-full bg-background">
-      <GlobalNav />
-      <div className="mx-auto max-w-6xl px-10 py-10">
+    <SidebarShell
+      topBarLeft={
+        <div className="text-xs text-text-muted">
+          <span className="font-medium text-text-secondary">全局指标</span>
+        </div>
+      }
+    >
+      <div className="mx-auto max-w-6xl">
         <GlobalMetricsDashboard />
       </div>
-    </div>
+    </SidebarShell>
   );
 }

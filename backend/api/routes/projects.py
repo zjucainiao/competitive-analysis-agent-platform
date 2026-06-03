@@ -9,7 +9,7 @@ from ulid import ULID
 
 from backend.api.deps import get_storage
 from backend.api.schemas import ProjectCreateRequest, ProjectListResponse
-from backend.schemas import Project, ProjectStatus
+from backend.schemas import AnalysisMode, Project, ProjectStatus
 from backend.storage import Storage
 
 router = APIRouter(tags=["projects"])
@@ -20,17 +20,55 @@ async def create_project(
     req: ProjectCreateRequest,
     storage: Storage = Depends(get_storage),
 ) -> Project:
+    # ----- mode 校验 / 自动派生 -----
+    # 关键设计：single_research 模式不再硬剔对比类维度。功能 / 定价 / SWOT /
+    # 差异化对单产品本身仍然有意义（自身能力速览 / 定价档位 / 自我 SW 评估 /
+    # 差异化定位）。Analyst 内部对这些维度有 competitors=[] 单产品分支；
+    # Reporter ``single_research_v1`` 模板用调研基调标题。
+    competitors = list(req.competitors)
+    analysis_dimensions = list(req.analysis_dimensions)
+    report_template_id = req.report_template_id
+
+    if req.analysis_mode == AnalysisMode.COMPETITIVE_COMPARE:
+        if not competitors:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "analysis_mode=competitive_compare requires ≥1 competitor; "
+                    "use 'single_research' for solo product研究 or 'auto_discover' "
+                    "to let the system fill competitors first."
+                ),
+            )
+    elif req.analysis_mode == AnalysisMode.SINGLE_RESEARCH:
+        # 单产品调研：忽略用户传的 competitors（即使非空也清掉）；
+        # dimensions 由用户自由选；默认模板换 single_research_v1（调研基调）。
+        competitors = []
+        if report_template_id == "standard_v1":
+            report_template_id = "single_research_v1"
+    elif req.analysis_mode == AnalysisMode.AUTO_DISCOVER:
+        # 由前端在 POST /api/discover-competitors 后把候选填进 competitors 再创建；
+        # 这里仍允许 competitors=[] 但 plan 阶段会因为 0 产品而失败 —— 给出友好提示
+        if not competitors:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "analysis_mode=auto_discover but competitors=[]; please call "
+                    "POST /api/discover-competitors first and submit the result."
+                ),
+            )
+
     project = Project(
         project_id=f"proj_{ULID()}",
         project_name=req.project_name,
         owner=req.owner,
         created_at=datetime.now(timezone.utc),
         target_product=req.target_product,
-        competitors=req.competitors,
+        competitors=competitors,
+        analysis_mode=req.analysis_mode,
         industry=req.industry,
         industry_schema_version=req.industry_schema_version,
-        analysis_dimensions=req.analysis_dimensions,
-        report_template_id=req.report_template_id,
+        analysis_dimensions=analysis_dimensions,
+        report_template_id=report_template_id,
         target_audience=req.target_audience,
         mode=req.mode,
         collect_constraints=req.collect_constraints,

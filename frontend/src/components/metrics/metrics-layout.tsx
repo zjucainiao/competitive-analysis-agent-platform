@@ -301,7 +301,7 @@ function PerAgentQuality() {
           Per-agent quality
         </div>
         <p className="mt-0.5 text-xs text-text-secondary">
-          每个 Agent 的通过率 / 节点数 / 平均耗时 / token / 成本
+          每个环节的通过率、平均耗时与成本
         </p>
       </header>
       <ul className="space-y-3">

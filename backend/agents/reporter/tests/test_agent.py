@@ -902,6 +902,139 @@ def test_self_correct_disabled_falls_back_to_post_validate_raise(
     assert out.draft.metadata["forced_fallbacks"] == 0
 
 
+# ---------- QA feedback → prompt 接通测试 ----------
+
+
+def test_render_qa_feedback_block_empty_returns_empty_string() -> None:
+    """无 feedback / None / 空 dict → 渲染空串（section.md 占位符消失）。"""
+    from backend.agents.reporter.agent import _render_qa_feedback_block
+
+    assert _render_qa_feedback_block(None) == ""
+    assert _render_qa_feedback_block({}) == ""
+    # 字段全空也应跳过，不产生噪音 prompt
+    assert (
+        _render_qa_feedback_block(
+            {"from_verdict_id": "v_1", "issues": [], "must_address": [], "instructions": ""}
+        )
+        == ""
+    )
+
+
+def test_render_qa_feedback_block_contains_instructions_and_issues() -> None:
+    """有 routing reason + must_address + issues 时，全部进 prompt 块。"""
+    from backend.agents.reporter.agent import _render_qa_feedback_block
+
+    payload = {
+        "from_verdict_id": "v_42",
+        "revision": 2,
+        "instructions": "重写 pricing 章节，剔除被用户标 disputed 的证据",
+        "must_address": ["iss_p1", "iss_p2"],
+        "issues": [
+            {
+                "issue_id": "iss_p1",
+                "dimension": "evidence_completeness",
+                "severity": "major",
+                "location": "report.paragraphs[para_007]",
+                "problem": "段落引用 ev_n_pricing_001 已被用户标 disputed",
+                "suggested_fix": "改写为定性表述或换证据",
+                "target_agent": "reporter",
+                "required_inputs": {"avoid_evidence_ids": ["ev_n_pricing_001"]},
+            },
+            {
+                "issue_id": "iss_p2",
+                "dimension": "fact_consistency",
+                "severity": "critical",
+                "location": "report.sections[3].paragraphs[2]",
+                "problem": "数字 90% 在引用证据中找不到原值",
+                "suggested_fix": "去掉具体数字，改用「显著高于」之类定性词",
+                "target_agent": "reporter",
+                "required_inputs": {},
+            },
+        ],
+    }
+    block = _render_qa_feedback_block(payload)
+
+    # 顶部强标记 + revision
+    assert "QA Feedback" in block
+    assert "revision 2" in block
+    # routing reason
+    assert "重写 pricing 章节" in block
+    # must_address 全部出现
+    assert "iss_p1" in block
+    assert "iss_p2" in block
+    # issue 详情
+    assert "report.paragraphs[para_007]" in block
+    assert "report.sections[3].paragraphs[2]" in block
+    assert "已被用户标 disputed" in block
+    assert "改用「显著高于」" in block
+    # required_inputs 落到 Constraints 行
+    assert "avoid_evidence_ids" in block
+    assert "ev_n_pricing_001" in block
+    # 严重程度 + 维度标签
+    assert "major" in block
+    assert "critical" in block
+    assert "evidence_completeness" in block
+
+
+def test_qa_feedback_reaches_real_llm_section_prompt() -> None:
+    """端到端：把 qa_feedback 塞进 ReporterInput，跑真实 LLM 路径，
+    断言 FakeLLM 捕获的 user_content 里能看到 issue 文本。
+
+    这是 QA→Reporter 反馈环最关键的接通点：之前 Reporter 只读 ``revision`` 编号
+    bump 版本，不把反馈文本送进 LLM；本测保证不再回退。
+    """
+    from backend.agents.reporter.fixtures import load_demo_input
+
+    captured: list[str] = []
+
+    class CaptureLLM:
+        """记录每次 chat 收到的 user_content，再走 FakeLLM 的兜底逻辑。"""
+
+        def chat(self, *, system: str, messages: list[dict], **kwargs: Any) -> Any:
+            uc = next((m["content"] for m in messages if m["role"] == "user"), "")
+            captured.append(uc)
+            # 让 Reporter 失败 fallback heuristic（我们只关心 prompt 是否含反馈）
+            raise RuntimeError("capture done")
+
+        def embed(self, texts: list[str], **kwargs: Any) -> list[list[float]]:
+            return [[0.0] * 8 for _ in texts]
+
+    qa_feedback = {
+        "from_verdict_id": "v_test",
+        "revision": 1,
+        "instructions": "用户标了 ev_n_pricing_xyz 为 disputed，重写相关段落",
+        "must_address": ["iss_disputed_para_777"],
+        "issues": [
+            {
+                "issue_id": "iss_disputed_para_777",
+                "dimension": "evidence_completeness",
+                "severity": "major",
+                "location": "report.paragraphs[para_777]",
+                "problem": "用户 PATCH evidence ev_n_pricing_xyz 标 disputed，本段引用它",
+                "suggested_fix": "改写不依赖该 evidence；找替代证据或弱化结论",
+                "target_agent": "reporter",
+                "required_inputs": {"avoid_evidence_ids": ["ev_n_pricing_xyz"]},
+            }
+        ],
+    }
+
+    inp_base = load_demo_input(template_id="standard_v1")
+    inp = inp_base.model_copy(update={"qa_feedback": qa_feedback})
+
+    agent = Reporter(llm=CaptureLLM(), tracer=NullTracer(), self_correct=False)
+    agent.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id)
+
+    assert captured, "Reporter 没调到 LLM，wiring 路径未触达"
+    joined = "\n".join(captured)
+    # 关键断言：QA 反馈文本必须真的出现在 user prompt 里
+    assert "QA Feedback" in joined
+    assert "用户标了 ev_n_pricing_xyz" in joined
+    assert "iss_disputed_para_777" in joined
+    assert "report.paragraphs[para_777]" in joined
+    assert "avoid_evidence_ids" in joined
+    assert "ev_n_pricing_xyz" in joined
+
+
 # ---------- 辅助函数 ----------
 
 

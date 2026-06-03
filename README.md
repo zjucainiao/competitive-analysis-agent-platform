@@ -1,18 +1,28 @@
 # AI 驱动的 B 端 SaaS 竞品分析 Agent 协作平台
 
-> 多智能体 DAG 编排 · 结构化竞品知识 Schema · 证据链可溯源 · 质检反馈闭环 · 全链路可观测
+> 4 阶段流水线 · DAG 编排 · 结构化竞品知识 Schema · 证据链可溯源 · 质检反馈闭环 · 全链路可观测
 
-面向 B 端 SaaS 竞品分析场景，本平台通过 **5 个专职 Agent**（采集 / 抽取 / 分析 / 报告 / 质检）协同工作，自动完成从公开信息采集、知识结构化、对比分析、报告撰写到质检审查的全流程，输出一份带证据来源、可追踪过程、可复用结构化数据的竞品分析报告。
+面向 B 端 SaaS 竞品分析场景，本平台用 **4 阶段流水线 · 内部 5 个专职 Agent** 协同工作，自动完成从公开信息**采集与结构化** → **分析** → **撰写** → **质检** 的全流程，输出一份带证据来源、可追踪过程、可复用结构化数据的竞品分析报告。
+
+| 阶段 | 内部 Agent | 干什么 |
+|---|---|---|
+| **1. 采集与结构化** | Collector + Extractor | 公开信息抓取 + LLM 抽取到 Schema + 证据链编织 |
+| **2. 分析** | Analyst | 多维度跨产品对比 / 单产品深度调研 |
+| **3. 撰写** | Reporter | 结构化报告生成 + 数字引用强制校验 + 反幻觉自修复 |
+| **4. 质检** | QA | 6 维度自动审查，不合理触发反馈环重做 |
+
+> Collector 和 Extractor 在 DAG 拓扑上仍是独立节点（独立失败 / 独立重试 / 独立反馈），方便定位问题；但**用户呈现层**统一为「阶段 1 · 采集与结构化」一个色块。
 
 ## 核心特性
 
 | 特性 | 落地点 |
 |---|---|
-| 5 Agent 专职分工 | 采集 / 抽取 / 分析 / 报告 / 质检 + Orchestrator 编排器 |
+| 4 阶段流水线 | 采集与结构化 / 分析 / 撰写 / 质检 + Orchestrator 编排器 |
 | 结构化消息契约 | Agent 间走 Pydantic / JSON Schema，**非自然语言对话** |
 | DAG 任务编排 | 节点状态机 + 反馈边，支持并行采集、条件分支、质检回流 |
 | 自适应任务拆分 | Orchestrator 根据 query 复杂度动态生成 DAG，不写死 |
 | 竞品知识 Schema | 通用 Schema + 行业扩展（协作办公 / CRM / 跨境电商 / 教育 SaaS） |
+| 三种分析模式 | 多竞品对比 / 单产品调研 / 自动发现竞品 |
 | 证据链可溯源 | 每个结论绑定 `evidence_id`，UI 一键跳转原文 |
 | 幻觉抑制四层 | 结构化输出 + 引用强制 + 自一致性 + QA 反馈 |
 | Agent 自评估 | 每个 Agent 输出 confidence + self-critique |
@@ -39,8 +49,11 @@
 └────────────────────┬────────────────────────────────┘
                      │
 ┌────────────────────┴────────────────────────────────┐
-│  多智能体执行层                                     │
-│  采集 · 抽取 · 分析 · 报告 · 质检                   │
+│  多智能体执行层  ──  4 阶段流水线                   │
+│  ① 采集与结构化 (Collector+Extractor)               │
+│  ② 分析 (Analyst)                                   │
+│  ③ 撰写 (Reporter)                                  │
+│  ④ 质检 (QA)                                        │
 └────────────────────┬────────────────────────────────┘
                      │
 ┌────────────────────┴────────────────────────────────┐
@@ -82,7 +95,7 @@
 │   └── mock_data/          # Mock 数据，供 Agent 独立开发使用
 └── docs/
     ├── ARCHITECTURE.md     # 系统架构
-    ├── AGENTS.md           # 5 Agent 接口契约（实现窗口必读）
+    ├── AGENTS.md           # 内部 5 Agent 接口契约（实现窗口必读 · 用户层呈现 4 阶段）
     ├── SCHEMA.md           # 竞品知识 Schema
     ├── DAG.md              # 任务编排设计
     ├── EVIDENCE.md         # 证据链与溯源
@@ -96,15 +109,20 @@
     └── CONVENTIONS.md      # 编码与协作规范
 ```
 
-## 5 Agent 速查
+## 4 阶段 / 5 Agent 速查
 
-| Agent | 输入 | 输出 | 关键工具 |
-|---|---|---|---|
-| Collector | 产品名 + 维度 + 约束 | RawSourceDoc[] | Tavily / Firecrawl / Playwright |
-| Extractor | RawSourceDoc[] + 行业 Schema | CompetitorProfile + Evidence[] | LLM + JSON Schema 校验 |
-| Analyst | CompetitorProfile[] + 维度 | AnalysisResult（每条 claim 绑 evidence_id） | LLM + RAG |
-| Reporter | AnalysisResult + 模板 | ReportDraft（结构化 markdown） | LLM + 引用强制 |
-| QA | ReportDraft + Evidence + Profile | QAVerdict + 路由决策 | LLM + 规则校验 |
+> **用户视角**：4 阶段流水线（采集与结构化 / 分析 / 撰写 / 质检）。
+> **工程视角**：阶段 1 内部由 Collector + Extractor 两个 Agent 实现 ——
+> 它们 IO 形态完全不同（网络抓取 vs LLM 抽取），所以在 DAG 上仍保留两个独立节点，
+> 这样可以独立失败、独立重试、独立反馈环。
+
+| 阶段 | 内部 Agent | 输入 | 输出 | 关键工具 |
+|---|---|---|---|---|
+| **1 · 采集与结构化** | Collector | 产品名 + 维度 + 约束 | RawSourceDoc[] | Tavily / Firecrawl / Playwright |
+| | Extractor | RawSourceDoc[] + 行业 Schema | CompetitorProfile + Evidence[] | LLM + JSON Schema 校验 |
+| **2 · 分析** | Analyst | CompetitorProfile[] + 维度 | AnalysisResult（每条 claim 绑 evidence_id） | LLM + RAG |
+| **3 · 撰写** | Reporter | AnalysisResult + 模板 | ReportDraft（结构化 markdown） | LLM + 引用强制 |
+| **4 · 质检** | QA | ReportDraft + Evidence + Profile | QAVerdict + 路由决策 | LLM + 规则校验 |
 
 详细契约见 [docs/AGENTS.md](docs/AGENTS.md)。
 

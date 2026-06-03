@@ -20,7 +20,16 @@ from backend.orchestrator import AgentRegistry, Orchestrator
 from backend.schemas import SCHEMA_VERSION
 from backend.storage import build_storage, init_storage
 
-from .routes import events, evidence, interventions, meta, projects, reports, runs
+from .routes import (
+    discovery,
+    events,
+    evidence,
+    interventions,
+    meta,
+    projects,
+    reports,
+    runs,
+)
 
 # 仓库根目录 .env 在模块装载时加载，让 uvicorn 直接启动也能拿到 LLM key
 load_dotenv()
@@ -131,6 +140,7 @@ def create_app(
     app.include_router(interventions.router, prefix="/api")
     app.include_router(meta.router, prefix="/api")
     app.include_router(events.router, prefix="/api")
+    app.include_router(discovery.router, prefix="/api")
     return app
 
 

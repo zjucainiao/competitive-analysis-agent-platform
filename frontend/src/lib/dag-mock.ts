@@ -52,21 +52,28 @@ export interface DagEdgeRecord {
   type: "dependency" | "feedback";
 }
 
-/* ── layout coordinates ────────────────────────────────────────────────── */
+/* ── layout coordinates · 横向流水线（左 → 右） ───────────────────────────
+ *
+ * 命名沿用 COL_* / ROW_* 但语义已重置：
+ *  - COL_* = 3 个并行分支（Notion / ClickUp / Asana）的 **Y 坐标**，从上到下排
+ *  - ROW_* = 流水线各阶段的 **X 坐标**，从左到右排（start → collect → extract …）
+ *
+ * 节点的 position 写成 `{ x: ROW_STAGE, y: COL_BRANCH }`。
+ */
 
-const COL_NOTION = 60;
-const COL_CLICKUP = 280;
-const COL_ASANA = 500;
-const COL_CENTER = 280;
-const COL_V2 = 500;
+const COL_NOTION = 0;     // 上分支
+const COL_CLICKUP = 180;  // 中分支
+const COL_ASANA = 360;    // 下分支
+const COL_CENTER = 180;   // 主干（在中分支高度）
+const COL_V2 = 480;       // reporter_v2 / qa_v2 feedback 分支：放在 3 个 collector 行下方
 
 const ROW_START = 0;
-const ROW_COLLECT = 110;
-const ROW_EXTRACT = 230;
-const ROW_ANALYST = 360;
-const ROW_REPORTER = 480;
-const ROW_QA = 600;
-const ROW_END = 720;
+const ROW_COLLECT = 260;
+const ROW_EXTRACT = 520;
+const ROW_ANALYST = 780;
+const ROW_REPORTER = 1040;
+const ROW_QA = 1300;
+const ROW_END = 1560;
 
 /* ── helpers ───────────────────────────────────────────────────────────── */
 
@@ -86,7 +93,7 @@ function llm(
 export const DEMO_DAG_NODES: DagNodeRecord[] = [
   {
     id: "start",
-    position: { x: COL_CENTER, y: ROW_START },
+    position: { x: ROW_START, y: COL_CENTER },
     data: {
       label: "start",
       agent: "control",
@@ -106,7 +113,7 @@ export const DEMO_DAG_NODES: DagNodeRecord[] = [
   },
   {
     id: "collect.notion",
-    position: { x: COL_NOTION, y: ROW_COLLECT },
+    position: { x: ROW_COLLECT, y: COL_NOTION },
     data: {
       label: "collect:notion",
       agent: "collector",
@@ -131,7 +138,7 @@ export const DEMO_DAG_NODES: DagNodeRecord[] = [
   },
   {
     id: "collect.clickup",
-    position: { x: COL_CLICKUP, y: ROW_COLLECT },
+    position: { x: ROW_COLLECT, y: COL_CLICKUP },
     data: {
       label: "collect:clickup",
       agent: "collector",
@@ -156,7 +163,7 @@ export const DEMO_DAG_NODES: DagNodeRecord[] = [
   },
   {
     id: "collect.asana",
-    position: { x: COL_ASANA, y: ROW_COLLECT },
+    position: { x: ROW_COLLECT, y: COL_ASANA },
     data: {
       label: "collect:asana",
       agent: "collector",
@@ -182,7 +189,7 @@ export const DEMO_DAG_NODES: DagNodeRecord[] = [
   },
   {
     id: "extract.notion",
-    position: { x: COL_NOTION, y: ROW_EXTRACT },
+    position: { x: ROW_EXTRACT, y: COL_NOTION },
     data: {
       label: "extract:notion",
       agent: "extractor",
@@ -213,7 +220,7 @@ export const DEMO_DAG_NODES: DagNodeRecord[] = [
   },
   {
     id: "extract.clickup",
-    position: { x: COL_CLICKUP, y: ROW_EXTRACT },
+    position: { x: ROW_EXTRACT, y: COL_CLICKUP },
     data: {
       label: "extract:clickup",
       agent: "extractor",
@@ -239,7 +246,7 @@ export const DEMO_DAG_NODES: DagNodeRecord[] = [
   },
   {
     id: "extract.asana",
-    position: { x: COL_ASANA, y: ROW_EXTRACT },
+    position: { x: ROW_EXTRACT, y: COL_ASANA },
     data: {
       label: "extract:asana",
       agent: "extractor",
@@ -267,7 +274,7 @@ export const DEMO_DAG_NODES: DagNodeRecord[] = [
   },
   {
     id: "analyst",
-    position: { x: COL_CENTER, y: ROW_ANALYST },
+    position: { x: ROW_ANALYST, y: COL_CENTER },
     data: {
       label: "analyst",
       agent: "analyst",
@@ -297,7 +304,7 @@ export const DEMO_DAG_NODES: DagNodeRecord[] = [
   },
   {
     id: "reporter",
-    position: { x: COL_CENTER, y: ROW_REPORTER },
+    position: { x: ROW_REPORTER, y: COL_CENTER },
     data: {
       label: "reporter",
       agent: "reporter",
@@ -328,7 +335,7 @@ export const DEMO_DAG_NODES: DagNodeRecord[] = [
   },
   {
     id: "qa",
-    position: { x: COL_CENTER, y: ROW_QA },
+    position: { x: ROW_QA, y: COL_CENTER },
     data: {
       label: "qa",
       agent: "qa",
@@ -363,7 +370,7 @@ export const DEMO_DAG_NODES: DagNodeRecord[] = [
   },
   {
     id: "reporter_v2",
-    position: { x: COL_V2, y: ROW_REPORTER },
+    position: { x: ROW_REPORTER, y: COL_V2 },
     data: {
       label: "reporter_v2",
       agent: "reporter",
@@ -388,7 +395,7 @@ export const DEMO_DAG_NODES: DagNodeRecord[] = [
   },
   {
     id: "qa_v2",
-    position: { x: COL_V2, y: ROW_QA },
+    position: { x: ROW_QA, y: COL_V2 },
     data: {
       label: "qa_v2",
       agent: "qa",
@@ -410,7 +417,7 @@ export const DEMO_DAG_NODES: DagNodeRecord[] = [
   },
   {
     id: "end",
-    position: { x: COL_CENTER + (COL_V2 - COL_CENTER) / 2, y: ROW_END },
+    position: { x: ROW_END, y: (COL_CENTER + COL_V2) / 2 },
     data: {
       label: "end",
       agent: "control",

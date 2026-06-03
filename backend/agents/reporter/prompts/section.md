@@ -27,4 +27,6 @@ Evidence excerpts (JSON, may be truncated):
 {{ evidences_json }}
 ```
 
+{{ qa_feedback_block }}
+
 Generate the ``ReportSection`` now.

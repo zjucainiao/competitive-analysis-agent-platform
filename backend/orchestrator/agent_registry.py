@@ -60,6 +60,15 @@ class AgentRegistry:
     def known_agents() -> list[str]:
         return list(_AGENT_CLASSES.keys())
 
+    @property
+    def llm(self) -> Any:
+        """暴露底层 LLM provider，供非 Agent 路径用（如 auto-discover 竞品 endpoint）。
+
+        BaseAgent 实例化时会 wrap 成 ``_TrackingLLMWrapper``；这里返回的是 raw provider，
+        没有 token tracking。token 用量由调用方自己上报。
+        """
+        return self._llm
+
     def get(self, agent_name: str) -> BaseAgent:
         if agent_name in self._cache:
             return self._cache[agent_name]

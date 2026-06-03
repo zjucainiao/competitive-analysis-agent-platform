@@ -204,6 +204,13 @@ class Planner:
                     resolved.append(dep)
             spec["depends_on"] = resolved
 
+        # 剪枝：PARALLEL_JOIN / PARALLEL_FORK 节点入边只有 1 个时是冗余 barrier，
+        # 直接把它从 DAG 里抽掉（典型场景：single_research 模式下只有 1 个 product，
+        # extract.{product} 之后的 join_extract 等同于直通）。
+        # 用户在 DAG 视图看到一个名叫「join_extract」的孤儿节点容易误解为「联合抽取」业务步骤，
+        # 实际上它只是 plumbing。
+        _prune_trivial_barriers(expanded)
+
         # 落 DAGNode + DAGEdge
         nodes = [
             self._to_dag_node(spec, project, variables=variables)
@@ -254,9 +261,13 @@ class Planner:
     def _resolve_project_ref(self, ref: str, project: Project) -> Any:
         path = ref[len("project.") :]
         if path == "target_plus_competitors":
+            # single_research 模式下 competitors=[]，整张 DAG 退化为只跑 target 一路
+            # collector/extractor —— 已被 API 层 single_research 分支保证 competitors=[]。
             return [project.target_product, *project.competitors]
         if path == "competitors":
             return list(project.competitors)
+        if path == "target_product":
+            return [project.target_product]
         if path == "analysis_dimensions":
             return [d.value for d in project.analysis_dimensions]
         raise TemplateExpandError(f"unknown project ref: {ref!r}")
@@ -308,6 +319,47 @@ class Planner:
 # 便于 quick smoke test
 def _now() -> datetime:  # pragma: no cover
     return datetime.now(timezone.utc)
+
+
+def _prune_trivial_barriers(expanded: dict[str, dict[str, Any]]) -> None:
+    """剪枝：PARALLEL_JOIN / PARALLEL_FORK 入边 ≤ 1 时直接抽掉（直通）。
+
+    就地修改 ``expanded`` —— 删除冗余节点 + 把下游 depends_on 重写到该节点的上游。
+
+    典型触发：single_research 模式下 ``join_extract`` 入边只有 ``extract.{target}``
+    一个，按设计应等同 ``analyst depends_on [extract.{target}]``。
+
+    保留 ``start`` / ``end`` 不剪 —— 它们是固定锚点，即使度数小也对 DAG 拓扑可读性
+    有意义。
+    """
+    barrier_types = {"parallel_join", "parallel_fork"}
+    # 多轮，让 barrier 链上的所有冗余 join 都被剥掉
+    while True:
+        pruned: list[str] = []
+        for nid, spec in list(expanded.items()):
+            if spec.get("type") not in barrier_types:
+                continue
+            deps = spec.get("depends_on", []) or []
+            if len(deps) > 1:
+                continue
+            # 1 个上游 → 直接 bypass；0 个上游极少见（孤儿 barrier）也一并剪掉
+            upstream = deps[0] if deps else None
+            for other_id, other_spec in expanded.items():
+                other_deps = other_spec.get("depends_on", []) or []
+                if nid not in other_deps:
+                    continue
+                # 替换 nid → upstream（若有），否则直接移除该 dep
+                new_deps: list[str] = []
+                for d in other_deps:
+                    if d != nid:
+                        new_deps.append(d)
+                    elif upstream is not None and upstream not in new_deps:
+                        new_deps.append(upstream)
+                other_spec["depends_on"] = new_deps
+            del expanded[nid]
+            pruned.append(nid)
+        if not pruned:
+            return
 
 
 __all__ = [

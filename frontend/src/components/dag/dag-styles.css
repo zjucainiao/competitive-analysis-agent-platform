@@ -17,23 +17,25 @@
 
 .react-flow__edge-path {
   stroke: var(--border-strong);
-  stroke-width: 1.5;
+  stroke-width: 2;
+  stroke-linecap: round;
 }
 
 .react-flow__edge.feedback .react-flow__edge-path {
   stroke: var(--rework-base);
-  stroke-width: 1.5;
+  stroke-width: 2;
   stroke-dasharray: 6 4;
+  stroke-linecap: round;
 }
 
 .react-flow__edge:hover .react-flow__edge-path {
   stroke: var(--accent-base);
-  stroke-width: 2;
+  stroke-width: 2.5;
 }
 
 .react-flow__edge.feedback:hover .react-flow__edge-path {
   stroke: var(--rework-base);
-  stroke-width: 2;
+  stroke-width: 2.5;
 }
 
 /* ── selected / connectionline ────────────────────────────────────────── */

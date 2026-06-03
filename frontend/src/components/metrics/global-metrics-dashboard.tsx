@@ -14,6 +14,7 @@ import { Sparkline } from "./sparkline";
 import { MOCK_PROJECTS } from "@/lib/projects-mock";
 import { aggregateMetrics } from "@/lib/api/client";
 import type { AggregateMetricsResponse } from "@/lib/api/types";
+import { phaseOf } from "@/lib/agent-phases";
 
 /**
  * /metrics · 全局指标仪表盘
@@ -61,7 +62,7 @@ const GLOBAL_METRICS_7D: GlobalCore[] = [
     rawValue: 0.82,
     delta: "+0.04",
     positive: true,
-    hint: "Schema 字段填充率 × source 覆盖率",
+    hint: "信息完整度：字段填充比例 × 来源覆盖",
     trend: [0.71, 0.73, 0.75, 0.77, 0.79, 0.81, 0.82],
     trendTone: "good",
   },
@@ -160,7 +161,7 @@ const RECENT_ACTIVITY = [
   { at: "2m", text: "协作办公 Demo · qa rework", tone: "rework" },
   { at: "8m", text: "Linear vs Jira · run #02 v2 published", tone: "success" },
   { at: "12m", text: "Shopify 生态 · run #01 started", tone: "running" },
-  { at: "27m", text: "AI Agent 平台对比 · failed at extractor", tone: "error" },
+  { at: "27m", text: "AI Agent 平台对比 · 抽取阶段失败", tone: "error" },
   { at: "1h", text: "CRM Q1 · v3 published", tone: "success" },
   { at: "2h", text: "客户支持平台对比 · archived (3 months)", tone: "neutral" },
 ];
@@ -367,6 +368,15 @@ function GlobalMetricCard({ metric }: { metric: GlobalCore }) {
 
 /* ──────────────────────────────────────────────────────────────────────── */
 
+/** phase tone → 徽章 tailwind class（与 dag-node 内 PHASE_BADGE_TONE 对齐） */
+const PHASE_BADGE_TONE: Record<string, string> = {
+  "viz-1": "bg-viz-1/15 text-viz-1",
+  "viz-2": "bg-viz-2/15 text-viz-2",
+  "viz-3": "bg-viz-3/15 text-viz-3",
+  accent: "bg-accent-bg text-accent-base",
+  muted: "bg-neutral-bg text-text-muted",
+};
+
 function AgentHealthTable() {
   return (
     <section className="rounded-lg border border-border-subtle bg-bg-raised">
@@ -374,11 +384,15 @@ function AgentHealthTable() {
         <div className="text-[10px] font-medium uppercase tracking-wider text-text-muted">
           Per-agent health · cross-projects
         </div>
+        <div className="mt-0.5 text-[11px] text-text-muted">
+          按 4 阶段流水线分组：阶段 1 采集与结构化（collector + extractor）/ 2 分析 / 3 撰写 / 4 质检
+        </div>
       </header>
       <table className="w-full text-xs">
         <thead className="text-[10px] uppercase tracking-wider text-text-muted">
           <tr>
-            <th className="px-5 py-2 text-left font-medium">Agent</th>
+            <th className="px-5 py-2 text-left font-medium">Phase</th>
+            <th className="px-3 py-2 text-left font-medium">Agent</th>
             <th className="px-3 py-2 text-left font-medium">Pass</th>
             <th className="px-3 py-2 text-right font-medium">Nodes</th>
             <th className="px-3 py-2 text-right font-medium">Cost</th>
@@ -386,33 +400,46 @@ function AgentHealthTable() {
           </tr>
         </thead>
         <tbody className="divide-y divide-border-subtle">
-          {AGENT_HEALTH.map((a) => (
-            <tr key={a.agent}>
-              <td className="px-5 py-2.5">
-                <code className="font-mono font-medium text-text-primary">
-                  {a.agent}
-                </code>
-              </td>
-              <td className="px-3 py-2.5 w-[140px]">
-                <PassMini ratio={a.passRate} />
-              </td>
-              <td
-                className="px-3 py-2.5 text-right font-mono text-text-secondary tabular-nums"
-                data-num
-              >
-                {a.nodes}
-              </td>
-              <td
-                className="px-3 py-2.5 text-right font-mono text-text-secondary tabular-nums"
-                data-num
-              >
-                ${a.cost.toFixed(2)}
-              </td>
-              <td className="px-5 py-2.5 text-text-secondary text-[11px]">
-                {a.notes}
-              </td>
-            </tr>
-          ))}
+          {AGENT_HEALTH.map((a) => {
+            const phase = phaseOf(a.agent);
+            return (
+              <tr key={a.agent}>
+                <td className="px-5 py-2.5">
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-pill px-1.5 py-0.5 text-[10px] font-medium",
+                      PHASE_BADGE_TONE[phase.tone]
+                    )}
+                  >
+                    {phase.order}. {phase.label}
+                  </span>
+                </td>
+                <td className="px-3 py-2.5">
+                  <code className="font-mono font-medium text-text-primary">
+                    {a.agent}
+                  </code>
+                </td>
+                <td className="px-3 py-2.5 w-[140px]">
+                  <PassMini ratio={a.passRate} />
+                </td>
+                <td
+                  className="px-3 py-2.5 text-right font-mono text-text-secondary tabular-nums"
+                  data-num
+                >
+                  {a.nodes}
+                </td>
+                <td
+                  className="px-3 py-2.5 text-right font-mono text-text-secondary tabular-nums"
+                  data-num
+                >
+                  ${a.cost.toFixed(2)}
+                </td>
+                <td className="px-5 py-2.5 text-text-secondary text-[11px]">
+                  {a.notes}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </section>
@@ -600,12 +627,7 @@ function CostTrendChart() {
 function FooterNote() {
   return (
     <div className="rounded-md border border-dashed border-border-default bg-bg-sunken/60 px-4 py-3 text-[11px] text-text-muted leading-relaxed">
-      全局指标 endpoint 尚未在后端 v1 暴露——本页展示预置视觉素材 +
-      <code className="font-mono">{" GET /api/projects "}</code>
-      聚合的 active projects 数。后端落 <code className="font-mono">GET /api/metrics/global</code>{" "}
-      后所有数字会从真实 trace / verdict / intervention 事件流自动计算。
-      告警阈值规则、Slack / 邮件 webhook 配置见{" "}
-      <code className="font-mono">docs/METRICS.md § 7</code>。
+      头部 6 个核心指标来自实时聚合；活动日志与告警阈值仍在接入中。
     </div>
   );
 }

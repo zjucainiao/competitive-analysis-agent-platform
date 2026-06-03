@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
 from backend.schemas import (
     AgentOutputBase,
     AnalysisDimension,
+    AnalysisMode,
     CollectConstraints,
     DAGPlan,
     Project,
@@ -25,6 +26,12 @@ class ProjectCreateRequest(BaseModel):
     """POST /api/projects 请求体。
 
     省略系统补全字段：project_id / created_at / status。
+
+    ``analysis_mode`` 三选项：
+    - ``competitive_compare``（默认）：1+ 竞品，标准对比流程
+    - ``single_research``：0 竞品也允许，跳过对比维度
+    - ``auto_discover``：0 竞品也允许，建议先调
+      ``POST /api/discover-competitors`` 把候选竞品填回 ``competitors``
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -33,6 +40,7 @@ class ProjectCreateRequest(BaseModel):
     owner: str
     target_product: str
     competitors: list[str]
+    analysis_mode: AnalysisMode = AnalysisMode.COMPETITIVE_COMPARE
     industry: str = Field(default="collaboration_saas")
     industry_schema_version: str = "1.0.0"
     analysis_dimensions: list[AnalysisDimension] = Field(

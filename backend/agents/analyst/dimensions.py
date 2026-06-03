@@ -296,6 +296,54 @@ def analyze_pricing_comparison(
                 )
             )
 
+    # ----- 单产品分支：0 竞品时上面 3 条 claim 全空，转向产出"自身定价档位画像"-----
+    if not competitors and not claims:
+        target_profile = profiles.get(target_product)
+        if target_profile is not None:
+            ev_target = _filter_pool(_pricing_evidence(target_profile), valid_pool)
+            entry = _entry_paid(target_profile)
+            advanced = _advanced_paid(target_profile)
+            if entry is not None and entry.price_per_seat_monthly_usd is not None and ev_target:
+                claims.append(
+                    AnalysisClaim(
+                        claim_id="cl_price_self_entry",
+                        text=(
+                            f"{target_product} 入门付费档 {entry.name}："
+                            f"${entry.price_per_seat_monthly_usd:g}/seat/月。"
+                        ),
+                        products_involved=[target_product],
+                        evidence_ids=ev_target,
+                        confidence=0.88,
+                    )
+                )
+            if advanced is not None and advanced.price_per_seat_monthly_usd is not None and ev_target:
+                claims.append(
+                    AnalysisClaim(
+                        claim_id="cl_price_self_advanced",
+                        text=(
+                            f"{target_product} 中档计划 {advanced.name}："
+                            f"${advanced.price_per_seat_monthly_usd:g}/seat/月。"
+                        ),
+                        products_involved=[target_product],
+                        evidence_ids=ev_target,
+                        confidence=0.86,
+                    )
+                )
+            # pricing_model 单独点出（订阅 / 用量 / 一次性）
+            if ev_target:
+                claims.append(
+                    AnalysisClaim(
+                        claim_id="cl_price_self_model",
+                        text=(
+                            f"{target_product} 采用 "
+                            f"{target_profile.pricing.pricing_model.value} 定价模式。"
+                        ),
+                        products_involved=[target_product],
+                        evidence_ids=ev_target,
+                        confidence=0.82,
+                    )
+                )
+
     summary = _build_pricing_summary(matrix_entry, matrix_advanced)
     confidence = 0.9 if claims else 0.5
     matrix: dict[str, dict[str, float]] | None = None
@@ -407,11 +455,61 @@ def analyze_feature_comparison(
                     )
                 )
 
+    # ----- 单产品分支：0 竞品时横向对比 claim 全空，列出 target 自身能力速览 -----
+    if not competitors and target is not None and target.industry_extension is not None:
+        target_ev = _filter_pool(_feature_evidence(target), valid_pool)
+        if target_ev:
+            # 按成熟度分组：advanced+ 列为亮点，basic/intermediate 列为常规，none 列为缺口
+            advanced_caps: list[str] = []
+            basic_caps: list[str] = []
+            for field in _MATURITY_FIELDS:
+                ms = getattr(target.industry_extension, field, None)
+                if ms is None or not ms.has_capability:
+                    continue
+                rank = _MATURITY_RANK.get(ms.maturity_level, 0)
+                label = _FIELD_LABEL_ZH.get(field, field)
+                if rank >= 3:
+                    advanced_caps.append(label)
+                else:
+                    basic_caps.append(label)
+            # 已有的 cl_feat_target_strength 涵盖了 highlights，这里补"广度"角度的 claim
+            existing_ids = {c.claim_id for c in claims}
+            if advanced_caps and "cl_feat_self_advanced" not in existing_ids:
+                claims.append(
+                    AnalysisClaim(
+                        claim_id="cl_feat_self_advanced",
+                        text=(
+                            f"{target_product} 在 {', '.join(advanced_caps)} 能力上达到 "
+                            f"advanced 及以上成熟度。"
+                        ),
+                        products_involved=[target_product],
+                        evidence_ids=target_ev,
+                        confidence=0.82,
+                    )
+                )
+            if basic_caps:
+                claims.append(
+                    AnalysisClaim(
+                        claim_id="cl_feat_self_basic",
+                        text=(
+                            f"{target_product} 同时提供 {', '.join(basic_caps)} 等基础能力，"
+                            f"功能覆盖广度较完整。"
+                        ),
+                        products_involved=[target_product],
+                        evidence_ids=target_ev,
+                        confidence=0.78,
+                    )
+                )
+
     summary = (
         f"覆盖 {len(matrix)} 个能力维度的横向对比，"
         f"其中 {len(claims)} 处存在显著强弱差异。"
         if matrix
-        else "输入 profile 缺少 industry_extension 字段，无法做能力对比。"
+        else (
+            f"列出 {target_product} 自身 {len(claims)} 项能力点。"
+            if not competitors and claims
+            else "输入 profile 缺少 industry_extension 字段，无法做能力分析。"
+        )
     )
     confidence = 0.85 if claims else (0.55 if matrix else 0.3)
     return DimensionAnalysis(
@@ -502,6 +600,57 @@ def analyze_swot(
                 )
                 if len([c for c in claims if (c.qualifier or "") == "weakness"]) >= 3:
                     break
+
+    # 2b. 单产品分支：0 竞品时上面拿不出 Weakness claim，转向
+    #     target.competitive.weaknesses + user_feedback.pain_points 作为单产品自评弱项
+    if not competitors:
+        for idx, ins in enumerate(target.competitive.weaknesses, start=1):
+            ev = _filter_pool(ins.evidence_ids, valid_pool)
+            if not ev:
+                ev = _filter_pool(
+                    _feature_evidence(target) + _feedback_theme_evidence(target),
+                    valid_pool,
+                )
+            if ev:
+                claims.append(
+                    AnalysisClaim(
+                        claim_id=f"cl_swot_w_self_{idx}",
+                        text=f"{target_product} 自评弱项：{ins.text}",
+                        products_involved=[target_product],
+                        evidence_ids=ev,
+                        confidence=min(0.85, max(0.6, ins.confidence)),
+                        qualifier="weakness",
+                    )
+                )
+                if len([c for c in claims if (c.qualifier or "") == "weakness"]) >= 3:
+                    break
+        # 用户痛点也是弱项的真实信号
+        if (
+            len([c for c in claims if (c.qualifier or "") == "weakness"]) < 3
+            and target.user_feedback.user_pain_points
+        ):
+            for idx, pain in enumerate(target.user_feedback.user_pain_points, start=1):
+                if pain.severity == "low":
+                    continue
+                ev = _filter_pool(pain.evidence_ids, valid_pool)
+                if not ev:
+                    ev = _filter_pool(_feedback_theme_evidence(target), valid_pool)
+                if ev:
+                    claims.append(
+                        AnalysisClaim(
+                            claim_id=f"cl_swot_w_pain_{idx}",
+                            text=(
+                                f"{target_product} 用户反馈的痛点「{pain.pain}」（severity={pain.severity}）"
+                                f"指向能力上的弱项。"
+                            ),
+                            products_involved=[target_product],
+                            evidence_ids=ev,
+                            confidence=0.74,
+                            qualifier="weakness",
+                        )
+                    )
+                    if len([c for c in claims if (c.qualifier or "") == "weakness"]) >= 3:
+                        break
 
     # 3. Opportunities：竞品共同弱点 → 机会
     if target.industry_extension is not None:
@@ -694,10 +843,59 @@ def analyze_differentiation(
             if len(claims) >= 4:
                 break
 
+    # ----- 单产品分支：0 竞品时上面两段全空，转向"自身核心差异化锚点"-----
+    if not competitors and not claims and target.industry_extension is not None:
+        target_ev = _filter_pool(_feature_evidence(target), valid_pool)
+        if target_ev:
+            anchors: list[str] = []
+            for field in _MATURITY_FIELDS:
+                ms = getattr(target.industry_extension, field, None)
+                if (
+                    ms is None
+                    or not ms.has_capability
+                    or _MATURITY_RANK.get(ms.maturity_level, 0) < 3
+                ):
+                    continue
+                anchors.append(_FIELD_LABEL_ZH.get(field, field))
+            if anchors:
+                claims.append(
+                    AnalysisClaim(
+                        claim_id="cl_diff_self_anchors",
+                        text=(
+                            f"{target_product} 的核心差异化锚点："
+                            f"{', '.join(anchors)} 均达到 advanced 及以上成熟度，"
+                            f"可作为对外定位和宣推的能力支点。"
+                        ),
+                        products_involved=[target_product],
+                        evidence_ids=target_ev,
+                        confidence=0.72,
+                    )
+                )
+        # target.competitive.strengths 里如果有标记为 "differentiator" 的 Insight，
+        # 当作明示差异化（v1 schema 没有专门字段，复用 strengths 文本）
+        for idx, ins in enumerate(target.competitive.strengths, start=1):
+            ev = _filter_pool(ins.evidence_ids, valid_pool)
+            if not ev:
+                ev = _filter_pool(_feature_evidence(target), valid_pool)
+            if ev and len(claims) < 3:
+                claims.append(
+                    AnalysisClaim(
+                        claim_id=f"cl_diff_self_strength_{idx}",
+                        text=f"{target_product} 自身的差异化卖点：{ins.text}",
+                        products_involved=[target_product],
+                        evidence_ids=ev,
+                        confidence=min(0.78, max(0.55, ins.confidence)),
+                    )
+                )
+
     summary = (
         f"识别 {len(claims)} 条 {target_product} 可差异化的方向。"
         if claims
-        else f"对比组内未发现明显的 {target_product} 差异化机会。"
+        else (
+            f"{target_product} 暂未在 profile 中暴露足够的差异化锚点。"
+            if not competitors
+            else f"对比组内未发现明显的 {target_product} 差异化机会。"
+        )
     )
     confidence = 0.75 if claims else 0.5
     return DimensionAnalysis(

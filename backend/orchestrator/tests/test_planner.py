@@ -207,18 +207,28 @@ def test_unknown_template_raises() -> None:
 
 
 def test_empty_competitors_still_works_with_only_target() -> None:
-    """target_plus_competitors 至少含 target，单产品也应正常 plan。"""
+    """target_plus_competitors 至少含 target，单产品也应正常 plan。
+
+    Planner 会把入边 ≤ 1 的 parallel_join 节点剪枝（``join_extract`` 在单产品下
+    没意义），所以 single-product 比 multi-product 少 1 个 join 节点。
+    剪枝后剩 7 个：start + collect + extract + analyst + reporter + qa + end。
+    """
     project = _load_demo_project()
     project = project.model_copy(update={"competitors": []})
     plan = Planner().plan(project)
 
-    # 1 start + 1 collect + 1 extract + 1 join + 4 = 8 节点
-    assert len(plan.nodes) == 8
     ids = {n.node_id for n in plan.nodes}
+    assert len(plan.nodes) == 7
     assert "collect.notion" in ids
     assert "extract.notion" in ids
     # 其他竞品节点不应存在
     assert not any(nid.startswith("collect.clickup") for nid in ids)
+    # join_extract 在单产品下被剪掉
+    assert "join_extract" not in ids
+    # analyst 的 input_refs 应该直接指向 extract.notion，而不是 join_extract
+    analyst = next(n for n in plan.nodes if n.node_id == "analyst")
+    assert "extract.notion" in analyst.input_refs
+    assert "join_extract" not in analyst.input_refs
 
 
 def test_explicit_template_id_override() -> None:

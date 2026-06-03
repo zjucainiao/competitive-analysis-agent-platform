@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { DownloadIcon, CopyIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   MOCK_REPORT,
   type MockReport,
@@ -71,6 +73,16 @@ export function ReportLayout(props: ReportLayoutProps = {}) {
   const [activeSectionId, setActiveSectionId] = useState<string | null>(
     report.sections[0]?.id ?? null
   );
+
+  /* URL ?section=xxx → 只渲染该章节（章节聚焦模式） */
+  const searchParams = useSearchParams();
+  const sectionParam = searchParams.get("section");
+  const sectionFocus = sectionParam
+    ? report.sections.find((s) => s.id === sectionParam)
+    : null;
+  useEffect(() => {
+    if (sectionFocus) setActiveSectionId(sectionFocus.id);
+  }, [sectionFocus]);
 
   /* IO observer for section tracking */
   useEffect(() => {
@@ -186,11 +198,15 @@ export function ReportLayout(props: ReportLayoutProps = {}) {
   }, [report.sections, localEdits]);
 
   let runningIndex = 0;
-  const sectionsWithIndex = sections.map((s) => {
+  const allSectionsWithIndex = sections.map((s) => {
     const start = runningIndex;
     runningIndex += s.paragraphs.length;
     return { s, start };
   });
+  /* 章节聚焦模式：只渲染该章节；否则渲染全部 */
+  const sectionsWithIndex = sectionFocus
+    ? allSectionsWithIndex.filter(({ s }) => s.id === sectionFocus.id)
+    : allSectionsWithIndex;
 
   return (
     <EvidenceLookupProvider apiEvidences={apiEvidences}>
@@ -207,12 +223,21 @@ export function ReportLayout(props: ReportLayoutProps = {}) {
           pendingDiffCount={pendingDiffCount}
           userEditCount={userEditCount}
         />
-        <div className="grid grid-cols-[180px_minmax(0,1fr)_360px] gap-8">
-          <ReportToc
-            sections={report.sections}
-            activeSectionId={activeSectionId}
-            onSectionClick={handleSectionClick}
-          />
+        <div
+          className={cn(
+            "grid gap-8",
+            sectionFocus
+              ? "grid-cols-[minmax(0,1fr)_360px]"
+              : "grid-cols-[180px_minmax(0,1fr)_360px]"
+          )}
+        >
+          {!sectionFocus ? (
+            <ReportToc
+              sections={report.sections}
+              activeSectionId={activeSectionId}
+              onSectionClick={handleSectionClick}
+            />
+          ) : null}
 
           <article className="min-w-0 max-w-[760px] space-y-10 rounded-lg border border-border-subtle bg-bg-raised px-8 py-10">
             {sectionsWithIndex.map(({ s, start }) => (

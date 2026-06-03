@@ -16,15 +16,28 @@ import {
   ServerCogIcon,
   PlugZapIcon,
   Loader2Icon,
+  UserSearchIcon,
+  UsersIcon,
+  ZapIcon,
+  PlusIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { emitIntervention } from "@/lib/workspace-actions";
-import { createProject, startRun, ApiError } from "@/lib/api/client";
+import {
+  createProject,
+  discoverCompetitors,
+  startRun,
+  ApiError,
+} from "@/lib/api/client";
 import { revalidate } from "@/lib/api/hooks";
-import type { AnalysisDimension } from "@/lib/api/types";
+import type {
+  AnalysisDimension,
+  AnalysisMode,
+  DiscoveredCompetitor,
+} from "@/lib/api/types";
 
 /* ── option definitions ──────────────────────────────────────────────── */
 
@@ -106,6 +119,33 @@ const STEPS = [
   { id: 4, label: "Mode & review" },
 ];
 
+const ANALYSIS_MODES: Array<{
+  id: AnalysisMode;
+  label: string;
+  icon: typeof UsersIcon;
+  note: string;
+}> = [
+  {
+    id: "competitive_compare",
+    label: "竞品对比",
+    icon: UsersIcon,
+    note: "1+ 个竞品，跑标准对比维度（推荐）",
+  },
+  {
+    id: "single_research",
+    label: "单产品调研",
+    icon: UserSearchIcon,
+    note: "只分析一个产品，不做对比",
+  },
+  {
+    id: "auto_discover",
+    label: "自动发现竞品",
+    icon: ZapIcon,
+    note: "让 LLM 推荐竞品，你可编辑后再跑",
+  },
+];
+
+
 const SAMPLE_TARGETS = ["Notion", "Linear", "Coda", "Figma"];
 const SAMPLE_COMPETITORS: Record<string, string[]> = {
   Notion: ["ClickUp", "Asana", "Coda"],
@@ -119,6 +159,9 @@ const SAMPLE_COMPETITORS: Record<string, string[]> = {
 export function WizardLayout() {
   const router = useRouter();
   const [step, setStep] = useState(1);
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(
+    "competitive_compare"
+  );
   const [target, setTarget] = useState("");
   const [competitors, setCompetitors] = useState<string[]>([]);
   const [industry, setIndustry] = useState<string | null>("collaboration_saas");
@@ -134,7 +177,21 @@ export function WizardLayout() {
   const [mode, setMode] = useState<string>("real");
   const [submitting, setSubmitting] = useState(false);
 
-  const canStep1Next = target.trim().length > 0 && competitors.length >= 1;
+  // 切换 analysis_mode 时清理 competitors（单产品调研下竞品无意义）。
+  // dimensions 不再因 mode 改动 —— 单产品也能选所有维度（Analyst 内部走单产品分支）。
+  const handleSwitchAnalysisMode = (next: AnalysisMode) => {
+    setAnalysisMode(next);
+    if (next === "single_research") {
+      setCompetitors([]);
+    }
+  };
+
+  // Step 1 校验：随 analysis_mode 切换
+  const canStep1Next = (() => {
+    if (target.trim().length === 0) return false;
+    if (analysisMode === "single_research") return true; // 0 竞品也行
+    return competitors.length >= 1; // compare / auto_discover 都需要 ≥1
+  })();
   const canStep2Next = industry !== null;
   const canStep3Next = dimensions.size >= 1;
   const canSubmit =
@@ -146,14 +203,22 @@ export function WizardLayout() {
   const handleSubmit = async () => {
     if (submitting) return;
     setSubmitting(true);
+    const projectName =
+      analysisMode === "single_research"
+        ? `${target} 单产品调研`
+        : `${target} vs ${competitors.join(" / ")}`;
     const payload = {
-      project_name: `${target} vs ${competitors.join(" / ")}`,
+      project_name: projectName,
       owner: "demo-user",
       target_product: target,
-      competitors,
+      competitors: analysisMode === "single_research" ? [] : competitors,
+      analysis_mode: analysisMode,
       industry: industry!,
       analysis_dimensions: Array.from(dimensions) as AnalysisDimension[],
-      report_template_id: "standard_v1",
+      report_template_id:
+        analysisMode === "single_research"
+          ? "single_research_v1"
+          : "standard_v1",
       mode: "real" as const,
     };
     emitIntervention("create-project", target);
@@ -193,20 +258,28 @@ export function WizardLayout() {
       <div className="rounded-lg border border-border-subtle bg-bg-raised p-6">
         {step === 1 && (
           <Step1Target
+            analysisMode={analysisMode}
+            onChangeAnalysisMode={handleSwitchAnalysisMode}
             target={target}
             setTarget={setTarget}
             competitors={competitors}
             setCompetitors={setCompetitors}
+            industry={industry}
           />
         )}
         {step === 2 && <Step2Industry value={industry} onChange={setIndustry} />}
         {step === 3 && (
-          <Step3Dimensions value={dimensions} onChange={setDimensions} />
+          <Step3Dimensions
+            value={dimensions}
+            onChange={setDimensions}
+            analysisMode={analysisMode}
+          />
         )}
         {step === 4 && (
           <Step4Mode
             mode={mode}
             onChangeMode={setMode}
+            analysisMode={analysisMode}
             target={target}
             competitors={competitors}
             industry={industry}
@@ -337,22 +410,33 @@ function Stepper({
 /* ── Step 1 ─────────────────────────────────────────────────────────── */
 
 function Step1Target({
+  analysisMode,
+  onChangeAnalysisMode,
   target,
   setTarget,
   competitors,
   setCompetitors,
+  industry,
 }: {
+  analysisMode: AnalysisMode;
+  onChangeAnalysisMode: (m: AnalysisMode) => void;
   target: string;
   setTarget: (s: string) => void;
   competitors: string[];
   setCompetitors: (c: string[]) => void;
+  industry: string | null;
 }) {
   const [draft, setDraft] = useState("");
+  const [discovering, setDiscovering] = useState(false);
+  const [discovered, setDiscovered] = useState<DiscoveredCompetitor[]>([]);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
   const inputId = useId();
 
   const handlePickSample = (t: string) => {
     setTarget(t);
-    setCompetitors(SAMPLE_COMPETITORS[t] ?? []);
+    if (analysisMode !== "single_research") {
+      setCompetitors(SAMPLE_COMPETITORS[t] ?? []);
+    }
   };
 
   const addCompetitor = (name: string) => {
@@ -364,8 +448,81 @@ function Step1Target({
     setDraft("");
   };
 
+  const handleDiscover = async () => {
+    if (!target.trim() || discovering) return;
+    setDiscovering(true);
+    setDiscoverError(null);
+    setDiscovered([]);
+    try {
+      const resp = await discoverCompetitors({
+        target_product: target.trim(),
+        industry: industry ?? "collaboration_saas",
+        max_competitors: 5,
+      });
+      if (resp.error) {
+        setDiscoverError(resp.error);
+        toast.warning("LLM 推荐失败", { description: resp.error });
+      } else if (resp.competitors.length === 0) {
+        setDiscoverError("LLM 没有找到该产品的常见竞品，请手动输入");
+      } else {
+        setDiscovered(resp.competitors);
+        toast.success(`LLM 推荐了 ${resp.competitors.length} 个竞品`, {
+          description: "点击 + 添加到列表，可编辑或删除",
+        });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setDiscoverError(msg);
+      toast.error("调用失败", { description: msg });
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* ── 分析模式选择 ── */}
+      <section>
+        <div className="text-sm font-medium text-text-primary">分析模式</div>
+        <p className="mt-0.5 text-[11px] text-text-muted">
+          决定 DAG 形态：是否需要竞品 / Reporter 用对比基调还是调研基调
+        </p>
+        <ul className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+          {ANALYSIS_MODES.map((m) => {
+            const Icon = m.icon;
+            const active = analysisMode === m.id;
+            return (
+              <li key={m.id}>
+                <button
+                  type="button"
+                  onClick={() => onChangeAnalysisMode(m.id)}
+                  className={cn(
+                    "h-full w-full rounded-md border bg-bg-raised p-3 text-left transition-colors duration-120 ease-out-quart",
+                    active
+                      ? "border-accent-border ring-1 ring-accent-base/15 bg-accent-bg/40"
+                      : "border-border-subtle hover:border-border-default"
+                  )}
+                >
+                  <Icon
+                    className={cn(
+                      "h-4 w-4",
+                      active ? "text-accent-base" : "text-text-muted"
+                    )}
+                  />
+                  <div className="mt-2 text-sm font-medium text-text-primary">
+                    {m.label}
+                  </div>
+                  <div className="mt-1 text-[11px] text-text-muted leading-relaxed">
+                    {m.note}
+                  </div>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      {/* ── 目标产品 ── */}
       <section>
         <label htmlFor={inputId} className="block text-sm font-medium text-text-primary">
           目标产品 (Target)
@@ -398,61 +555,151 @@ function Step1Target({
         </div>
       </section>
 
-      <section>
-        <label className="block text-sm font-medium text-text-primary">
-          竞品 (Competitors)
-          <span className="ml-2 text-[11px] font-normal text-text-muted">
-            1 – 6 个 · 已选 {competitors.length}
-          </span>
-        </label>
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {competitors.map((c) => (
-            <span
-              key={c}
-              className="inline-flex items-center gap-1 rounded-pill border border-accent-border bg-accent-bg px-2.5 py-1 text-xs font-medium text-accent-base"
-            >
-              <span>{c}</span>
-              <button
-                type="button"
-                onClick={() =>
-                  setCompetitors(competitors.filter((x) => x !== c))
-                }
-                aria-label={`remove ${c}`}
-              >
-                <XIcon className="h-3 w-3" />
-              </button>
+      {/* ── 竞品输入（按 analysis_mode 条件渲染） ── */}
+      {analysisMode === "single_research" ? (
+        <section className="rounded-md border border-dashed border-border-default bg-bg-sunken/40 p-4">
+          <div className="flex items-center gap-2">
+            <UserSearchIcon className="h-4 w-4 text-accent-base" />
+            <span className="text-sm font-medium text-text-primary">
+              单产品调研模式
             </span>
-          ))}
-          {competitors.length < 6 ? (
-            <div className="inline-flex items-center gap-1.5">
-              <Input
-                type="text"
-                placeholder={
-                  competitors.length === 0 ? "+ 添加竞品名" : "+ another"
-                }
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addCompetitor(draft);
-                  }
-                }}
-                className="h-7 w-[180px] px-2 text-xs"
-              />
-              {draft ? (
+          </div>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-text-muted">
+            不需要竞品。Collector / Extractor 只跑目标产品一路；Analyst 全部 6 个维度
+            都能选 ——「功能 / 定价 / SWOT / 差异化」走「单产品视角」分支（功能能力速览 /
+            定价档位画像 / 自我 SW 评估 / 差异化定位）；Reporter 用调研基调模板，
+            不会出现「X vs Y」对比段落。
+          </p>
+        </section>
+      ) : (
+        <section>
+          <label className="block text-sm font-medium text-text-primary">
+            竞品 (Competitors)
+            <span className="ml-2 text-[11px] font-normal text-text-muted">
+              1 – 6 个 · 已选 {competitors.length}
+            </span>
+          </label>
+
+          {analysisMode === "auto_discover" ? (
+            <div className="mt-2 rounded-md border border-accent-border/60 bg-accent-bg/30 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[11px] text-text-secondary">
+                  让 LLM 根据目标产品 + 行业推荐 3-5 个常见竞品（可编辑 / 删除）
+                </div>
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => addCompetitor(draft)}
+                  onClick={handleDiscover}
+                  disabled={!target.trim() || discovering}
+                  className="shrink-0 gap-1.5"
                 >
-                  Add
+                  {discovering ? (
+                    <Loader2Icon className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <ZapIcon className="h-3 w-3" />
+                  )}
+                  <span>
+                    {discovering
+                      ? "调用中…"
+                      : discovered.length > 0
+                        ? "重新推荐"
+                        : "让 LLM 推荐"}
+                  </span>
                 </Button>
+              </div>
+              {discoverError ? (
+                <div className="mt-2 text-[11px] text-warning-base">
+                  {discoverError}
+                </div>
+              ) : null}
+              {discovered.length > 0 ? (
+                <ul className="mt-3 space-y-1.5">
+                  {discovered.map((d) => {
+                    const alreadyAdded = competitors.includes(d.name);
+                    return (
+                      <li
+                        key={d.name}
+                        className="flex items-start gap-2 rounded-md border border-border-subtle bg-bg-raised px-2.5 py-1.5"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-medium text-text-primary">
+                            {d.name}
+                          </div>
+                          <div className="text-[10px] text-text-muted leading-relaxed">
+                            {d.reason}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={alreadyAdded || competitors.length >= 6}
+                          onClick={() => addCompetitor(d.name)}
+                          className="h-6 shrink-0 gap-1 px-2 text-[11px]"
+                        >
+                          {alreadyAdded ? (
+                            <CheckIcon className="h-3 w-3" />
+                          ) : (
+                            <PlusIcon className="h-3 w-3" />
+                          )}
+                          <span>{alreadyAdded ? "已加" : "加入"}</span>
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
               ) : null}
             </div>
           ) : null}
-        </div>
-      </section>
+
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            {competitors.map((c) => (
+              <span
+                key={c}
+                className="inline-flex items-center gap-1 rounded-pill border border-accent-border bg-accent-bg px-2.5 py-1 text-xs font-medium text-accent-base"
+              >
+                <span>{c}</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCompetitors(competitors.filter((x) => x !== c))
+                  }
+                  aria-label={`remove ${c}`}
+                >
+                  <XIcon className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+            {competitors.length < 6 ? (
+              <div className="inline-flex items-center gap-1.5">
+                <Input
+                  type="text"
+                  placeholder={
+                    competitors.length === 0 ? "+ 添加竞品名" : "+ another"
+                  }
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addCompetitor(draft);
+                    }
+                  }}
+                  className="h-7 w-[180px] px-2 text-xs"
+                />
+                {draft ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => addCompetitor(draft)}
+                  >
+                    Add
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -469,8 +716,7 @@ function Step2Industry({
   return (
     <div className="space-y-4">
       <p className="text-sm text-text-secondary">
-        选择行业 schema 模板。Schema 决定 CompetitorProfile.industry_extension
-        的字段集合 + Analyst 的对比维度。
+        选择目标产品所在的行业，会用对应行业的对比维度和字段集合。
       </p>
       <ul className="grid grid-cols-1 gap-3 md:grid-cols-3">
         {INDUSTRIES.map((ind) => {
@@ -522,10 +768,13 @@ function Step2Industry({
 function Step3Dimensions({
   value,
   onChange,
+  analysisMode,
 }: {
   value: Set<string>;
   onChange: (next: Set<string>) => void;
+  analysisMode: AnalysisMode;
 }) {
+  const isSingle = analysisMode === "single_research";
   const toggle = (id: string) => {
     const next = new Set(value);
     if (next.has(id)) next.delete(id);
@@ -537,8 +786,9 @@ function Step3Dimensions({
     <div className="space-y-4">
       <div>
         <p className="text-sm text-text-secondary">
-          选择 Analyst 要输出的对比维度（6 选 N，至少 1）。每个维度对应一组独立
-          prompt + comparison_matrix。
+          {isSingle
+            ? "单产品调研模式下，所有维度都可选。Analyst 会用「单产品视角」处理：functions 变成功能能力速览、pricing 变成定价档位画像、SWOT 只评 Strengths/Weaknesses、differentiation 描述自我差异化定位 —— 不会写「X vs Y」段落。"
+            : "选择 Analyst 要输出的对比维度（6 选 N，至少 1）。每个维度对应一组独立 prompt + comparison_matrix。"}
         </p>
       </div>
       <ul className="grid grid-cols-1 gap-2 md:grid-cols-2">
@@ -564,7 +814,9 @@ function Step3Dimensions({
                       : "border-border-default bg-bg-raised"
                   )}
                 >
-                  {active ? <CheckIcon className="h-3 w-3 text-text-inverse" /> : null}
+                  {active ? (
+                    <CheckIcon className="h-3 w-3 text-text-inverse" />
+                  ) : null}
                 </span>
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-text-primary">
@@ -590,6 +842,7 @@ function Step3Dimensions({
 function Step4Mode({
   mode,
   onChangeMode,
+  analysisMode,
   target,
   competitors,
   industry,
@@ -597,6 +850,7 @@ function Step4Mode({
 }: {
   mode: string;
   onChangeMode: (m: string) => void;
+  analysisMode: AnalysisMode;
   target: string;
   competitors: string[];
   industry: string | null;
@@ -653,6 +907,9 @@ function Step4Mode({
           Review
         </div>
         <dl className="mt-2 grid grid-cols-[110px_1fr] gap-x-3 gap-y-1.5 text-xs">
+          <ReviewItem k="analysis_mode">
+            <code className="font-mono text-text-accent">{analysisMode}</code>
+          </ReviewItem>
           <ReviewItem k="target">
             <span className="font-medium text-text-accent">
               {target || "—"}
@@ -660,7 +917,11 @@ function Step4Mode({
           </ReviewItem>
           <ReviewItem k="competitors">
             <span className="text-text-primary">
-              {competitors.length > 0 ? competitors.join(" · ") : "—"}
+              {analysisMode === "single_research"
+                ? "—（单产品调研，无竞品）"
+                : competitors.length > 0
+                  ? competitors.join(" · ")
+                  : "—"}
             </span>
           </ReviewItem>
           <ReviewItem k="industry">
@@ -670,6 +931,13 @@ function Step4Mode({
           </ReviewItem>
           <ReviewItem k="dimensions">
             <span className="text-text-secondary">{dimensions.join(", ")}</span>
+          </ReviewItem>
+          <ReviewItem k="report_tpl">
+            <code className="font-mono text-text-secondary">
+              {analysisMode === "single_research"
+                ? "single_research_v1"
+                : "standard_v1"}
+            </code>
           </ReviewItem>
           <ReviewItem k="mode">
             <code className="font-mono text-text-primary">{mode}</code>

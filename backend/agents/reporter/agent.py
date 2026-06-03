@@ -556,6 +556,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                 indent=2,
             ),
             evidences_json=json.dumps(ev_excerpts, ensure_ascii=False, indent=2),
+            qa_feedback_block=_render_qa_feedback_block(inp.qa_feedback),
         )
 
         resp = self.llm.chat(
@@ -1178,6 +1179,23 @@ def _render(template: str, **vars: Any) -> str:
         return "" if value is None else str(value)
 
     return re.sub(r"{{\s*(.+?)\s*}}", repl, template)
+
+
+_REPORTER_CLOSING = (
+    "Apply the fixes above. Only this section's relevant issues (matching "
+    "``location``) need to be addressed here; other sections will be "
+    "regenerated separately. Do NOT re-introduce dropped evidence_ids or "
+    "hallucinated numbers."
+)
+
+
+def _render_qa_feedback_block(qa_feedback: dict | None) -> str:
+    """Reporter 专用 thin wrapper（保留原名让外部测试用同样路径调）。"""
+    from backend.agents._qa_feedback import render_qa_feedback_block
+
+    return render_qa_feedback_block(
+        qa_feedback, closing_instruction=_REPORTER_CLOSING
+    )
 
 
 def _coerce_pydantic(resp: Any, model: type[BaseModel]) -> Any:

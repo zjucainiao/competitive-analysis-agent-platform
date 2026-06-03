@@ -1,5 +1,7 @@
 import type {
   AggregateMetricsResponse,
+  DiscoverCompetitorsRequest,
+  DiscoverCompetitorsResponse,
   EditPromptRequest,
   EvidenceDisputeRequest,
   EvidenceDisputeResponse,
@@ -110,6 +112,16 @@ export function createProject(
   req: ProjectCreateRequest
 ): Promise<Project> {
   return request<Project>("/api/projects", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** 自动发现竞品（auto_discover 模式专用）。失败时返 200 + competitors=[] + error。 */
+export function discoverCompetitors(
+  req: DiscoverCompetitorsRequest
+): Promise<DiscoverCompetitorsResponse> {
+  return request<DiscoverCompetitorsResponse>("/api/discover-competitors", {
     method: "POST",
     body: JSON.stringify(req),
   });

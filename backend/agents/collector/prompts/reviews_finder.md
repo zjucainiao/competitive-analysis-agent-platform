@@ -35,3 +35,5 @@
 产品名：`{{ product_name }}`
 
 请搜索该产品在主流评论平台的用户评价，按 schema 输出 JSON。如果完全找不到（产品太小众或非英文市场），`overall_rating` 与 `review_count` 填 null，`sources` 留空数组。
+
+{{ qa_feedback_block }}

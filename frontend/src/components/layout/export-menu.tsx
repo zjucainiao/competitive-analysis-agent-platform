@@ -50,7 +50,7 @@ const FORMATS: Array<{
   {
     fmt: "json",
     label: "JSON (full state)",
-    desc: "plan + outputs + verdicts + metrics 完整 dump，给数据团队",
+    desc: "完整数据 dump，方便数据团队二次处理",
     icon: FileJsonIcon,
   },
 ];

@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { AlertTriangleIcon, Loader2Icon, PlugZapIcon } from "lucide-react";
 import { toast } from "sonner";
-import { AppShell } from "@/components/layout/app-shell";
-import type { RunContext } from "@/components/layout/context-bar";
+import { SidebarShell } from "@/components/layout/sidebar-shell";
+import { StatusPill, type StatusTone } from "@/components/layout/status-pill";
+import { WorkspaceActions } from "@/components/layout/workspace-actions";
+import { WorkspaceTopTabs } from "@/components/layout/workspace-top-tabs";
+import { RunHistoryBadge } from "@/components/layout/run-history-badge";
 import { DagCanvas } from "@/components/dag";
 import { EditPromptDialog } from "@/components/dag/edit-prompt-dialog";
 import { ExportMenu } from "@/components/layout/export-menu";
@@ -14,21 +17,23 @@ import { TraceLayout } from "@/components/trace";
 import { EvidenceLayout } from "@/components/evidence";
 import { MetricsLayout } from "@/components/metrics";
 import { Button } from "@/components/ui/button";
-import { GlobalNav } from "@/components/layout/global-nav";
 import { useProjectState, revalidate } from "@/lib/api/hooks";
 import { useProjectEvents } from "@/lib/api/ws";
 import { apiStateToDagData, findLatestReporter, aggregateEvidences } from "@/lib/api/adapters";
 import { DEMO_RUN_CONTEXT } from "@/lib/mock-run";
 import { WorkspaceApiProvider } from "@/lib/workspace-api-context";
+import type { RunContext } from "@/components/layout/context-bar";
 import type { TabKey } from "@/components/layout/tabs-row";
-import type { Project, ProjectStateResponse } from "@/lib/api/types";
+import type { Project, ProjectStateResponse, RunRef } from "@/lib/api/types";
+import type { RunStatus } from "@/lib/workspace-actions";
 
 /**
- * Workspace 客户端壳。
+ * Workspace 客户端壳（Phase 2 重构后）。
  *
- *  - useProjectState（SWR）拉 plan + outputs + verdicts
- *  - useProjectEvents（WS）订阅 /events，每条 NodeExecutionResult 触发 revalidate
- *  - 把适配后的数据下发到各 tab
+ *  - SidebarShell 提供左侧栏（5 tab 子菜单 + 当前项目 context）+ 顶部 slim TopBar
+ *  - TopBar 左：项目名 + run 编号 + 状态 pill + 历史下拉
+ *  - TopBar 右：WorkspaceActions（Publish / Rerun / Share / Export 等）
+ *  - 旧 ContextBar + TabsRow 全删
  *  - projectId === "demo" 走 mock（保留 design preview 路径）
  */
 export function ClientWorkspace({
@@ -42,26 +47,83 @@ export function ClientWorkspace({
 }) {
   const isDemoMock = projectId === "demo";
 
-  /* mock 路径直接渲染（与之前一致） */
   if (isDemoMock) {
     return <DemoMockWorkspace tab={tab} />;
   }
+  return <ApiWorkspace projectId={projectId} runId={runId} tab={tab} />;
+}
+
+/* ── tab body switch ─────────────────────────────────────────────────── */
+
+function TabBody({
+  tab,
+  state,
+  projectId,
+}: {
+  tab: TabKey;
+  state: ProjectStateResponse | null;
+  projectId: string | null;
+}) {
+  if (!state) {
+    // demo mock 路径
+    const ctx = DEMO_RUN_CONTEXT;
+    return (
+      <>
+        {tab === "dag" && <DagCanvas />}
+        {tab === "report" && <ReportLayout />}
+        {tab === "trace" && <TraceLayout />}
+        {tab === "evidence" && <EvidenceLayout />}
+        {tab === "metrics" && <MetricsLayout ctx={ctx} />}
+      </>
+    );
+  }
+  const dagData = apiStateToDagData(state);
+  const latestReporter = findLatestReporter(state.outputs);
+  const allEvidences = aggregateEvidences(state.outputs);
+  const ctx = projectToRunContext(state.project);
   return (
-    <ApiWorkspace projectId={projectId} runId={runId} tab={tab} />
+    <>
+      {tab === "dag" && (
+        <DagCanvas
+          nodes={dagData.nodes}
+          edges={dagData.edges}
+          isLiveData={true}
+        />
+      )}
+      {tab === "report" && (
+        <ReportLayout
+          apiReporter={latestReporter}
+          apiEvidences={allEvidences}
+          apiProjectId={projectId ?? undefined}
+          apiVerdicts={state.verdicts}
+        />
+      )}
+      {tab === "trace" && <TraceLayout apiState={state} />}
+      {tab === "evidence" && (
+        <EvidenceLayout apiEvidences={allEvidences} apiOutputs={state.outputs} />
+      )}
+      {tab === "metrics" && (
+        <MetricsLayout ctx={ctx} apiProject={state.project} />
+      )}
+    </>
   );
 }
 
-/* ── demo mock path（保留 /projects/demo/runs/01 不变） ─────────────── */
+/* ── demo mock path ──────────────────────────────────────────────────── */
 
 function DemoMockWorkspace({ tab }: { tab: TabKey }) {
+  const ctx = DEMO_RUN_CONTEXT;
   return (
-    <AppShell ctx={DEMO_RUN_CONTEXT}>
-      {tab === "dag" && <DagCanvas />}
-      {tab === "report" && <ReportLayout />}
-      {tab === "trace" && <TraceLayout />}
-      {tab === "evidence" && <EvidenceLayout />}
-      {tab === "metrics" && <MetricsLayout ctx={DEMO_RUN_CONTEXT} />}
-    </AppShell>
+    <SidebarShell
+      projectName={ctx.projectName}
+      topBarLeft={<WorkspaceCrumb ctx={ctx} />}
+      topBarRight={<WorkspaceActions status={toneToRunStatus(ctx.status.tone)} />}
+      topTabs={<WorkspaceTopTabs />}
+    >
+      <TabBody tab={tab} state={null} projectId={null} />
+      <EditPromptDialog />
+      <ExportMenu />
+    </SidebarShell>
   );
 }
 
@@ -77,7 +139,6 @@ function ApiWorkspace({
 }) {
   const { data: state, error, isLoading, mutate } = useProjectState(projectId);
 
-  /* WS subscribe → on event, revalidate state */
   const { status: wsStatus } = useProjectEvents(projectId, {
     onMessage: (msg) => {
       void revalidate.projectState(projectId);
@@ -88,7 +149,6 @@ function ApiWorkspace({
       } else if (msg.status === "needs_rework") {
         toast.warning(`${msg.node_id} → needs rework`);
       } else if (msg.status === "success") {
-        /* 不刷屏，只在关键节点弹 */
         if (msg.node_id.startsWith("qa")) {
           toast.success(`${msg.node_id} verdict ready`);
         }
@@ -104,7 +164,12 @@ function ApiWorkspace({
   }
 
   return (
-    <ApiWorkspaceShell state={state} tab={tab} wsConnected={wsStatus === "open"} projectId={projectId} />
+    <ApiWorkspaceShell
+      state={state}
+      tab={tab}
+      wsConnected={wsStatus === "open"}
+      projectId={projectId}
+    />
   );
 }
 
@@ -120,9 +185,6 @@ function ApiWorkspaceShell({
   projectId: string;
 }) {
   const ctx = useMemo(() => projectToRunContext(state.project), [state.project]);
-  const dagData = useMemo(() => apiStateToDagData(state), [state]);
-  const latestReporter = useMemo(() => findLatestReporter(state.outputs), [state.outputs]);
-  const allEvidences = useMemo(() => aggregateEvidences(state.outputs), [state.outputs]);
 
   const apiContext = useMemo(
     () => ({
@@ -139,40 +201,54 @@ function ApiWorkspaceShell({
 
   return (
     <WorkspaceApiProvider value={apiContext}>
-    <AppShell ctx={ctx}>
-      {!wsConnected && (
-        <div className="-mx-10 mb-4 border-b border-warning-border bg-warning-bg px-10 py-1.5 text-[11px] text-warning-base">
-          WebSocket 未连接 · 每 30 秒 SWR 轮询兜底
-        </div>
-      )}
-      {tab === "dag" && (
-        <DagCanvas
-          nodes={dagData.nodes}
-          edges={dagData.edges}
-          isLiveData={wsConnected}
-        />
-      )}
-      {tab === "report" && (
-        <ReportLayout
-          apiReporter={latestReporter}
-          apiEvidences={allEvidences}
-          apiProjectId={projectId}
-          apiVerdicts={state.verdicts}
-        />
-      )}
-      {tab === "trace" && (
-        <TraceLayout apiState={state} />
-      )}
-      {tab === "evidence" && (
-        <EvidenceLayout apiEvidences={allEvidences} apiOutputs={state.outputs} />
-      )}
-      {tab === "metrics" && (
-        <MetricsLayout ctx={ctx} apiProject={state.project} />
-      )}
-      <EditPromptDialog />
-      <ExportMenu />
-    </AppShell>
+      <SidebarShell
+        projectName={ctx.projectName}
+        topBarLeft={<WorkspaceCrumb ctx={ctx} />}
+        topBarRight={<WorkspaceActions status={toneToRunStatus(ctx.status.tone)} />}
+        topTabs={<WorkspaceTopTabs />}
+      >
+        {!wsConnected && (
+          <div className="mb-4 flex items-center gap-2 rounded-md border border-warning-border bg-warning-bg px-3 py-1.5 text-[11px] text-warning-base">
+            <AlertTriangleIcon className="h-3 w-3" />
+            <span>WebSocket 未连接 · 每 30 秒 SWR 轮询兜底</span>
+          </div>
+        )}
+        <TabBody tab={tab} state={state} projectId={projectId} />
+        <EditPromptDialog />
+        <ExportMenu />
+      </SidebarShell>
     </WorkspaceApiProvider>
+  );
+}
+
+/* ── top-bar pieces ──────────────────────────────────────────────────── */
+
+function WorkspaceCrumb({ ctx }: { ctx: RunContext }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 text-xs">
+      <Link
+        href="/projects"
+        className="shrink-0 text-text-muted hover:text-text-secondary"
+      >
+        项目
+      </Link>
+      <span className="text-text-muted">/</span>
+      <span className="truncate text-sm font-medium text-text-primary">
+        {ctx.projectName}
+      </span>
+      <span className="text-text-muted">·</span>
+      <span className="shrink-0 font-mono tabular-nums text-text-secondary" data-num>
+        run #{String(ctx.runNumber).padStart(2, "0")}
+      </span>
+      <StatusPill
+        tone={ctx.status.tone}
+        label={ctx.status.label}
+        pulse={ctx.status.pulse}
+      />
+      {ctx.runs && ctx.runs.length > 0 ? (
+        <RunHistoryBadge runs={ctx.runs} activeRunId={ctx.runId} />
+      ) : null}
+    </div>
   );
 }
 
@@ -181,7 +257,7 @@ function ApiWorkspaceShell({
 function projectToRunContext(p: Project): RunContext {
   const statusToneMap: Record<
     string,
-    { tone: RunContext["status"]["tone"]; label: string; pulse?: boolean }
+    { tone: StatusTone; label: string; pulse?: boolean }
   > = {
     running: { tone: "running", label: "running", pulse: true },
     planning: { tone: "running", label: "planning", pulse: true },
@@ -197,8 +273,7 @@ function projectToRunContext(p: Project): RunContext {
       cross_border_ecommerce_saas: "cross_border_ecommerce_saas",
       edu_saas: "edu_saas",
     }[p.industry] ?? p.industry;
-  // 最新 run 的 run_id，没有就 fallback 到 project_id
-  const latestRun = p.runs.length > 0 ? p.runs[p.runs.length - 1] : null;
+  const latestRun: RunRef | null = p.runs.length > 0 ? p.runs[p.runs.length - 1] : null;
   return {
     projectId: p.project_id,
     projectName: p.project_name,
@@ -211,6 +286,22 @@ function projectToRunContext(p: Project): RunContext {
     industry: industryLabel,
     runs: p.runs,
   };
+}
+
+function toneToRunStatus(tone: StatusTone): RunStatus {
+  switch (tone) {
+    case "running":
+    case "warning":
+      return "running";
+    case "rework":
+      return "rework";
+    case "success":
+      return "success";
+    case "error":
+      return "failed";
+    default:
+      return "pending";
+  }
 }
 
 /* ── states ──────────────────────────────────────────────────────────── */
@@ -228,10 +319,15 @@ function ErrorView({
   const is404 = msg.includes("404");
 
   return (
-    <div className="min-h-full bg-background">
-      <GlobalNav />
-      <div className="mx-auto max-w-2xl px-10 py-20">
-        <div className="rounded-lg border border-error-border bg-error-bg p-6">
+    <SidebarShell
+      topBarLeft={
+        <div className="text-xs text-text-muted">
+          <span className="font-medium text-text-secondary">无法加载</span>
+        </div>
+      }
+    >
+      <div className="mx-auto max-w-2xl">
+        <div className="card-soft border-error-border bg-error-bg p-6">
           <div className="flex items-start gap-3">
             <AlertTriangleIcon className="h-5 w-5 mt-1 shrink-0 text-error-base" />
             <div>
@@ -271,20 +367,28 @@ function ErrorView({
           </div>
         </div>
       </div>
-    </div>
+    </SidebarShell>
   );
 }
 
 function LoadingView() {
   return (
-    <div className="min-h-full bg-background">
-      <GlobalNav />
-      <div className="mx-auto max-w-2xl px-10 py-20">
-        <div className="inline-flex items-center gap-2 text-sm text-text-muted">
-          <Loader2Icon className="h-4 w-4 animate-spin" />
-          <span>正在加载 workspace state…</span>
+    <SidebarShell
+      topBarLeft={
+        <div className="inline-flex items-center gap-2 text-xs text-text-muted">
+          <Loader2Icon className="h-3.5 w-3.5 animate-spin" />
+          <span>加载 workspace state…</span>
+        </div>
+      }
+    >
+      <div className="mx-auto max-w-2xl">
+        <div className="card-soft flex items-center gap-3 px-5 py-4">
+          <Loader2Icon className="h-4 w-4 animate-spin text-accent-base" />
+          <span className="text-sm text-text-secondary">
+            正在从后端拉取 plan / outputs / verdicts…
+          </span>
         </div>
       </div>
-    </div>
+    </SidebarShell>
   );
 }

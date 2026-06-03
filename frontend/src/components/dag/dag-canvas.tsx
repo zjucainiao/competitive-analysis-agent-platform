@@ -95,8 +95,17 @@ export function DagCanvas({
     };
   }, [isPlaying, isApiMode]);
 
-  const sourceNodes = nodesProp ?? DEMO_DAG_NODES;
-  const sourceEdges = edgesProp ?? DEMO_DAG_EDGES;
+  const rawSourceNodes = nodesProp ?? DEMO_DAG_NODES;
+  const rawSourceEdges = edgesProp ?? DEMO_DAG_EDGES;
+
+  // Control 节点（start / end / parallel_join / parallel_fork）对用户没有决策意义，
+  // 隐藏掉只留 4 阶段的业务节点 —— 与 README「4 阶段流水线」叙事对齐。
+  // API 模式下 adapter 已经过滤过；mock 模式（DEMO_DAG_NODES 含 start/end）在这里兜底。
+  const { sourceNodes, sourceEdges } = useMemo(
+    () => hideControlNodes(rawSourceNodes, rawSourceEdges),
+    [rawSourceNodes, rawSourceEdges]
+  );
+
   const phase = DAG_PHASES[phaseIdx];
   const isLive = isApiMode ? isLiveData : phaseIdx === FINAL_PHASE_INDEX;
 
@@ -213,9 +222,9 @@ export function DagCanvas({
         >
           <Background
             variant={BackgroundVariant.Dots}
-            gap={20}
-            size={1}
-            color="var(--border-subtle)"
+            gap={24}
+            size={1.2}
+            color="var(--border-default)"
           />
           <Controls showInteractive={false} position="bottom-right" />
           <MiniMap
@@ -229,16 +238,16 @@ export function DagCanvas({
                 case "success":
                   return "oklch(58% 0.16 150)";
                 case "running":
-                  return "oklch(62% 0.16 220)";
+                  return "oklch(60% 0.18 230)";
                 case "rework":
-                  return "oklch(64% 0.18 50)";
+                  return "oklch(64% 0.20 35)";
                 case "error":
                   return "oklch(56% 0.21 25)";
                 default:
-                  return "oklch(54% 0.01 70)";
+                  return "oklch(56% 0.012 280)";
               }
             }}
-            maskColor="oklch(96% 0.006 80 / 0.6)"
+            maskColor="oklch(96% 0.018 285 / 0.6)"
           />
         </ReactFlow>
       </div>
@@ -254,4 +263,64 @@ export function DagCanvas({
       />
     </div>
   );
+}
+
+/* ── 隐藏 control 节点：把 start / end / join / fork 从视图剔掉，
+   边重连透传（让 business 节点之间直连），保证用户视角只看到 4 阶段业务节点。 ── */
+function hideControlNodes(
+  nodes: DagNodeRecord[],
+  edges: DagEdgeRecord[]
+): { sourceNodes: DagNodeRecord[]; sourceEdges: DagEdgeRecord[] } {
+  const controlIds = new Set(
+    nodes.filter((n) => n.data.agent === "control").map((n) => n.id)
+  );
+  if (controlIds.size === 0) {
+    return { sourceNodes: nodes, sourceEdges: edges };
+  }
+
+  const businessNodes = nodes.filter((n) => !controlIds.has(n.id));
+
+  // edges 重连：对每条业务节点出边，若目标是 control，沿边 BFS 找下游可达的业务节点；
+  // 若 source 是 control，跳过（由其他业务上游接管）。
+  const adj = new Map<string, string[]>();
+  for (const e of edges) {
+    if (!adj.has(e.source)) adj.set(e.source, []);
+    adj.get(e.source)!.push(e.target);
+  }
+  const reachable = (from: string): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const stack = [from];
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      if (seen.has(cur)) continue;
+      seen.add(cur);
+      if (!controlIds.has(cur)) {
+        out.push(cur);
+        continue;
+      }
+      for (const next of adj.get(cur) ?? []) stack.push(next);
+    }
+    return out;
+  };
+
+  const seenEdgeKey = new Set<string>();
+  const businessEdges: DagEdgeRecord[] = [];
+  for (const e of edges) {
+    if (controlIds.has(e.source)) continue;
+    const targets = controlIds.has(e.target) ? reachable(e.target) : [e.target];
+    for (const t of targets) {
+      const key = `${e.source}→${t}`;
+      if (seenEdgeKey.has(key)) continue;
+      seenEdgeKey.add(key);
+      businessEdges.push({
+        id: `${e.id}::${t}`,
+        source: e.source,
+        target: t,
+        type: e.type,
+      });
+    }
+  }
+
+  return { sourceNodes: businessNodes, sourceEdges: businessEdges };
 }

@@ -109,6 +109,7 @@ from .dag import (
     NodeType,
 )
 from .project import (
+    AnalysisMode,
     Project,
     ProjectMetrics,
     ProjectMetricsSnapshot,
@@ -203,6 +204,7 @@ __all__ = [
     "NodeStatus",
     "NodeType",
     # project
+    "AnalysisMode",
     "Project",
     "ProjectMetrics",
     "ProjectMetricsSnapshot",
