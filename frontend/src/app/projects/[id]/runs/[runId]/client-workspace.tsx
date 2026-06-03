@@ -1,15 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangleIcon, Loader2Icon, PlugZapIcon } from "lucide-react";
 import { toast } from "sonner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
-import { StatusPill, type StatusTone } from "@/components/layout/status-pill";
-import { WorkspaceActions } from "@/components/layout/workspace-actions";
-import { WorkspaceTopTabs } from "@/components/layout/workspace-top-tabs";
-import { RunHistoryBadge } from "@/components/layout/run-history-badge";
+import { WorkspaceShell } from "@/components/layout/workspace-shell";
+import { WorkspaceDetailsRail } from "@/components/layout/workspace-details-rail";
+import { type StatusTone } from "@/components/layout/status-pill";
 import { DagCanvas } from "@/components/dag";
+import { ExecutionLogCard } from "@/components/dag/execution-log-card";
 import { EditPromptDialog } from "@/components/dag/edit-prompt-dialog";
 import { ExportMenu } from "@/components/layout/export-menu";
 import { ReportLayout } from "@/components/report";
@@ -19,22 +19,37 @@ import { MetricsLayout } from "@/components/metrics";
 import { Button } from "@/components/ui/button";
 import { useProjectState, revalidate } from "@/lib/api/hooks";
 import { useProjectEvents } from "@/lib/api/ws";
-import { apiStateToDagData, findLatestReporter, aggregateEvidences } from "@/lib/api/adapters";
+import {
+  apiStateToDagData,
+  findLatestReporter,
+  aggregateEvidences,
+} from "@/lib/api/adapters";
 import { DEMO_RUN_CONTEXT } from "@/lib/mock-run";
 import { WorkspaceApiProvider } from "@/lib/workspace-api-context";
 import type { RunContext } from "@/components/layout/context-bar";
 import type { TabKey } from "@/components/layout/tabs-row";
-import type { Project, ProjectStateResponse, RunRef } from "@/lib/api/types";
+import type {
+  Project,
+  ProjectStateResponse,
+  RunRef,
+  DAGNode,
+} from "@/lib/api/types";
 import type { RunStatus } from "@/lib/workspace-actions";
+import type { DagNodeData } from "@/lib/dag-mock";
 
 /**
- * Workspace 客户端壳（Phase 2 重构后）。
+ * Workspace 客户端壳 —— 三栏 AgentResearch 风格。
  *
- *  - SidebarShell 提供左侧栏（5 tab 子菜单 + 当前项目 context）+ 顶部 slim TopBar
- *  - TopBar 左：项目名 + run 编号 + 状态 pill + 历史下拉
- *  - TopBar 右：WorkspaceActions（Publish / Rerun / Share / Export 等）
- *  - 旧 ContextBar + TabsRow 全删
- *  - projectId === "demo" 走 mock（保留 design preview 路径）
+ * 布局：
+ *  ┌────┬────────────────────────────────┬────────┐
+ *  │ 80 │ TopBar（项目 + 进度 + 时长）  │ 320    │
+ *  │ ic │ Main（DAG / Report / Trace…）  │ Details│
+ *  └────┴────────────────────────────────┴────────┘
+ *
+ * - 左 80px 窄图标栏（WorkspaceSidebar）
+ * - 顶部专属 WorkspaceTopBar：进度条 + 运行时长 + workspace actions
+ * - 右 320px 常驻 WorkspaceDetailsRail：选中节点 → 5 tab（概览/输入/输出/日志/证据）
+ * - 颜色仍是浅紫 Similarweb 主题，只改结构
  */
 export function ClientWorkspace({
   projectId,
@@ -59,17 +74,27 @@ function TabBody({
   tab,
   state,
   projectId,
+  onSelectNode,
 }: {
   tab: TabKey;
   state: ProjectStateResponse | null;
   projectId: string | null;
+  onSelectNode?: (id: string, data: DagNodeData | null) => void;
 }) {
   if (!state) {
-    // demo mock 路径
     const ctx = DEMO_RUN_CONTEXT;
     return (
       <>
-        {tab === "dag" && <DagCanvas />}
+        {tab === "dag" && (
+          <div className="flex h-[calc(100vh-7rem)] flex-col gap-4">
+            <div className="min-h-0 flex-1">
+              <DagCanvas onSelectNode={onSelectNode} />
+            </div>
+            <div className="shrink-0">
+              <ExecutionLogCard />
+            </div>
+          </div>
+        )}
         {tab === "report" && <ReportLayout />}
         {tab === "trace" && <TraceLayout />}
         {tab === "evidence" && <EvidenceLayout />}
@@ -84,11 +109,19 @@ function TabBody({
   return (
     <>
       {tab === "dag" && (
-        <DagCanvas
-          nodes={dagData.nodes}
-          edges={dagData.edges}
-          isLiveData={true}
-        />
+        <div className="flex h-[calc(100vh-7rem)] flex-col gap-4">
+          <div className="min-h-0 flex-1">
+            <DagCanvas
+              nodes={dagData.nodes}
+              edges={dagData.edges}
+              isLiveData={true}
+              onSelectNode={onSelectNode}
+            />
+          </div>
+          <div className="shrink-0">
+            <ExecutionLogCard state={state} />
+          </div>
+        </div>
       )}
       {tab === "report" && (
         <ReportLayout
@@ -113,17 +146,43 @@ function TabBody({
 
 function DemoMockWorkspace({ tab }: { tab: TabKey }) {
   const ctx = DEMO_RUN_CONTEXT;
+  const [selected, setSelected] = useState<{
+    id: string;
+    data: DagNodeData;
+  } | null>(null);
+
   return (
-    <SidebarShell
+    <WorkspaceShell
       projectName={ctx.projectName}
-      topBarLeft={<WorkspaceCrumb ctx={ctx} />}
-      topBarRight={<WorkspaceActions status={toneToRunStatus(ctx.status.tone)} />}
-      topTabs={<WorkspaceTopTabs />}
+      statusTone={ctx.status.tone}
+      statusLabel={ctx.status.label}
+      statusPulse={ctx.status.pulse}
+      progressDone={8}
+      progressTotal={11}
+      startedAt={"2026-06-02T10:24:12Z"}
+      endedAt={null}
+      runStatus={toneToRunStatus(ctx.status.tone)}
+      runs={[]}
+      activeRunId={ctx.runId}
+      detailsRail={
+        <WorkspaceDetailsRail
+          nodeId={selected?.id ?? null}
+          data={selected?.data ?? null}
+          onClose={() => setSelected(null)}
+        />
+      }
     >
-      <TabBody tab={tab} state={null} projectId={null} />
+      <TabBody
+        tab={tab}
+        state={null}
+        projectId={null}
+        onSelectNode={(id, data) =>
+          data ? setSelected({ id, data }) : setSelected(null)
+        }
+      />
       <EditPromptDialog />
       <ExportMenu />
-    </SidebarShell>
+    </WorkspaceShell>
   );
 }
 
@@ -157,7 +216,9 @@ function ApiWorkspace({
   });
 
   if (error) {
-    return <ErrorView error={error} projectId={projectId} onRetry={() => mutate()} />;
+    return (
+      <ErrorView error={error} projectId={projectId} onRetry={() => mutate()} />
+    );
   }
   if (isLoading || !state) {
     return <LoadingView />;
@@ -185,6 +246,10 @@ function ApiWorkspaceShell({
   projectId: string;
 }) {
   const ctx = useMemo(() => projectToRunContext(state.project), [state.project]);
+  const [selected, setSelected] = useState<{
+    id: string;
+    data: DagNodeData;
+  } | null>(null);
 
   const apiContext = useMemo(
     () => ({
@@ -199,57 +264,75 @@ function ApiWorkspaceShell({
     [projectId]
   );
 
+  // 计算 DAG 整体进度：成功 / 失败 / 跳过算"已结束"，其余算"未结束"
+  const { progressDone, progressTotal } = useMemo(
+    () => computeProgress(state.plan?.nodes ?? []),
+    [state.plan]
+  );
+
+  // 找最后一次 run 算运行时长
+  const latestRun: RunRef | null =
+    state.project.runs.length > 0
+      ? state.project.runs[state.project.runs.length - 1]
+      : null;
+
   return (
     <WorkspaceApiProvider value={apiContext}>
-      <SidebarShell
+      <WorkspaceShell
         projectName={ctx.projectName}
-        topBarLeft={<WorkspaceCrumb ctx={ctx} />}
-        topBarRight={<WorkspaceActions status={toneToRunStatus(ctx.status.tone)} />}
-        topTabs={<WorkspaceTopTabs />}
+        statusTone={ctx.status.tone}
+        statusLabel={ctx.status.label}
+        statusPulse={ctx.status.pulse}
+        progressDone={progressDone}
+        progressTotal={progressTotal}
+        startedAt={latestRun?.started_at ?? null}
+        endedAt={latestRun?.ended_at ?? null}
+        runStatus={toneToRunStatus(ctx.status.tone)}
+        runs={ctx.runs}
+        activeRunId={ctx.runId}
+        detailsRail={
+          <WorkspaceDetailsRail
+            nodeId={selected?.id ?? null}
+            data={selected?.data ?? null}
+            onClose={() => setSelected(null)}
+          />
+        }
       >
         {!wsConnected && (
           <div className="mb-4 flex items-center gap-2 rounded-md border border-warning-border bg-warning-bg px-3 py-1.5 text-[11px] text-warning-base">
             <AlertTriangleIcon className="h-3 w-3" />
-            <span>WebSocket 未连接 · 每 30 秒 SWR 轮询兜底</span>
+            <span>WebSocket 未连接 · 每 30 秒兜底刷新</span>
           </div>
         )}
-        <TabBody tab={tab} state={state} projectId={projectId} />
+        <TabBody
+          tab={tab}
+          state={state}
+          projectId={projectId}
+          onSelectNode={(id, data) =>
+            data ? setSelected({ id, data }) : setSelected(null)
+          }
+        />
         <EditPromptDialog />
         <ExportMenu />
-      </SidebarShell>
+      </WorkspaceShell>
     </WorkspaceApiProvider>
   );
 }
 
-/* ── top-bar pieces ──────────────────────────────────────────────────── */
+/* ── progress helper ─────────────────────────────────────────────────── */
 
-function WorkspaceCrumb({ ctx }: { ctx: RunContext }) {
-  return (
-    <div className="flex min-w-0 items-center gap-2 text-xs">
-      <Link
-        href="/projects"
-        className="shrink-0 text-text-muted hover:text-text-secondary"
-      >
-        项目
-      </Link>
-      <span className="text-text-muted">/</span>
-      <span className="truncate text-sm font-medium text-text-primary">
-        {ctx.projectName}
-      </span>
-      <span className="text-text-muted">·</span>
-      <span className="shrink-0 font-mono tabular-nums text-text-secondary" data-num>
-        run #{String(ctx.runNumber).padStart(2, "0")}
-      </span>
-      <StatusPill
-        tone={ctx.status.tone}
-        label={ctx.status.label}
-        pulse={ctx.status.pulse}
-      />
-      {ctx.runs && ctx.runs.length > 0 ? (
-        <RunHistoryBadge runs={ctx.runs} activeRunId={ctx.runId} />
-      ) : null}
-    </div>
-  );
+function computeProgress(nodes: DAGNode[]): {
+  progressDone: number;
+  progressTotal: number;
+} {
+  if (nodes.length === 0) return { progressDone: 0, progressTotal: 0 };
+  const done = nodes.filter(
+    (n) =>
+      n.status === "success" ||
+      n.status === "failed" ||
+      n.status === "skipped"
+  ).length;
+  return { progressDone: done, progressTotal: nodes.length };
 }
 
 /* ── adapters ────────────────────────────────────────────────────────── */
@@ -273,7 +356,8 @@ function projectToRunContext(p: Project): RunContext {
       cross_border_ecommerce_saas: "cross_border_ecommerce_saas",
       edu_saas: "edu_saas",
     }[p.industry] ?? p.industry;
-  const latestRun: RunRef | null = p.runs.length > 0 ? p.runs[p.runs.length - 1] : null;
+  const latestRun: RunRef | null =
+    p.runs.length > 0 ? p.runs[p.runs.length - 1] : null;
   return {
     projectId: p.project_id,
     projectName: p.project_name,
@@ -385,7 +469,7 @@ function LoadingView() {
         <div className="card-soft flex items-center gap-3 px-5 py-4">
           <Loader2Icon className="h-4 w-4 animate-spin text-accent-base" />
           <span className="text-sm text-text-secondary">
-            正在从后端拉取 plan / outputs / verdicts…
+            正在从后端拉取项目状态…
           </span>
         </div>
       </div>

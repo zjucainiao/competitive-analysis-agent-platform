@@ -1,17 +1,14 @@
 import type { StatusTone } from "@/components/layout/status-pill";
 
 /**
- * DAG demo snapshot for Sprint 1.
+ * DAG demo —— 7 agent · 3×3+1 矩形排版（对齐 AgentResearch 参考图）。
  *
- * 故事线：「Notion vs ClickUp vs Asana」run #03 正卡在 QA 反馈闭环上：
- *   - 第一轮 reporter 产出后 QA 检出 2 个 evidence 缺失 issue
- *   - QA 路由回 reporter，新建 reporter_v2 节点
- *   - reporter_v2 正在 running（带 pulse）
- *   - qa_v2 + end 还是 pending
+ * 故事线：
+ *   - 任务规划 已完成 → 信息采集 正在跑 (75%) → 证据入库 已完成
+ *   - 结构化分析 正在跑 (60%)，下游 reporter / qa / end 等待中
+ *   - 返工 dashed 边从 qa 回指 collector（视觉占位，第一轮 QA 尚未触发）
  *
- * 这是评分项「反馈闭环真实可触发」的视觉证据，必须放在第一眼能看到的位置。
- *
- * Sprint 2 接 Orchestrator 的 WebSocket 流，本文件改成 fixture-only fallback。
+ * Sprint 2 接 Orchestrator 后本文件退役为 fixture-only。
  */
 
 export type DagNodeStatus = StatusTone;
@@ -35,7 +32,6 @@ export interface DagNodeData {
   outputs: Array<{ key: string; value: string }>;
   revision: number;
   parentNodeId: string | null;
-  /** 节点在故事线里的角色，用于详情抽屉的副标题 */
   storyHint?: string;
 }
 
@@ -52,30 +48,31 @@ export interface DagEdgeRecord {
   type: "dependency" | "feedback";
 }
 
-/* ── layout coordinates · 横向流水线（左 → 右） ───────────────────────────
+/* ── 3×3 + 1 网格坐标 ──────────────────────────────────────────────────
  *
- * 命名沿用 COL_* / ROW_* 但语义已重置：
- *  - COL_* = 3 个并行分支（Notion / ClickUp / Asana）的 **Y 坐标**，从上到下排
- *  - ROW_* = 流水线各阶段的 **X 坐标**，从左到右排（start → collect → extract …）
+ *   col0      col1      col2
+ *  ┌──────┬─────────┬─────────┐
+ *  │ 规划 │ 采集    │ 入库    │  row 0
+ *  ├──────┼─────────┼─────────┤
+ *  │ 分析 │ 报告    │ 质检    │  row 1
+ *  ├──────┼─────────┼─────────┤
+ *  │      │ 输出报告 │         │  row 2（中列单节点）
+ *  └──────┴─────────┴─────────┘
  *
- * 节点的 position 写成 `{ x: ROW_STAGE, y: COL_BRANCH }`。
+ * 节点 280×~180，间距 60 横 / 60 纵。
  */
+const NODE_W = 280;
+const NODE_H = 190;
+const GAP_X = 60;
+const GAP_Y = 60;
 
-const COL_NOTION = 0;     // 上分支
-const COL_CLICKUP = 180;  // 中分支
-const COL_ASANA = 360;    // 下分支
-const COL_CENTER = 180;   // 主干（在中分支高度）
-const COL_V2 = 480;       // reporter_v2 / qa_v2 feedback 分支：放在 3 个 collector 行下方
+const COL0 = 0;
+const COL1 = NODE_W + GAP_X;
+const COL2 = (NODE_W + GAP_X) * 2;
 
-const ROW_START = 0;
-const ROW_COLLECT = 260;
-const ROW_EXTRACT = 520;
-const ROW_ANALYST = 780;
-const ROW_REPORTER = 1040;
-const ROW_QA = 1300;
-const ROW_END = 1560;
-
-/* ── helpers ───────────────────────────────────────────────────────────── */
+const ROW0 = 0;
+const ROW1 = NODE_H + GAP_Y;
+const ROW2 = (NODE_H + GAP_Y) * 2;
 
 const k = (n: number) => Math.round(n);
 
@@ -91,336 +88,155 @@ function llm(
 /* ── nodes ─────────────────────────────────────────────────────────────── */
 
 export const DEMO_DAG_NODES: DagNodeRecord[] = [
+  // Row 0
   {
-    id: "start",
-    position: { x: ROW_START, y: COL_CENTER },
+    id: "planner",
+    position: { x: COL0, y: ROW0 },
     data: {
-      label: "start",
-      agent: "control",
+      label: "任务规划",
+      agent: "planner",
       status: "success",
-      durationMs: 12,
-      tokens: null,
-      costUsd: 0,
-      confidence: 1,
+      durationMs: 83_000,
+      tokens: { input: k(1840), output: k(620) },
+      costUsd: 0.01,
+      confidence: 1.0,
       selfCritique: null,
-      llmCalls: [],
-      inputs: [{ key: "project_id", value: "demo" }],
-      outputs: [{ key: "next", value: "collect ×3" }],
+      llmCalls: [llm("doubao-pro", 4200, 1840, 620)],
+      inputs: [
+        { key: "input", value: "用户需求、竞品列表" },
+      ],
+      outputs: [
+        { key: "next", value: "计划 18 个子任务" },
+      ],
       revision: 1,
       parentNodeId: null,
-      storyHint: "DAG 入口控制节点",
     },
   },
   {
-    id: "collect.notion",
-    position: { x: ROW_COLLECT, y: COL_NOTION },
+    id: "collector",
+    position: { x: COL1, y: ROW0 },
     data: {
-      label: "collect:notion",
+      label: "信息采集",
       agent: "collector",
+      status: "running",
+      durationMs: 452_000,
+      tokens: { input: k(8240), output: k(2180) },
+      costUsd: 0.04,
+      confidence: 0,
+      selfCritique: null,
+      llmCalls: [llm("doubao-pro", 12_800, 8240, 2180)],
+      inputs: [
+        { key: "input", value: "爬取任务、网站列表" },
+      ],
+      outputs: [
+        { key: "raw_sources", value: "12 篇文档 / 236 条证据" },
+      ],
+      revision: 1,
+      parentNodeId: null,
+      storyHint: "Notion / ClickUp / Asana 三家产品页 / 文档 / 评论站正在并发抓取",
+    },
+  },
+  {
+    id: "extractor",
+    position: { x: COL2, y: ROW0 },
+    data: {
+      label: "证据入库",
+      agent: "extractor",
       status: "success",
-      durationMs: 4200,
-      tokens: { input: k(1234), output: 421 },
-      costUsd: 0.018,
+      durationMs: 138_000,
+      tokens: { input: k(6420), output: k(3120) },
+      costUsd: 0.05,
       confidence: 0.92,
-      selfCritique: "4 dimensions covered with high-authority sources",
-      llmCalls: [llm("claude-sonnet-4-6", 1432, 1234, 421)],
+      selfCritique: null,
+      llmCalls: [llm("doubao-pro", 18_400, 6420, 3120)],
       inputs: [
-        { key: "product", value: "Notion" },
-        { key: "dimensions", value: "homepage / pricing / docs / reviews" },
+        { key: "input", value: "原始数据、元数据" },
       ],
       outputs: [
-        { key: "raw_sources", value: "8 docs" },
-        { key: "evidences", value: "12 minted" },
+        { key: "evidences", value: "236 条证据已入库" },
       ],
       revision: 1,
       parentNodeId: null,
     },
   },
-  {
-    id: "collect.clickup",
-    position: { x: ROW_COLLECT, y: COL_CLICKUP },
-    data: {
-      label: "collect:clickup",
-      agent: "collector",
-      status: "success",
-      durationMs: 3800,
-      tokens: { input: k(1102), output: 380 },
-      costUsd: 0.016,
-      confidence: 0.94,
-      selfCritique: "4 dimensions covered",
-      llmCalls: [llm("claude-sonnet-4-6", 1380, 1102, 380)],
-      inputs: [
-        { key: "product", value: "ClickUp" },
-        { key: "dimensions", value: "homepage / pricing / docs / reviews" },
-      ],
-      outputs: [
-        { key: "raw_sources", value: "7 docs" },
-        { key: "evidences", value: "11 minted" },
-      ],
-      revision: 1,
-      parentNodeId: null,
-    },
-  },
-  {
-    id: "collect.asana",
-    position: { x: ROW_COLLECT, y: COL_ASANA },
-    data: {
-      label: "collect:asana",
-      agent: "collector",
-      status: "success",
-      durationMs: 5100,
-      tokens: { input: k(1310), output: 460 },
-      costUsd: 0.019,
-      confidence: 0.9,
-      selfCritique:
-        "user_reviews dim 仅采集到 2 条高权威源，confidence 略低",
-      llmCalls: [llm("claude-sonnet-4-6", 1610, 1310, 460)],
-      inputs: [
-        { key: "product", value: "Asana" },
-        { key: "dimensions", value: "homepage / pricing / docs / reviews" },
-      ],
-      outputs: [
-        { key: "raw_sources", value: "9 docs" },
-        { key: "evidences", value: "13 minted" },
-      ],
-      revision: 1,
-      parentNodeId: null,
-    },
-  },
-  {
-    id: "extract.notion",
-    position: { x: ROW_EXTRACT, y: COL_NOTION },
-    data: {
-      label: "extract:notion",
-      agent: "extractor",
-      status: "success",
-      durationMs: 12400,
-      tokens: { input: k(4842), output: 916 },
-      costUsd: 0.061,
-      confidence: 0.87,
-      selfCritique:
-        "全部必填字段已填充；user_feedback.review_count 来自二手数据，标 unverified",
-      llmCalls: [
-        llm("claude-sonnet-4-6", 4231, 1820, 432),
-        llm("claude-sonnet-4-6", 4012, 1640, 280),
-        llm("claude-sonnet-4-6", 4157, 1382, 204),
-      ],
-      inputs: [
-        { key: "raw_sources", value: "8 docs (collect:notion)" },
-        { key: "industry_schema", value: "collaboration_saas_v1" },
-      ],
-      outputs: [
-        { key: "profile", value: "CompetitorProfile(Notion)" },
-        { key: "evidences", value: "12 linked" },
-        { key: "field_status", value: "10 verified · 2 unverified" },
-      ],
-      revision: 1,
-      parentNodeId: null,
-    },
-  },
-  {
-    id: "extract.clickup",
-    position: { x: ROW_EXTRACT, y: COL_CLICKUP },
-    data: {
-      label: "extract:clickup",
-      agent: "extractor",
-      status: "success",
-      durationMs: 11900,
-      tokens: { input: k(4612), output: 882 },
-      costUsd: 0.058,
-      confidence: 0.89,
-      selfCritique: "所有字段 verified",
-      llmCalls: [
-        llm("claude-sonnet-4-6", 4012, 1742, 392),
-        llm("claude-sonnet-4-6", 3920, 1580, 290),
-        llm("claude-sonnet-4-6", 3968, 1290, 200),
-      ],
-      inputs: [{ key: "raw_sources", value: "7 docs" }],
-      outputs: [
-        { key: "profile", value: "CompetitorProfile(ClickUp)" },
-        { key: "evidences", value: "11 linked" },
-      ],
-      revision: 1,
-      parentNodeId: null,
-    },
-  },
-  {
-    id: "extract.asana",
-    position: { x: ROW_EXTRACT, y: COL_ASANA },
-    data: {
-      label: "extract:asana",
-      agent: "extractor",
-      status: "success",
-      durationMs: 13200,
-      tokens: { input: k(5104), output: 970 },
-      costUsd: 0.064,
-      confidence: 0.85,
-      selfCritique:
-        "industry_extension.team_permission 字段在 raw_text 中未找到，填 null",
-      llmCalls: [
-        llm("claude-sonnet-4-6", 4421, 1920, 412),
-        llm("claude-sonnet-4-6", 4302, 1730, 320),
-        llm("claude-sonnet-4-6", 4477, 1454, 238),
-      ],
-      inputs: [{ key: "raw_sources", value: "9 docs" }],
-      outputs: [
-        { key: "profile", value: "CompetitorProfile(Asana)" },
-        { key: "evidences", value: "13 linked" },
-        { key: "field_status", value: "9 verified · 4 unknown" },
-      ],
-      revision: 1,
-      parentNodeId: null,
-    },
-  },
+  // Row 1
   {
     id: "analyst",
-    position: { x: ROW_ANALYST, y: COL_CENTER },
+    position: { x: COL0, y: ROW1 },
     data: {
-      label: "analyst",
+      label: "结构化分析",
       agent: "analyst",
-      status: "success",
-      durationMs: 16800,
-      tokens: { input: k(6512), output: 1820 },
-      costUsd: 0.124,
+      status: "running",
+      durationMs: 341_000,
+      tokens: { input: k(5240), output: k(1480) },
+      costUsd: 0.03,
       confidence: 0.86,
-      selfCritique:
-        "覆盖 3 维度；feature 维度有 1 条 counter_evidence 体现严谨",
-      llmCalls: [
-        llm("claude-sonnet-4-6", 5612, 2104, 612),
-        llm("claude-sonnet-4-6", 5410, 2208, 604),
-        llm("claude-sonnet-4-6", 5778, 2200, 604),
-      ],
+      selfCritique: null,
+      llmCalls: [llm("doubao-pro", 22_400, 5240, 1480)],
       inputs: [
-        { key: "profiles", value: "Notion / ClickUp / Asana" },
-        { key: "dimensions", value: "feature / pricing / swot" },
+        { key: "input", value: "证据数据" },
       ],
       outputs: [
-        { key: "result", value: "AnalysisResult · 7 claims" },
-        { key: "evidence pool", value: "36 ids referenced" },
+        { key: "claims", value: "48 个结构化结论" },
       ],
       revision: 1,
       parentNodeId: null,
+      storyHint: "维度对比矩阵正在生成；每条结论都绑定 evidence_id",
     },
   },
   {
     id: "reporter",
-    position: { x: ROW_REPORTER, y: COL_CENTER },
+    position: { x: COL1, y: ROW1 },
     data: {
-      label: "reporter",
+      label: "报告撰写",
       agent: "reporter",
-      status: "success",
-      durationMs: 18600,
-      tokens: { input: k(8412), output: 2104 },
-      costUsd: 0.184,
-      confidence: 0.84,
-      selfCritique:
-        "所有量化段落与 evidence 字面一致；overview 段为软结论",
-      llmCalls: [
-        llm("claude-sonnet-4-6", 4220, 2304, 612),
-        llm("claude-sonnet-4-6", 4530, 2104, 580),
-        llm("claude-sonnet-4-6", 4612, 2210, 510),
-        llm("claude-sonnet-4-6", 5238, 1794, 402),
-      ],
+      status: "neutral",
+      durationMs: null,
+      tokens: null,
+      costUsd: null,
+      confidence: 0,
+      selfCritique: null,
+      llmCalls: [],
       inputs: [
-        { key: "analysis", value: "AnalysisResult · 7 claims" },
-        { key: "template_id", value: "standard_v1" },
+        { key: "input", value: "结构化结论、大纲" },
       ],
       outputs: [
-        { key: "draft", value: "ReportDraft v1 · 4 sections" },
+        { key: "draft", value: "完整分析报告（草稿）" },
       ],
       revision: 1,
       parentNodeId: null,
-      storyHint: "第一版报告 · QA 检出 2 个 evidence 缺失",
     },
   },
   {
     id: "qa",
-    position: { x: ROW_QA, y: COL_CENTER },
+    position: { x: COL2, y: ROW1 },
     data: {
-      label: "qa",
+      label: "质量审查",
       agent: "qa",
-      status: "rework",
-      durationMs: 8200,
-      tokens: { input: k(7812), output: 612 },
-      costUsd: 0.096,
-      confidence: 0.93,
-      selfCritique:
-        "发现 2 处段落 evidence 缺失，已路由回 Reporter（must_address: p_sw_01, p_pr_02）",
-      llmCalls: [
-        llm("claude-sonnet-4-6", 1620, 1320, 102),
-        llm("claude-sonnet-4-6", 1432, 1280, 92),
-        llm("claude-sonnet-4-6", 1502, 1340, 110),
-        llm("claude-sonnet-4-6", 1418, 1260, 96),
-        llm("claude-sonnet-4-6", 1228, 1304, 102),
-        llm("claude-sonnet-4-6", 1000, 1308, 110),
-      ],
+      status: "neutral",
+      durationMs: null,
+      tokens: null,
+      costUsd: null,
+      confidence: 0,
+      selfCritique: null,
+      llmCalls: [],
       inputs: [
-        { key: "draft", value: "ReportDraft v1" },
-        { key: "prior_verdicts", value: "0" },
+        { key: "input", value: "报告草稿、证据链" },
       ],
       outputs: [
-        { key: "verdict", value: "needs_revision · 2 issues" },
-        { key: "routing", value: "→ reporter (must_address × 2)" },
-        { key: "blocking", value: "true" },
+        { key: "verdict", value: "质检结果、修改建议" },
       ],
       revision: 1,
       parentNodeId: null,
-      storyHint: "质检失败 · 触发反馈闭环",
     },
   },
-  {
-    id: "reporter_v2",
-    position: { x: ROW_REPORTER, y: COL_V2 },
-    data: {
-      label: "reporter_v2",
-      agent: "reporter",
-      status: "running",
-      durationMs: null,
-      tokens: { input: k(3210), output: 442 },
-      costUsd: 0.04,
-      confidence: 0,
-      selfCritique: null,
-      llmCalls: [llm("claude-sonnet-4-6", 4220, 3210, 442)],
-      inputs: [
-        { key: "analysis", value: "AnalysisResult · 7 claims" },
-        { key: "qa_feedback", value: "2 issues · must_address × 2" },
-        { key: "template_id", value: "standard_v1" },
-        { key: "parent", value: "reporter (v1)" },
-      ],
-      outputs: [{ key: "draft", value: "ReportDraft v2 (generating…)" }],
-      revision: 2,
-      parentNodeId: "reporter",
-      storyHint: "Orchestrator 根据 QA routing 重建的版本，正按 must_address 重写",
-    },
-  },
-  {
-    id: "qa_v2",
-    position: { x: ROW_QA, y: COL_V2 },
-    data: {
-      label: "qa_v2",
-      agent: "qa",
-      status: "neutral",
-      durationMs: null,
-      tokens: null,
-      costUsd: null,
-      confidence: 0,
-      selfCritique: null,
-      llmCalls: [],
-      inputs: [
-        { key: "draft", value: "ReportDraft v2 (waiting)" },
-        { key: "prior_verdicts", value: "1" },
-      ],
-      outputs: [],
-      revision: 2,
-      parentNodeId: "qa",
-    },
-  },
+  // Row 2（中列单节点）
   {
     id: "end",
-    position: { x: ROW_END, y: (COL_CENTER + COL_V2) / 2 },
+    position: { x: COL1, y: ROW2 },
     data: {
-      label: "end",
-      agent: "control",
+      label: "输出报告",
+      agent: "end",
       status: "neutral",
       durationMs: null,
       tokens: null,
@@ -428,8 +244,12 @@ export const DEMO_DAG_NODES: DagNodeRecord[] = [
       confidence: 0,
       selfCritique: null,
       llmCalls: [],
-      inputs: [{ key: "verdict", value: "(待 qa_v2 通过)" }],
-      outputs: [],
+      inputs: [
+        { key: "input", value: "最终报告、证据链" },
+      ],
+      outputs: [
+        { key: "output", value: "竞品分析报告（最终版）" },
+      ],
       revision: 1,
       parentNodeId: null,
     },
@@ -439,21 +259,18 @@ export const DEMO_DAG_NODES: DagNodeRecord[] = [
 /* ── edges ─────────────────────────────────────────────────────────────── */
 
 export const DEMO_DAG_EDGES: DagEdgeRecord[] = [
-  { id: "e1", source: "start", target: "collect.notion", type: "dependency" },
-  { id: "e2", source: "start", target: "collect.clickup", type: "dependency" },
-  { id: "e3", source: "start", target: "collect.asana", type: "dependency" },
-  { id: "e4", source: "collect.notion", target: "extract.notion", type: "dependency" },
-  { id: "e5", source: "collect.clickup", target: "extract.clickup", type: "dependency" },
-  { id: "e6", source: "collect.asana", target: "extract.asana", type: "dependency" },
-  { id: "e7", source: "extract.notion", target: "analyst", type: "dependency" },
-  { id: "e8", source: "extract.clickup", target: "analyst", type: "dependency" },
-  { id: "e9", source: "extract.asana", target: "analyst", type: "dependency" },
-  { id: "e10", source: "analyst", target: "reporter", type: "dependency" },
-  { id: "e11", source: "reporter", target: "qa", type: "dependency" },
-  /* feedback edge — 这是评分项「反馈闭环真实可触发」的视觉证据 */
-  { id: "e12", source: "qa", target: "reporter_v2", type: "feedback" },
-  { id: "e13", source: "reporter_v2", target: "qa_v2", type: "dependency" },
-  { id: "e14", source: "qa_v2", target: "end", type: "dependency" },
+  // Row 0 横向
+  { id: "e1", source: "planner", target: "collector", type: "dependency" },
+  { id: "e2", source: "collector", target: "extractor", type: "dependency" },
+  // Row 0 → Row 1（跨行下移）
+  { id: "e3", source: "extractor", target: "analyst", type: "dependency" },
+  // Row 1 横向
+  { id: "e4", source: "analyst", target: "reporter", type: "dependency" },
+  { id: "e5", source: "reporter", target: "qa", type: "dependency" },
+  // Row 1 → Row 2（跨行下移）
+  { id: "e6", source: "qa", target: "end", type: "dependency" },
+  // 返工：质量审查 → 信息采集（dashed feedback）
+  { id: "e7", source: "qa", target: "collector", type: "feedback" },
 ];
 
 /* ── summary stats (toolbar header) ────────────────────────────────────── */
@@ -492,7 +309,7 @@ export function summarizeDag(nodes: DagNodeRecord[]): DagRunSummary {
     }
     if (n.data.costUsd) totalCostUsd += n.data.costUsd;
     if (n.data.durationMs) elapsedMs += n.data.durationMs;
-    if (n.data.label.startsWith("qa")) qaRoundCount += 1;
+    if (n.data.label.startsWith("qa") || n.data.agent === "qa") qaRoundCount += 1;
   }
 
   return {

@@ -35,6 +35,12 @@ interface DagCanvasProps {
   edges?: DagEdgeRecord[];
   /** 是否处于 live 模式（WS 推流中），决定工具条文案 */
   isLiveData?: boolean;
+  /**
+   * 节点选中回调。
+   *  - 传入：workspace 接管选中状态（搭配右侧 DetailsRail），不再弹内嵌 Sheet
+   *  - 不传：保持原行为（点节点弹 NodeDetailSheet 抽屉）
+   */
+  onSelectNode?: (id: string, data: DagNodeData | null) => void;
 }
 
 /**
@@ -49,9 +55,11 @@ export function DagCanvas({
   nodes: nodesProp,
   edges: edgesProp,
   isLiveData = false,
+  onSelectNode,
 }: DagCanvasProps = {}) {
   const searchParams = useSearchParams();
   const requestedNode = searchParams.get("node");
+  const railMode = !!onSelectNode;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -153,11 +161,6 @@ export function DagCanvas({
     return summarizeDag(phasedNodes);
   }, [sourceNodes, phase, isApiMode]);
 
-  const handleNodeClick: NodeMouseHandler = (_, node) => {
-    setSelectedId(node.id);
-    setSheetOpen(true);
-  };
-
   const selectedData: DagNodeData | null = useMemo(() => {
     if (!selectedId) return null;
     const base = sourceNodes.find((n) => n.id === selectedId)?.data ?? null;
@@ -166,8 +169,22 @@ export function DagCanvas({
     return { ...base, status: phase.status[selectedId] ?? base.status };
   }, [selectedId, phase, sourceNodes, isApiMode]);
 
+  const handleNodeClick: NodeMouseHandler = (_, node) => {
+    setSelectedId(node.id);
+    if (railMode) {
+      // rail 模式：通知 workspace 接管，不弹 Sheet
+      const base = sourceNodes.find((n) => n.id === node.id)?.data ?? null;
+      const data = base && !isApiMode
+        ? { ...base, status: phase.status[node.id] ?? base.status }
+        : base;
+      onSelectNode?.(node.id, data);
+    } else {
+      setSheetOpen(true);
+    }
+  };
+
   return (
-    <div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-raised">
+    <div className="flex h-full flex-col overflow-hidden rounded-lg border border-border-subtle bg-bg-raised">
       <DagToolbar
         summary={summary}
         phaseIdx={isApiMode ? FINAL_PHASE_INDEX : phaseIdx}
@@ -204,7 +221,7 @@ export function DagCanvas({
           setPhaseIdx(FINAL_PHASE_INDEX);
         }}
       />
-      <div className="h-[720px]">
+      <div className="min-h-0 flex-1" style={{ minHeight: 420 }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -212,7 +229,7 @@ export function DagCanvas({
           onNodeClick={handleNodeClick}
           onPaneClick={() => setSelectedId(null)}
           fitView
-          fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
+          fitViewOptions={{ padding: 0.05, maxZoom: 1 }}
           minZoom={0.4}
           maxZoom={1.5}
           proOptions={{ hideAttribution: true }}
@@ -252,15 +269,18 @@ export function DagCanvas({
         </ReactFlow>
       </div>
 
-      <NodeDetailSheet
-        open={sheetOpen}
-        onOpenChange={(open) => {
-          setSheetOpen(open);
-          if (!open) setSelectedId(null);
-        }}
-        nodeId={selectedId}
-        data={selectedData}
-      />
+      {/* rail 模式下不弹 Sheet（详情在右侧 320px 常驻栏） */}
+      {!railMode ? (
+        <NodeDetailSheet
+          open={sheetOpen}
+          onOpenChange={(open) => {
+            setSheetOpen(open);
+            if (!open) setSelectedId(null);
+          }}
+          nodeId={selectedId}
+          data={selectedData}
+        />
+      ) : null}
     </div>
   );
 }

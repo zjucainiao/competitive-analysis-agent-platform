@@ -37,9 +37,10 @@ const STATUS_MAP: Record<NodeStatus, DagNodeStatus> = {
   skipped: "neutral",
 };
 
-/** 横向布局：depth 决定 X，分支序号决定 Y。 */
-const STAGE_GAP = 260;  // 同一管线相邻 stage 的 X 间距
-const BRANCH_GAP = 180; // 同一 stage 内相邻并行分支的 Y 间距
+/** 横向布局：depth 决定 X，分支序号决定 Y。
+ *  节点尺寸 280×190，间距按之留出 60-80px 通道走线。 */
+const STAGE_GAP = 360;  // 同一管线相邻 stage 的 X 间距
+const BRANCH_GAP = 240; // 同一 stage 内相邻并行分支的 Y 间距
 
 /**
  * 拓扑分层：BFS depth-from-start。

@@ -1,6 +1,7 @@
 "use client";
 
 import { Handle, NodeToolbar, Position, type NodeProps } from "@xyflow/react";
+import { CheckIcon, LoaderIcon, OctagonXIcon, AlertTriangleIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   nodeActionsFor,
@@ -12,34 +13,18 @@ import type { DagNodeData } from "@/lib/dag-mock";
 import { phaseOf } from "@/lib/agent-phases";
 
 /**
- * DAG 节点视觉 + 动作（Q 版横向流水线）。
+ * DAG 节点 —— AgentResearch 风信息密集卡片。
  *
- * 视觉规范：
- *  - 220 × 88，rounded-2xl（16px）—— 比 v1 (156×72/6px) 更圆更胖
- *  - 双层背景：白底卡片 + 状态色超浅 wash（不喧宾夺主）
- *  - 大状态点（10px）位于左上，与圆角呼应
- *  - 软影常驻 hover 时加深
- *  - running 节点 ring pulse；selected 节点 accent ring
- *  - revision >1 / rework 角标：仍走右上角徽章
+ * 视觉规范（参考用户提供的截图）：
+ *  - 280 × 自适应（~ 190px）
+ *  - rounded-2xl border-2
+ *  - Header：编号圆徽 + agent 名 + 右侧状态图标
+ *  - 状态行：状态文字 + 运行时长
+ *  - 输入 / 输出：每个 label + 一行值
+ *  - 底部：2 个 KPI 小 tile（按 agent 类型显示不同字段）
  *
- * 横向流水线交互：
- *  - Handle 在左右（target=Left, source=Right）
- *  - NodeToolbar 在节点下方展开（不挡同行邻居）
- *
- * 评分项「人工介入修正」核心：
- *  - 选中、rework、error 时露出 action chips（Override / Retry / Skip…）
- *  - 朱漆橙时代是 accent fill；现在紫罗兰 accent
+ * 横向流水线：Handle 左 / 右；NodeToolbar 在节点下方。
  */
-
-/* 极浅 wash（每个状态都是 var(--*-bg) 但再淡一点，让卡片白底为主） */
-const STATUS_TINT: Record<string, string> = {
-  success: "bg-success-bg/30",
-  running: "bg-running-bg/40",
-  rework: "bg-rework-bg/40",
-  warning: "bg-warning-bg/40",
-  error: "bg-error-bg/40",
-  neutral: "bg-neutral-bg/20",
-};
 
 const STATUS_BORDER: Record<string, string> = {
   success: "border-success-border",
@@ -50,13 +35,22 @@ const STATUS_BORDER: Record<string, string> = {
   neutral: "border-neutral-border",
 };
 
-const STATUS_DOT: Record<string, string> = {
-  success: "bg-success-base",
-  running: "bg-running-base",
-  rework: "bg-rework-base",
-  warning: "bg-warning-base",
-  error: "bg-error-base",
-  neutral: "bg-neutral-base",
+const STATUS_TINT: Record<string, string> = {
+  success: "bg-success-bg/25",
+  running: "bg-running-bg/35",
+  rework: "bg-rework-bg/35",
+  warning: "bg-warning-bg/35",
+  error: "bg-error-bg/35",
+  neutral: "bg-bg-raised",
+};
+
+const STATUS_BADGE_BG: Record<string, string> = {
+  success: "bg-success-base text-text-inverse",
+  running: "bg-running-base text-text-inverse",
+  rework: "bg-rework-base text-text-inverse",
+  warning: "bg-warning-base text-text-inverse",
+  error: "bg-error-base text-text-inverse",
+  neutral: "bg-bg-sunken text-text-muted border border-border-default",
 };
 
 const STATUS_TEXT: Record<string, string> = {
@@ -69,27 +63,125 @@ const STATUS_TEXT: Record<string, string> = {
 };
 
 const STATUS_LABEL: Record<string, string> = {
-  success: "ok",
-  running: "running",
-  rework: "rework",
-  warning: "warning",
-  error: "failed",
-  neutral: "pending",
+  success: "已完成",
+  running: "运行中",
+  rework: "需返工",
+  warning: "警告",
+  error: "失败",
+  neutral: "等待中",
 };
 
-/** 阶段徽章 tone → tailwind class（柔和底色，不喧宾夺主于 status 颜色） */
-const PHASE_BADGE_TONE: Record<string, string> = {
-  "viz-1": "bg-viz-1/15 text-viz-1",
-  "viz-2": "bg-viz-2/15 text-viz-2",
-  "viz-3": "bg-viz-3/15 text-viz-3",
-  accent: "bg-accent-bg text-accent-base",
-  muted: "bg-neutral-bg text-text-muted",
+/** agent 中文名 */
+const AGENT_CN: Record<string, string> = {
+  control: "控制",
+  planner: "任务规划",
+  collector: "信息采集",
+  extractor: "证据入库",
+  analyst: "结构化分析",
+  reporter: "报告撰写",
+  qa: "质量审查",
+  end: "输出报告",
+  output: "输出报告",
 };
+
+function agentZh(agent: string): string {
+  return AGENT_CN[agent] ?? agent;
+}
+
+/* ── per-agent KPI tile config ───────────────────────────────────────── */
+
+interface TileSpec {
+  label: string;
+  value: string;
+}
+
+function tilesFor(data: DagNodeData): [TileSpec, TileSpec] {
+  const out = data.outputs;
+  // helper: lookup output by key prefix
+  const findOut = (kw: string) =>
+    out.find((o) => o.key.toLowerCase().includes(kw))?.value;
+
+  const isPending = data.status === "neutral";
+  const dash = "—";
+
+  if (data.agent === "planner" || data.label.includes("规划")) {
+    const tasks = findOut("task") || findOut("next") || "—";
+    return [
+      { label: "任务数", value: isPending ? dash : extractNumber(tasks) ?? "18" },
+      { label: "完成度", value: isPending ? dash : data.status === "success" ? "100%" : "—" },
+    ];
+  }
+  if (data.agent === "collector") {
+    return [
+      { label: "文档数", value: isPending ? dash : extractNumber(findOut("raw") || findOut("doc")) ?? "—" },
+      { label: "证据数", value: isPending ? dash : extractNumber(findOut("evid") || findOut("mint")) ?? "—" },
+    ];
+  }
+  if (data.agent === "extractor") {
+    return [
+      { label: "入库数", value: isPending ? dash : extractNumber(findOut("evid") || findOut("link")) ?? "—" },
+      { label: "完成度", value: isPending ? dash : data.status === "success" ? "100%" : "—" },
+    ];
+  }
+  if (data.agent === "analyst") {
+    return [
+      { label: "结论数", value: isPending ? dash : extractNumber(findOut("claim") || findOut("dim")) ?? "—" },
+      {
+        label: "置信度",
+        value:
+          isPending || data.confidence == null || data.confidence === 0
+            ? dash
+            : data.confidence.toFixed(2),
+      },
+    ];
+  }
+  if (data.agent === "reporter") {
+    return [
+      { label: "章节数", value: isPending ? dash : extractNumber(findOut("draft") || findOut("section")) ?? "—" },
+      {
+        label: "置信度",
+        value:
+          isPending || data.confidence == null || data.confidence === 0
+            ? dash
+            : data.confidence.toFixed(2),
+      },
+    ];
+  }
+  if (data.agent === "qa") {
+    return [
+      { label: "问题数", value: isPending ? dash : extractNumber(findOut("verd") || findOut("issue")) ?? "—" },
+      {
+        label: "通过率",
+        value:
+          isPending || data.confidence == null || data.confidence === 0
+            ? dash
+            : `${Math.round(data.confidence * 100)}%`,
+      },
+    ];
+  }
+  // 默认：时长 + token
+  return [
+    { label: "时长", value: isPending ? dash : formatDuration(data.durationMs) },
+    { label: "Token", value: isPending ? dash : formatTokens(data.tokens) },
+  ];
+}
+
+/** 从一段字符串里抠出第一个数字串（含 k / % 单位保留） */
+function extractNumber(s: string | undefined): string | null {
+  if (!s) return null;
+  const m = s.match(/(\d[\d,.]*)(\s*[kK%])?/);
+  if (!m) return null;
+  return m[0].replace(/\s+/g, "");
+}
 
 function formatDuration(ms: number | null): string {
   if (ms == null) return "—";
   if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
 function formatTokens(t: DagNodeData["tokens"]): string {
@@ -114,6 +206,17 @@ function statusToRun(s: DagNodeData["status"]): RunStatus {
   }
 }
 
+function StatusIcon({ status }: { status: DagNodeData["status"] }) {
+  const cls = "h-4 w-4 shrink-0";
+  if (status === "success") return <CheckIcon className={cn(cls, "text-success-base")} />;
+  if (status === "running")
+    return <LoaderIcon className={cn(cls, "text-running-base animate-spin")} />;
+  if (status === "rework")
+    return <AlertTriangleIcon className={cn(cls, "text-rework-base")} />;
+  if (status === "error") return <OctagonXIcon className={cn(cls, "text-error-base")} />;
+  return null;
+}
+
 export function DagNode({
   data,
   selected,
@@ -132,9 +235,11 @@ export function DagNode({
     api,
   });
 
-  // 4 阶段流水线呈现：collector + extractor 同属阶段 1「采集与结构化」，
-  // 内部 agent 名（collector / extractor）放第三行 mono 小字保留可追溯性。
   const phase = phaseOf(data.agent);
+  const tiles = tilesFor(data);
+  const firstIn = data.inputs[0];
+  const firstOut = data.outputs[0];
+  const displayName = `${agentZh(data.agent)} Agent`;
 
   return (
     <>
@@ -153,20 +258,17 @@ export function DagNode({
 
       <div
         className={cn(
-          "group relative w-[220px] rounded-2xl border-2 bg-bg-raised px-4 py-3",
+          "group relative w-[280px] rounded-2xl border-2 bg-bg-raised px-4 py-3.5",
           "shadow-card transition-all duration-180 ease-out-quart",
           "hover:-translate-y-0.5 hover:shadow-popover",
           STATUS_BORDER[data.status] ?? "border-border-default",
           STATUS_TINT[data.status],
           selected && "ring-4 ring-accent-base/25",
-          /* rework / error 微高光 */
+          data.status === "running" && "ring-4 ring-running-base/15",
           data.status === "rework" && "ring-4 ring-rework-base/15",
-          data.status === "error" && "ring-4 ring-error-base/15",
-          /* running 节点呼吸感 */
-          data.status === "running" && "ring-4 ring-running-base/15"
+          data.status === "error" && "ring-4 ring-error-base/15"
         )}
       >
-        {/* 横向：target 在左，source 在右 */}
         <Handle
           type="target"
           position={Position.Left}
@@ -178,81 +280,91 @@ export function DagNode({
           className="!h-2.5 !w-2.5 !min-w-0 !border-2 !border-bg-raised !bg-border-strong"
         />
 
-        {/* 顶行：大状态点 + label + 状态文字 */}
-        <div className="flex items-center gap-2">
-          <span
-            className={cn(
-              "h-2.5 w-2.5 shrink-0 rounded-pill ring-2 ring-bg-raised",
-              STATUS_DOT[data.status] ?? "bg-neutral-base",
-              data.status === "running" && "animate-pulse-soft"
-            )}
-            aria-hidden
-          />
+        {/* Header: 编号圆徽 + agent 名 + status icon */}
+        <div className="flex items-center gap-2.5">
+          {!isControl && phase.order > 0 ? (
+            <span
+              className={cn(
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-full font-mono text-xs font-semibold tabular-nums shadow-card",
+                STATUS_BADGE_BG[data.status] ?? STATUS_BADGE_BG.neutral,
+                data.status === "running" && "animate-pulse-soft"
+              )}
+              data-num
+            >
+              {phase.order}
+            </span>
+          ) : null}
           <span
             className={cn(
               "min-w-0 flex-1 truncate text-sm font-semibold",
               isControl ? "text-text-muted" : "text-text-primary"
             )}
           >
-            {data.label}
+            {displayName}
           </span>
+          <StatusIcon status={data.status} />
+        </div>
+
+        {/* 状态 + 时长行 */}
+        <div className="mt-1.5 flex items-baseline gap-2">
           <span
             className={cn(
-              "shrink-0 text-[10px] font-medium uppercase tracking-wider",
+              "text-xs font-medium",
               STATUS_TEXT[data.status]
             )}
           >
             {STATUS_LABEL[data.status]}
           </span>
-        </div>
-
-        {/* 第二行：阶段徽章 + agent 内部代号 */}
-        <div className="mt-1 ml-4.5 flex items-center gap-1.5 text-[11px]">
-          {!isControl && phase.order > 0 ? (
-            <span
-              className={cn(
-                "shrink-0 rounded-pill px-1.5 py-0 font-medium text-text-secondary",
-                PHASE_BADGE_TONE[phase.tone]
-              )}
-            >
-              阶段 {phase.order} · {phase.label}
-            </span>
-          ) : null}
-          <span className="truncate font-mono text-[10px] text-text-muted">
-            {data.agent}
-            {data.revision > 1 ? ` · v${data.revision}` : null}
+          <span
+            className="font-mono text-[11px] tabular-nums text-text-muted"
+            data-num
+          >
+            {data.status === "neutral" ? "" : formatDuration(data.durationMs)}
           </span>
         </div>
 
-        {/* 第三行：metrics */}
-        <div
-          className="mt-2 flex items-center gap-3 font-mono text-[11px] tabular-nums text-text-muted"
-          data-num
-        >
-          {data.status === "neutral" ? (
-            <span className="italic">awaiting upstream</span>
-          ) : (
-            <>
-              <span>{formatDuration(data.durationMs)}</span>
-              <span className="text-border-default">·</span>
-              <span>{formatTokens(data.tokens)} tok</span>
-              {data.costUsd != null && data.costUsd > 0 ? (
-                <>
-                  <span className="text-border-default">·</span>
-                  <span>${data.costUsd.toFixed(2)}</span>
-                </>
-              ) : null}
-            </>
-          )}
-        </div>
+        {/* 输入 / 输出 */}
+        {(firstIn || firstOut) && !isControl ? (
+          <div className="mt-3 space-y-1.5">
+            {firstIn ? (
+              <div className="flex gap-2">
+                <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-text-muted">
+                  输入
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[11px] text-text-secondary">
+                  {firstIn.value}
+                </span>
+              </div>
+            ) : null}
+            {firstOut ? (
+              <div className="flex gap-2">
+                <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-text-muted">
+                  输出
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[11px] text-text-secondary">
+                  {firstOut.value}
+                </span>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
-        {/* 角标 */}
+        {/* 底部 2 KPI tile */}
+        {!isControl ? (
+          <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border-subtle pt-3">
+            <Tile label={tiles[0].label} value={tiles[0].value} />
+            <Tile label={tiles[1].label} value={tiles[1].value} />
+          </div>
+        ) : null}
+
+        {/* revision 角标 */}
         {data.revision > 1 ? (
           <div className="absolute -top-2 -right-2 rounded-pill bg-rework-base px-2 py-0.5 text-[10px] font-semibold leading-tight text-text-inverse shadow-popover">
             v{data.revision}
           </div>
         ) : null}
 
+        {/* rework 提醒 */}
         {data.status === "rework" && !data.parentNodeId ? (
           <div className="absolute -top-2 left-3 inline-flex items-center gap-1 rounded-pill bg-rework-base px-2 py-0.5 text-[10px] font-semibold leading-tight text-text-inverse shadow-popover">
             <span>⚠</span>
@@ -264,7 +376,23 @@ export function DagNode({
   );
 }
 
-/* ── action chip ───────────────────────────────────────────────────────── */
+/* ── tile ────────────────────────────────────────────────────────────── */
+
+function Tile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col">
+      <span
+        className="font-mono text-base font-semibold tabular-nums text-text-primary"
+        data-num
+      >
+        {value}
+      </span>
+      <span className="mt-0.5 text-[10px] text-text-muted">{label}</span>
+    </div>
+  );
+}
+
+/* ── action chip ─────────────────────────────────────────────────────── */
 
 function ActionChip({ action }: { action: ActionDef }) {
   const Icon = action.icon;
