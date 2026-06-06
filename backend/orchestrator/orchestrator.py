@@ -107,7 +107,7 @@ class Orchestrator:
         引擎选择由 ``ORCH_ENGINE`` 环境变量控制（默认 ``legacy``，行为不变）：
         ``native`` 时改走 ``backend.orchestrator.graph`` 的原生 LangGraph 图。
         """
-        if os.getenv("ORCH_ENGINE", "legacy") == "native":
+        if os.getenv("ORCH_ENGINE", "native") == "native":
             async for r in self._run_native(plan, project):
                 yield r
             return
@@ -327,7 +327,7 @@ class Orchestrator:
         引擎选择同 ``run``:``ORCH_ENGINE=native`` 时走 ``_resume_native``
         (从 native checkpoint 续跑),否则走 legacy OrchestratorState 图(行为不变)。
         """
-        if os.getenv("ORCH_ENGINE", "legacy") == "native":
+        if os.getenv("ORCH_ENGINE", "native") == "native":
             async for r in self._resume_native(project_id, project):
                 yield r
             return

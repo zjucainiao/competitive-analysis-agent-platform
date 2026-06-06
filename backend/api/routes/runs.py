@@ -29,7 +29,7 @@ _log = logging.getLogger(__name__)
 
 def _is_native() -> bool:
     """当前是否走原生 LangGraph 引擎（与 Orchestrator.run 同判据）。"""
-    return os.getenv("ORCH_ENGINE", "legacy") == "native"
+    return os.getenv("ORCH_ENGINE", "native") == "native"
 
 
 async def _read_native_run_state(

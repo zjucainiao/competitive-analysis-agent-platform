@@ -74,11 +74,11 @@ async def test_native_engine_persists_outputs(
 
 
 @pytest.mark.asyncio
-async def test_native_engine_legacy_default_untouched(
+async def test_default_engine_is_native(
     monkeypatch, stub_registry, two_product_project, memory_storage
 ):
-    """不设 ORCH_ENGINE 时走 legacy:落库结果应是 legacy 模板形状,
-    不应出现 native-only 的引用键,证明默认路径未被 native 分支侵入。"""
+    """Phase 2 起 ORCH_ENGINE 默认 native:不设环境变量时走 native 引擎
+    (落库出现 native-only 的真实产品名引用键 collect.Notion)。"""
     monkeypatch.delenv("ORCH_ENGINE", raising=False)
     from backend.orchestrator.orchestrator import Orchestrator
 
@@ -86,12 +86,32 @@ async def test_native_engine_legacy_default_untouched(
     plan = orch.plan(two_product_project)
     results = [r async for r in orch.run(plan, two_product_project)]
 
-    # legacy 至少跑出若干节点结果
     assert results
     saved = await memory_storage.state_store.list_node_outputs(
         two_product_project.project_id
     )
-    # 走的是 legacy:有 legacy marker,没有 native marker
+    # 默认走 native:有 native marker,没有 legacy 模板形状的小写 marker
+    assert _NATIVE_MARKER in saved
+    assert _LEGACY_MARKER not in saved
+
+
+@pytest.mark.asyncio
+async def test_legacy_engine_reachable_via_flag(
+    monkeypatch, stub_registry, two_product_project, memory_storage
+):
+    """legacy 引擎仍可经 ORCH_ENGINE=legacy 显式回退(Phase 3 前不删)。"""
+    monkeypatch.setenv("ORCH_ENGINE", "legacy")
+    from backend.orchestrator.orchestrator import Orchestrator
+
+    orch = Orchestrator(registry=stub_registry, storage=memory_storage)
+    plan = orch.plan(two_product_project)
+    results = [r async for r in orch.run(plan, two_product_project)]
+
+    assert results
+    saved = await memory_storage.state_store.list_node_outputs(
+        two_product_project.project_id
+    )
+    # 显式 legacy:legacy 模板形状,无 native marker
     assert _LEGACY_MARKER in saved
     assert _NATIVE_MARKER not in saved
 
