@@ -170,3 +170,81 @@ def test_projection_builds_pipeline_edges(
     assert ("extract.Notion", "analyst") in pairs
     assert ("analyst", "reporter") in pairs
     assert ("reporter", "qa") in pairs
+
+
+def test_projection_timestamps_propagated_to_dag_nodes(
+    two_product_project: Project,
+) -> None:
+    """Fix 2：history NodeRun 中的 started_at/ended_at ISO 字符串应投影到 DAGNode。
+
+    验证：
+    - 带时间戳的 NodeRun → 对应 DAGNode.started_at/ended_at 非 None。
+    - 缺失时间戳的 NodeRun → DAGNode.started_at/ended_at 为 None（无 crash）。
+    - _compute_duration 对带时间戳的投影 plan 返回非零值。
+    """
+    from backend.orchestrator.projection import run_state_to_dagplan
+    from backend.orchestrator.metrics import _compute_duration
+
+    t_start = "2026-06-07T10:00:00+00:00"
+    t_end = "2026-06-07T10:01:30+00:00"  # 90 秒后
+
+    history = [
+        {
+            "node": "collect",
+            "agent": "collector",
+            "product": "Notion",
+            "round": 1,
+            "status": "success",
+            "span_id": "s1",
+            "started_at": t_start,
+            "ended_at": t_end,
+            "output_ref": "collect.Notion",
+        },
+        {
+            "node": "analyst",
+            "agent": "analyst",
+            "product": None,
+            "round": 1,
+            "status": "success",
+            "span_id": "s2",
+            # started_at/ended_at 缺失 → 应优雅处理，不崩
+            "output_ref": "analyst",
+        },
+    ]
+    state = {
+        "project_id": two_product_project.project_id,
+        "run_id": "run_ts_test",
+        "analysis_mode": "competitive_compare",
+        "products": ["Notion"],
+        "history": history,
+        "outputs": {
+            "collect.Notion": {"raw_sources": []},
+            "analyst": {"result": {}},
+        },
+        "verdicts": [],
+        "qa_round": 0,
+        "rework_products": [],
+        "rework_target": None,
+        "qa_feedback_by_node": {},
+        "aborted": False,
+        "abort_reason": "",
+    }
+
+    plan, _ = run_state_to_dagplan(state, project=two_product_project)
+
+    by_id = {n.node_id: n for n in plan.nodes}
+
+    # collect.Notion：时间戳应被正确解析
+    collect_node = by_id["collect.Notion"]
+    assert collect_node.started_at is not None, "collect.Notion.started_at 应为 datetime"
+    assert collect_node.ended_at is not None, "collect.Notion.ended_at 应为 datetime"
+
+    # analyst：时间戳缺失，应为 None（不崩）
+    analyst_node = by_id["analyst"]
+    assert analyst_node.started_at is None
+    assert analyst_node.ended_at is None
+
+    # _compute_duration 应返回非零值（collect 节点提供了有效时间窗口）
+    duration = _compute_duration(plan)
+    assert duration > 0, f"duration_seconds 应 > 0，实际={duration}"
+    assert duration == 90, f"预期 90 秒，实际={duration}"

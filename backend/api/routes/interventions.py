@@ -505,11 +505,16 @@ async def resume_run(
     if project_id in running_tasks and not running_tasks[project_id].done():
         raise HTTPException(status_code=409, detail="run is already in progress")
 
-    plan = await _load_plan_or_404(storage, project_id)
+    # plan 仍需加载以确认它存在（404 保护），但不再作为参数传给 resume()。
+    # orch.resume() 内部按 ORCH_ENGINE 路由：
+    #   native  → _resume_native(astream(None) 从 checkpoint 续跑)
+    #   legacy  → 从 legacy OrchestratorState checkpoint 续跑
+    # 两条路径都不需要调用方传入 plan。
+    await _load_plan_or_404(storage, project_id)
 
     async def _continue_in_bg() -> None:
         try:
-            async for _ in orch.run(plan, project):
+            async for _ in orch.resume(project_id, project):
                 pass
             await storage.state_store.update_project_status(project_id, ProjectStatus.DONE)
         except Exception:  # noqa: BLE001

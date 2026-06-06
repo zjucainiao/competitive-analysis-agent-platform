@@ -31,3 +31,35 @@
 
 ## 安全护栏
 legacy 不删 · flag 可切回 · 每阶段验证通过才 commit · native 转默认前真实跑通 · 前端迁移不留破 app。
+
+---
+
+## 完成状态(2026-06-07 自主执行)
+
+| Stage | 状态 | commit |
+|---|---|---|
+| A 后端补 7 缺口 + history 字段 | ✅ 完成并 review | b28c73a |
+| B RunStateView schema/assembler/端点 | ✅ 完成并 review | e52aa7a |
+| C 翻默认 native + 真实 LLM 验证 | ✅ 完成 | b1d8277 |
+| 投影桥补边(DAG 布局) | ✅ 完成 | 94b3f0f |
+| **D 前端迁移 RunStateView** | **⏸ 推迟到有人值守时做**(理由见下) | — |
+
+**实测验证(native 默认)**:
+- 全新项目 real-LLM 跑通 collect→extract→analyst→reporter→qa,metrics 落库,导出报告干净。
+- 翻默认只 1 个测试需改(default 断言反转,已拆成 default-native + legacy-reachable),全量 **321 passed, 5 skipped**。
+- **Playwright 实测工作台**:DAG 正确渲染 7 节点 6 边、报告 tab 干净(无英文/标签)、指标 7/7+tokens、5 tab 全正常。**app 在 native 默认下完全可用**(经 DAGPlan 投影桥)。
+
+**Stage D 为何推迟(而非冒险做)**:
+- app 已经经投影桥**完全可用**——前端组件吃稳定内部模型(DagNodeRecord/TraceSpan/MockReport),投影把 native RunState 翻成它们要的 DAGPlan 形状(节点+边+outputs)。
+- Stage D(前端直吃 RunStateView、删投影)是**纯重构**,对用户**不可见**(app 长一样),但是宽面前端改写(`apiStateToDagData`/`apiStateToSpans`/types/client/hooks + 直读 plan.nodes 的组件),夜间无人值守冒险改、若有 Playwright 抓不到的运行时问题会让用户醒来面对破 UI。
+- 风险/收益不对等 → 守"前端迁移不留破 app"护栏,推迟到有人盯 UI 时做。
+
+**Stage D 待办(已摸清,可直接执行)**:
+1. **RunStateView 加 `outputs` 字段**(`{node_id: AgentOutput}` 全量,非只 metric)——report/evidence tab 需要 `ReporterOutput.draft`/`ExtractorOutput.evidences`,instances/revisions 只带 metric 不够。这是 Stage D 的前置后端改动(additive)。
+2. 重写 `apiStateToDagData`:从 `stages[].instances/revisions` + `outputs` 建 DagNodeRecord(边按静态骨架 collect→extract→analyst→reporter→qa)。
+3. 重写 `apiStateToSpans`(trace):从 stages/history + outputs。
+4. `findLatestReporter`/`aggregateEvidences`:从 RunStateView.outputs(若加了字段则不变)。
+5. `workspace-details-rail`/`execution-log-card`:直读 plan.nodes 的改成 stages/instances。
+6. types.ts 加 RunStateView;client.ts/hooks.ts 切 `/run-state` 端点。
+7. 验证:tsc --noEmit + next build + Playwright 工作台走查真实 native run;**任一不过则 revert 前端、保持投影路径**。
+8. 全绿后删投影(那是 Phase 3 的事)。

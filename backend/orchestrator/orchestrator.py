@@ -104,8 +104,8 @@ class Orchestrator:
         - 每个节点完成后 ``save_node_output`` + ``publish(project:{pid}:nodes, result)``
         - LangGraph 自动 checkpoint state（thread_id=project_id）
 
-        引擎选择由 ``ORCH_ENGINE`` 环境变量控制（默认 ``legacy``，行为不变）：
-        ``native`` 时改走 ``backend.orchestrator.graph`` 的原生 LangGraph 图。
+        引擎选择由 ``ORCH_ENGINE`` 环境变量控制（默认 ``native``，Phase 2 起）：
+        ``ORCH_ENGINE=legacy`` 显式回退旧引擎；未设或设为 ``native`` 走原生 LangGraph 图。
         """
         if os.getenv("ORCH_ENGINE", "native") == "native":
             async for r in self._run_native(plan, project):

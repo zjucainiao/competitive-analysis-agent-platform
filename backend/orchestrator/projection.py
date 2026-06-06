@@ -12,6 +12,7 @@ contract：
 """
 from __future__ import annotations
 
+from datetime import datetime
 from ulid import ULID
 
 from backend.schemas import DAGEdge, DAGNode, DAGPlan, NodeStatus, NodeType, Project
@@ -31,6 +32,20 @@ _AGENT_OF: dict[str, str] = {
 # 终态中被视为"节点执行成功"的状态字符串集合
 # （needs_rework / partial 表示节点本身正常完成，只是结果触发了 QA 反馈）
 _SUCCESS_STATUSES = frozenset({"success", "partial", "needs_rework"})
+
+
+def _parse_iso_dt(value: str | None) -> datetime | None:
+    """将 ISO 8601 字符串解析为 datetime；None 或空字符串返回 None。
+
+    NodeRun.started_at / ended_at 由 run_agent_node 写入 ISO 字符串；
+    control 节点或失败节点可能缺失。
+    """
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
 
 
 def _node_id(node: str, product: str | None, round_: int) -> str:
@@ -92,8 +107,8 @@ def run_state_to_dagplan(state: dict, *, project: Project) -> tuple[DAGPlan, dic
                 retry_count=0,
                 max_retries=3,
                 timeout_ms=60_000,
-                started_at=None,
-                ended_at=None,
+                started_at=_parse_iso_dt(run.get("started_at")),
+                ended_at=_parse_iso_dt(run.get("ended_at")),
                 parent_node_id=parent_id,
                 revision=round_,
                 metadata=({"product": product} if product else {}),
