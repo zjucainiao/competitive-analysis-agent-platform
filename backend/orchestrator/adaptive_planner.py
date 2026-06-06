@@ -298,7 +298,7 @@ class AdaptivePlanner:
         # analyst / reporter / qa / end —— 标准串行
         for spec_id, agent, deps, timeout_ms, retries in (
             ("analyst", "analyst", ["join_extract"], 120000, 2),
-            ("reporter", "reporter", ["analyst"], 120000, 2),
+            ("reporter", "reporter", ["analyst"], 300000, 2),
             ("qa", "qa", ["reporter"], 60000, 2),
         ):
             nodes.append(

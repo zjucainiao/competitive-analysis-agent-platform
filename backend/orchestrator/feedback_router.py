@@ -108,7 +108,14 @@ class FeedbackRouter:
 
         any_matched = False
         for routing in verdict.routing:
-            targets = _find_rework_targets(plan, routing.target_agent)
+            # 只把"该 target_agent 名下的 issues"喂给目标选择，用其 required_inputs
+            # 里的 product / node_id 把返工收窄到具体产品节点（而非整类 agent 全重跑）。
+            relevant_issues = [
+                i for i in verdict.issues if i.target_agent == routing.target_agent
+            ]
+            targets = _find_rework_targets(
+                plan, routing.target_agent, issues=relevant_issues
+            )
             if not targets:
                 continue
             any_matched = True
@@ -192,8 +199,54 @@ def _next_versioned_id(node_id: str, current_revision: int) -> str:
     return f"{_base_id(node_id)}_v{current_revision + 1}"
 
 
-def _find_rework_targets(plan: DAGPlan, target_agent: str) -> list[DAGNode]:
-    """按 base_id 分组取最新 revision，过滤 agent_name 匹配的 AGENT_CALL 节点。"""
+# required_inputs 里携带产品名的键（与各 QA checker 约定对齐）
+_PRODUCT_STR_KEYS = ("product", "competitor")
+_PRODUCT_LIST_KEYS = (
+    "products_missing",
+    "competitors_involved",
+    "products",
+    "competitors",
+)
+
+
+def _wanted_products_from_issues(issues: list) -> set[str]:
+    """从 issues 的 required_inputs 提取被点名的产品名集合。"""
+    out: set[str] = set()
+    for i in issues:
+        ri = getattr(i, "required_inputs", None) or {}
+        for k in _PRODUCT_STR_KEYS:
+            v = ri.get(k)
+            if isinstance(v, str) and v.strip():
+                out.add(v)
+        for k in _PRODUCT_LIST_KEYS:
+            v = ri.get(k)
+            if isinstance(v, list):
+                out.update(x for x in v if isinstance(x, str) and x.strip())
+    return out
+
+
+def _wanted_node_ids_from_issues(issues: list) -> set[str]:
+    """从 issues 的 required_inputs 提取被点名的 node_id 集合。"""
+    out: set[str] = set()
+    for i in issues:
+        ri = getattr(i, "required_inputs", None) or {}
+        nid = ri.get("node_id")
+        if isinstance(nid, str) and nid.strip():
+            out.add(nid)
+    return out
+
+
+def _find_rework_targets(
+    plan: DAGPlan, target_agent: str, *, issues: list | None = None
+) -> list[DAGNode]:
+    """按 base_id 分组取最新 revision，过滤 agent_name 匹配的 AGENT_CALL 节点。
+
+    若 ``issues`` 给出了具体 product / node_id（per-product 的 collector /
+    extractor 场景），把返工目标**收窄**到匹配的节点，避免整类 agent 全部重跑。
+    收窄后若一个都没匹配上（产品名对不上等），安全回退到全部候选，绝不把
+    本该发生的返工丢掉。reporter / analyst 这类单节点 agent 通常没有产品键，
+    自然走不收窄路径，行为不变。
+    """
     latest: dict[str, DAGNode] = {}
     for node in plan.nodes:
         if node.node_type != NodeType.AGENT_CALL:
@@ -205,7 +258,21 @@ def _find_rework_targets(plan: DAGPlan, target_agent: str) -> list[DAGNode]:
         if existing is None or node.revision > existing.revision:
             latest[base] = node
     # 稳定排序：按 base_id 字典序
-    return [latest[k] for k in sorted(latest)]
+    candidates = [latest[k] for k in sorted(latest)]
+
+    if not issues:
+        return candidates
+    wanted_products = _wanted_products_from_issues(issues)
+    wanted_node_ids = _wanted_node_ids_from_issues(issues)
+    if not wanted_products and not wanted_node_ids:
+        return candidates
+    narrowed = [
+        n
+        for n in candidates
+        if n.node_id in wanted_node_ids
+        or n.metadata.get("product") in wanted_products
+    ]
+    return narrowed or candidates
 
 
 def _bfs_downstream(plan: DAGPlan, root_id: str) -> set[str]:

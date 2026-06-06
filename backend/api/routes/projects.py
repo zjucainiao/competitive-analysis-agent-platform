@@ -7,9 +7,9 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from ulid import ULID
 
-from backend.api.deps import get_storage
+from backend.api.deps import get_current_user, get_owned_project, get_storage
 from backend.api.schemas import ProjectCreateRequest, ProjectListResponse
-from backend.schemas import AnalysisMode, Project, ProjectStatus
+from backend.schemas import AnalysisMode, Project, ProjectStatus, User
 from backend.storage import Storage
 
 router = APIRouter(tags=["projects"])
@@ -19,6 +19,7 @@ router = APIRouter(tags=["projects"])
 async def create_project(
     req: ProjectCreateRequest,
     storage: Storage = Depends(get_storage),
+    current_user: User = Depends(get_current_user),
 ) -> Project:
     # ----- mode 校验 / 自动派生 -----
     # 关键设计：single_research 模式不再硬剔对比类维度。功能 / 定价 / SWOT /
@@ -60,7 +61,7 @@ async def create_project(
     project = Project(
         project_id=f"proj_{ULID()}",
         project_name=req.project_name,
-        owner=req.owner,
+        owner=current_user.user_id,  # 归属强制来自 JWT，杜绝客户端伪造
         created_at=datetime.now(timezone.utc),
         target_product=req.target_product,
         competitors=competitors,
@@ -81,18 +82,19 @@ async def create_project(
 @router.get("/projects", response_model=ProjectListResponse)
 async def list_projects(
     storage: Storage = Depends(get_storage),
-    owner: str | None = None,
+    current_user: User = Depends(get_current_user),
     project_status: ProjectStatus | None = None,
     include_archived: bool = False,
     include_deleted: bool = False,
 ) -> ProjectListResponse:
-    """列项目。
+    """列当前用户的项目。
 
+    owner 强制为已鉴权用户（不接受客户端传 owner），实现用户隔离。
     默认隐藏 ARCHIVED + DELETED；要看回收站传 ``include_archived=true``，
     要看彻底删除（30 天保留期）传 ``include_deleted=true``。
     """
     items = await storage.state_store.list_projects(
-        owner=owner, status=project_status
+        owner=current_user.user_id, status=project_status
     )
     if not include_archived:
         items = [p for p in items if p.status != ProjectStatus.ARCHIVED]
@@ -103,27 +105,18 @@ async def list_projects(
 
 @router.get("/projects/{project_id}", response_model=Project)
 async def get_project(
-    project_id: str,
-    storage: Storage = Depends(get_storage),
+    project: Project = Depends(get_owned_project),
 ) -> Project:
-    project = await storage.state_store.get_project(project_id)
-    if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"project {project_id!r} not found",
-        )
+    # get_owned_project 已做 404/403 校验，这里直接返回
     return project
 
 
 @router.post("/projects/{project_id}/archive", response_model=Project)
 async def archive_project(
-    project_id: str,
+    project: Project = Depends(get_owned_project),
     storage: Storage = Depends(get_storage),
 ) -> Project:
     """归档：从列表默认视图隐藏，但保留所有数据。"""
-    project = await storage.state_store.get_project(project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
     updated = project.model_copy(
         update={
             "status": ProjectStatus.ARCHIVED,
@@ -136,17 +129,14 @@ async def archive_project(
 
 @router.post("/projects/{project_id}/restore", response_model=Project)
 async def restore_project(
-    project_id: str,
+    project: Project = Depends(get_owned_project),
     storage: Storage = Depends(get_storage),
 ) -> Project:
     """从归档 / 回收站恢复。状态置回 DONE 或 DRAFT（根据是否有 metrics 推断）。"""
-    project = await storage.state_store.get_project(project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
     if project.status not in (ProjectStatus.ARCHIVED, ProjectStatus.DELETED):
         raise HTTPException(
             status_code=400,
-            detail=f"project {project_id!r} not archived/deleted (status={project.status.value})",
+            detail=f"project {project.project_id!r} not archived/deleted (status={project.status.value})",
         )
     new_status = ProjectStatus.DONE if project.metrics is not None else ProjectStatus.DRAFT
     updated = project.model_copy(
@@ -158,13 +148,10 @@ async def restore_project(
 
 @router.delete("/projects/{project_id}", response_model=Project)
 async def delete_project(
-    project_id: str,
+    project: Project = Depends(get_owned_project),
     storage: Storage = Depends(get_storage),
 ) -> Project:
     """软删：进回收站。30 天保留期由外部 cron 真删（v1 不实施 cron）。"""
-    project = await storage.state_store.get_project(project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
     updated = project.model_copy(
         update={
             "status": ProjectStatus.DELETED,

@@ -10,10 +10,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
 from ulid import ULID
 
-from backend.api.deps import get_orchestrator, get_storage
+from backend.api.deps import get_orchestrator, get_owned_project, get_storage
 from backend.api.schemas import ProjectStateResponse, RunStartedResponse
 from backend.orchestrator import Orchestrator
-from backend.schemas import ProjectStatus, RunSnapshot
+from backend.schemas import Project, ProjectStatus, RunSnapshot
 from backend.schemas.project import RunRef
 from backend.storage import Storage
 from backend.storage.serde import dump_output
@@ -33,14 +33,8 @@ async def start_run(
     request: Request,
     storage: Storage = Depends(get_storage),
     orch: Orchestrator = Depends(get_orchestrator),
+    project: Project = Depends(get_owned_project),
 ) -> RunStartedResponse:
-    project = await storage.state_store.get_project(project_id)
-    if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"project {project_id!r} not found",
-        )
-
     running_tasks: dict[str, asyncio.Task] = request.app.state.running_tasks
     if project_id in running_tasks and not running_tasks[project_id].done():
         raise HTTPException(
@@ -142,15 +136,13 @@ class RunListResponse(BaseModel):
 async def list_runs(
     project_id: str,
     storage: Storage = Depends(get_storage),
+    project: Project = Depends(get_owned_project),
 ) -> RunListResponse:
     """单项目所有 run 的 metadata 时间线（前端的 Rerun 按钮 / run 切换器需要）。
 
     每次 run 的完整 state 单独通过 ``GET /projects/{id}/runs/{run_id}/state`` 取
     （由 RunSnapshot 持久化，与 latest 状态相互独立）。
     """
-    project = await storage.state_store.get_project(project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
     return RunListResponse(project_id=project_id, runs=list(project.runs))
 
 
@@ -159,6 +151,7 @@ async def get_run_snapshot(
     project_id: str,
     run_id: str,
     storage: Storage = Depends(get_storage),
+    _project: Project = Depends(get_owned_project),
 ) -> dict:
     """取某次 run 终态时的完整 state 快照。
 
@@ -181,13 +174,8 @@ async def get_run_snapshot(
 async def get_state(
     project_id: str,
     storage: Storage = Depends(get_storage),
+    project: Project = Depends(get_owned_project),
 ) -> ProjectStateResponse:
-    project = await storage.state_store.get_project(project_id)
-    if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"project {project_id!r} not found",
-        )
     plan = await storage.state_store.get_dag_plan(project_id)
     outputs = await storage.state_store.list_node_outputs(project_id)
     verdicts = await storage.state_store.list_qa_verdicts(project_id)

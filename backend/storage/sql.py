@@ -40,6 +40,22 @@ CREATE TABLE IF NOT EXISTS checkpoint_writes (
 );
 """
 
+CREATE_USERS = """
+CREATE TABLE IF NOT EXISTS users (
+    user_id       text PRIMARY KEY,
+    email         text NOT NULL,
+    password_hash text NOT NULL,
+    display_name  text NOT NULL DEFAULT '',
+    created_at    timestamptz NOT NULL DEFAULT now()
+);
+"""
+
+# email 大小写不敏感唯一：注册/登录前已 lower() 规范化，这里再加库级唯一兜底
+CREATE_USERS_EMAIL_IDX = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique
+    ON users (lower(email));
+"""
+
 CREATE_PROJECTS = """
 CREATE TABLE IF NOT EXISTS projects (
     project_id text PRIMARY KEY,
@@ -114,7 +130,25 @@ CREATE INDEX IF NOT EXISTS idx_run_snapshots_project_time
     ON run_snapshots (project_id, captured_at DESC);
 """
 
+CREATE_LLM_CALLS = """
+CREATE TABLE IF NOT EXISTS llm_calls (
+    seq        bigserial PRIMARY KEY,
+    project_id text NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    node_id    text,
+    agent_name text,
+    ts         double precision NOT NULL DEFAULT 0,
+    payload    jsonb NOT NULL
+);
+"""
+
+CREATE_LLM_CALLS_IDX = """
+CREATE INDEX IF NOT EXISTS idx_llm_calls_project_ts
+    ON llm_calls (project_id, ts DESC, seq DESC);
+"""
+
 ALL_STATEMENTS = [
+    CREATE_USERS,
+    CREATE_USERS_EMAIL_IDX,
     CREATE_PROJECTS,
     CREATE_PROJECTS_IDX,
     CREATE_DAG_PLANS,
@@ -124,6 +158,8 @@ ALL_STATEMENTS = [
     CREATE_QA_VERDICTS_IDX,
     CREATE_RUN_SNAPSHOTS,
     CREATE_RUN_SNAPSHOTS_IDX,
+    CREATE_LLM_CALLS,
+    CREATE_LLM_CALLS_IDX,
     CREATE_CHECKPOINTS,
     CREATE_CHECKPOINTS_IDX,
     CREATE_CHECKPOINT_WRITES,

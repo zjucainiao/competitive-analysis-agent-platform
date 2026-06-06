@@ -16,7 +16,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.api.deps import get_orchestrator, get_storage
+from backend.api.deps import get_orchestrator, get_owned_project, get_storage
 from backend.orchestrator import Orchestrator
 from backend.schemas import (
     DAGNode,
@@ -28,7 +28,9 @@ from backend.schemas import (
 )
 from backend.storage import Storage
 
-router = APIRouter(tags=["interventions"])
+# 本路由所有端点都是 /projects/{project_id}/...，统一在路由级强制"已登录 + 属于本人"
+# （get_owned_project 从路径取 project_id，做 401/403/404）。
+router = APIRouter(tags=["interventions"], dependencies=[Depends(get_owned_project)])
 
 _log = logging.getLogger(__name__)
 

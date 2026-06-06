@@ -57,7 +57,7 @@ class RedisEventBus:
             with contextlib.suppress(Exception):
                 await pubsub.unsubscribe(channel)
             with contextlib.suppress(Exception):
-                await pubsub.close()
+                await pubsub.aclose()
 
     async def close(self) -> None:
         if self._closed:

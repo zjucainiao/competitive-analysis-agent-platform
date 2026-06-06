@@ -81,6 +81,7 @@ def _log_llm_call(
     duration_s: float,
     finish_reason: str | None,
     prompt_preview: str = "",
+    response_preview: str = "",
 ) -> None:
     """打一行结构化 LLM 调用日志。
 
@@ -121,9 +122,36 @@ def _log_llm_call(
             finish_reason=finish_reason,
             cost_usd=cost,
             prompt_preview=prompt_preview,
+            response_preview=response_preview,
         )
     except Exception:  # noqa: BLE001 — 观测层永远不能搞挂主流程
         pass
+
+
+def _preview_messages(messages: list[dict[str, Any]], *, limit: int = 1200) -> str:
+    """Compact prompt preview for UI logs.
+
+    The full prompt can be very large. Keep enough context for debugging while
+    avoiding huge ring-buffer entries.
+    """
+    parts: list[str] = []
+    for msg in messages:
+        role = msg.get("role", "?")
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(str(x) for x in content)
+        parts.append(f"{role}: {str(content)}")
+    text = "\n\n".join(parts).strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "..."
+
+
+def _preview_text(text: str, *, limit: int = 1200) -> str:
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "..."
 
 
 @dataclass
@@ -355,6 +383,8 @@ class OpenAICompatibleLLM:
         usage = getattr(completion, "usage", None)
         _tokens_in = getattr(usage, "prompt_tokens", 0) if usage else 0
         _tokens_out = getattr(usage, "completion_tokens", 0) if usage else 0
+
+        args_json = (tool_calls[0].function.arguments or "") if tool_calls else ""
         _log_llm_call(
             model=self.model,
             phase="tool_call",
@@ -362,6 +392,8 @@ class OpenAICompatibleLLM:
             tokens_out=_tokens_out,
             duration_s=_duration,
             finish_reason=choice.finish_reason,
+            prompt_preview=_preview_messages(full_messages),
+            response_preview=_preview_text(args_json),
         )
 
         if not tool_calls:
@@ -370,7 +402,6 @@ class OpenAICompatibleLLM:
                 "model returned no tool_calls under forced tool_choice"
             )
 
-        args_json = tool_calls[0].function.arguments or ""
         parsed = _parse_with_repair(args_json, schema_cls)
         return LLMResponse(
             parsed=parsed,
@@ -448,6 +479,8 @@ class OpenAICompatibleLLM:
             tokens_out=_tokens_out,
             duration_s=_duration,
             finish_reason=choice.finish_reason,
+            prompt_preview=_preview_messages(full_messages),
+            response_preview=_preview_text(content),
         )
         return LLMResponse(
             parsed=parsed,

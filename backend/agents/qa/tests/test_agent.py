@@ -326,6 +326,52 @@ def test_logic_consistency_fails_two_hard_conflicts() -> None:
     assert result.pass_ is False
 
 
+# ---------- 5b. coverage_density ----------
+
+
+def test_coverage_density_passes_on_full_draft() -> None:
+    """demo draft 每个维度都被实质展开 → 满分、无 issue。"""
+    from backend.agents.qa.checkers import CheckerContext, CoverageDensityChecker
+
+    inp = load_demo_input()
+    ctx = CheckerContext(
+        draft=inp.draft,
+        analysis=inp.analysis,
+        profiles=inp.profiles,
+        evidence_db={},
+    )
+    result = CoverageDensityChecker().run(ctx)
+    assert result.pass_, result.notes
+    assert result.score == pytest.approx(1.0)
+    assert result.issues == []
+
+
+def test_coverage_density_flags_thin_section_to_reporter() -> None:
+    """某维度有带证据 claim，但报告章节只剩软占位 → major → reporter。"""
+    from backend.agents.qa.checkers import CheckerContext, CoverageDensityChecker
+
+    inp = load_demo_input()
+    # feature_comparison 维度本有 3 条带证据 claim；把对应章节掏空成单段软占位
+    sec = next(s for s in inp.draft.sections if s.section_id == "sec_features")
+    placeholder = _mk_paragraph("p_features_placeholder", "暂无与功能相关的分析结论。")
+    placeholder.is_soft_conclusion = True
+    placeholder.is_quantitative = False
+    sec.paragraphs = [placeholder]
+
+    ctx = CheckerContext(
+        draft=inp.draft,
+        analysis=inp.analysis,
+        profiles=inp.profiles,
+        evidence_db={},
+    )
+    result = CoverageDensityChecker().run(ctx)
+    assert result.pass_ is False
+    majors = [i for i in result.issues if i.severity == "major"]
+    assert majors, "thin section should raise a major issue"
+    assert all(i.target_agent == "reporter" for i in majors)
+    assert any(i.required_inputs.get("dimension") == "feature_comparison" for i in majors)
+
+
 # ---------- 6. expression ----------
 
 

@@ -27,6 +27,7 @@ from backend.schemas import (
     ProjectStatus,
     QAVerdict,
     RunSnapshot,
+    User,
 )
 
 from .checkpoint_types import (
@@ -92,7 +93,21 @@ class CheckpointerProtocol(Protocol):
 
 @runtime_checkable
 class StateStoreProtocol(Protocol):
-    """Project / DAGPlan / NodeOutput / QAVerdict 的 CRUD。"""
+    """User / Project / DAGPlan / NodeOutput / QAVerdict 的 CRUD。"""
+
+    # ----- User -----
+
+    async def create_user(self, user: User) -> None:
+        """插入新用户。email 已唯一冲突时抛 ValueError（上层转 409）。"""
+        ...
+
+    async def get_user_by_email(self, email: str) -> User | None:
+        """按规范化（lower+trim）email 查；登录用。"""
+        ...
+
+    async def get_user_by_id(self, user_id: str) -> User | None:
+        """按 user_id 查；get_current_user 解析 JWT 后用。"""
+        ...
 
     # ----- Project -----
 
@@ -157,6 +172,25 @@ class StateStoreProtocol(Protocol):
 
     async def list_qa_verdicts(self, project_id: str) -> list[QAVerdict]:
         """按创建时间倒序。"""
+        ...
+
+    # ----- LLMCallRecord（每节点完成后持久化其 LLM 调用流水，重启可查） -----
+
+    async def append_llm_calls(
+        self, project_id: str, calls: list[dict]
+    ) -> None:
+        """追加一批 LLM 调用记录（dict 形态，见 observability.LLMCallRecord）。"""
+        ...
+
+    async def list_llm_calls(
+        self,
+        project_id: str,
+        *,
+        node_id: str | None = None,
+        agent_name: str | None = None,
+        limit: int = 200,
+    ) -> list[dict]:
+        """按 timestamp 倒序返回；node_id / agent_name 精确过滤。"""
         ...
 
     # ----- RunSnapshot（每次 run 终态时持久化整份 state） -----

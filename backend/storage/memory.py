@@ -22,6 +22,7 @@ from backend.schemas import (
     ProjectStatus,
     QAVerdict,
     RunSnapshot,
+    User,
 )
 
 from .checkpoint_types import (
@@ -209,14 +210,38 @@ class InMemoryStateStore:
     """实现 `StateStoreProtocol`。"""
 
     def __init__(self) -> None:
+        self._users: dict[str, User] = {}
+        self._user_id_by_email: dict[str, str] = {}  # lower(email) -> user_id
         self._projects: dict[str, Project] = {}
         self._project_updated_at: dict[str, datetime] = {}
         self._plans_by_project: dict[str, list[DAGPlan]] = defaultdict(list)
         self._node_outputs: dict[tuple[str, str], AgentOutputBase] = {}
         self._qa_verdicts: dict[str, list[tuple[datetime, QAVerdict]]] = defaultdict(list)
+        # project_id -> LLM 调用记录（dict）按追加顺序
+        self._llm_calls: dict[str, list[dict]] = defaultdict(list)
         # (project_id, run_id) -> RunSnapshot
         self._run_snapshots: dict[tuple[str, str], RunSnapshot] = {}
         self._lock = asyncio.Lock()
+
+    # ---- User ----
+
+    async def create_user(self, user: User) -> None:
+        key = user.email.strip().lower()
+        async with self._lock:
+            if key in self._user_id_by_email:
+                raise ValueError(f"email already registered: {key}")
+            self._users[user.user_id] = user
+            self._user_id_by_email[key] = user.user_id
+
+    async def get_user_by_email(self, email: str) -> User | None:
+        key = email.strip().lower()
+        async with self._lock:
+            uid = self._user_id_by_email.get(key)
+            return self._users.get(uid) if uid else None
+
+    async def get_user_by_id(self, user_id: str) -> User | None:
+        async with self._lock:
+            return self._users.get(user_id)
 
     # ---- Project ----
 
@@ -326,6 +351,39 @@ class InMemoryStateStore:
             items = list(self._qa_verdicts.get(project_id, []))
         items.sort(key=lambda kv: kv[0], reverse=True)
         return [v for _ts, v in items]
+
+    # ---- LLMCallRecord ----
+
+    async def append_llm_calls(
+        self, project_id: str, calls: list[dict]
+    ) -> None:
+        if not calls:
+            return
+        async with self._lock:
+            self._llm_calls[project_id].extend(dict(c) for c in calls)
+
+    async def list_llm_calls(
+        self,
+        project_id: str,
+        *,
+        node_id: str | None = None,
+        agent_name: str | None = None,
+        limit: int = 200,
+    ) -> list[dict]:
+        async with self._lock:
+            items = list(self._llm_calls.get(project_id, []))
+        # 倒序（最新优先），与 ring buffer list_calls 一致
+        items.sort(key=lambda c: c.get("timestamp", 0.0), reverse=True)
+        out: list[dict] = []
+        for c in items:
+            if node_id is not None and c.get("node_id") != node_id:
+                continue
+            if agent_name is not None and c.get("agent_name") != agent_name:
+                continue
+            out.append(c)
+            if len(out) >= limit:
+                break
+        return out
 
     # ---- RunSnapshot ----
 

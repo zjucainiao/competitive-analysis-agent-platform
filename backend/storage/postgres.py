@@ -16,6 +16,7 @@ import json
 from typing import Any, AsyncIterator, Sequence
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from backend.schemas import (
@@ -26,6 +27,7 @@ from backend.schemas import (
     ProjectStatus,
     QAVerdict,
     RunSnapshot,
+    User,
 )
 
 from .checkpoint_types import (
@@ -61,6 +63,48 @@ class PostgresStateStore:
 
     def __init__(self, engine: AsyncEngine) -> None:
         self._engine = engine
+
+    # ----- User -----
+
+    async def create_user(self, user: User) -> None:
+        sql = text(
+            """
+            INSERT INTO users (user_id, email, password_hash, display_name, created_at)
+            VALUES (:user_id, :email, :password_hash, :display_name, :created_at)
+            """
+        )
+        try:
+            async with self._engine.begin() as conn:
+                await conn.execute(
+                    sql,
+                    {
+                        "user_id": user.user_id,
+                        "email": user.email.strip().lower(),
+                        "password_hash": user.password_hash,
+                        "display_name": user.display_name,
+                        "created_at": user.created_at,
+                    },
+                )
+        except IntegrityError as e:  # email 唯一索引冲突
+            raise ValueError(f"email already registered: {user.email}") from e
+
+    async def get_user_by_email(self, email: str) -> User | None:
+        sql = text(
+            "SELECT user_id, email, password_hash, display_name, created_at "
+            "FROM users WHERE lower(email) = :email"
+        )
+        async with self._engine.connect() as conn:
+            row = (await conn.execute(sql, {"email": email.strip().lower()})).first()
+        return _row_to_user(row) if row is not None else None
+
+    async def get_user_by_id(self, user_id: str) -> User | None:
+        sql = text(
+            "SELECT user_id, email, password_hash, display_name, created_at "
+            "FROM users WHERE user_id = :uid"
+        )
+        async with self._engine.connect() as conn:
+            row = (await conn.execute(sql, {"uid": user_id})).first()
+        return _row_to_user(row) if row is not None else None
 
     # ----- Project -----
 
@@ -134,7 +178,7 @@ class PostgresStateStore:
             UPDATE projects
                SET status = :status,
                    updated_at = now(),
-                   payload = jsonb_set(payload, '{status}', to_jsonb(:status::text))
+                   payload = jsonb_set(payload, '{status}', to_jsonb(CAST(:status AS text)))
              WHERE project_id = :pid
             """
         )
@@ -294,6 +338,58 @@ class PostgresStateStore:
         async with self._engine.connect() as conn:
             rows = (await conn.execute(sql, {"pid": project_id})).all()
         return [QAVerdict.model_validate(_as_dict(r[0])) for r in rows]
+
+    # ----- LLMCallRecord -----
+
+    async def append_llm_calls(
+        self, project_id: str, calls: list[dict]
+    ) -> None:
+        if not calls:
+            return
+        sql = text(
+            """
+            INSERT INTO llm_calls (project_id, node_id, agent_name, ts, payload)
+            VALUES
+              (:project_id, :node_id, :agent_name, :ts, CAST(:payload AS jsonb))
+            """
+        )
+        async with self._engine.begin() as conn:
+            for c in calls:
+                await conn.execute(
+                    sql,
+                    {
+                        "project_id": project_id,
+                        "node_id": c.get("node_id"),
+                        "agent_name": c.get("agent_name"),
+                        "ts": float(c.get("timestamp") or 0.0),
+                        "payload": json.dumps(c, default=str),
+                    },
+                )
+
+    async def list_llm_calls(
+        self,
+        project_id: str,
+        *,
+        node_id: str | None = None,
+        agent_name: str | None = None,
+        limit: int = 200,
+    ) -> list[dict]:
+        clauses = ["project_id = :pid"]
+        params: dict[str, object] = {"pid": project_id, "limit": limit}
+        if node_id is not None:
+            clauses.append("node_id = :node_id")
+            params["node_id"] = node_id
+        if agent_name is not None:
+            clauses.append("agent_name = :agent_name")
+            params["agent_name"] = agent_name
+        sql = text(
+            "SELECT payload FROM llm_calls WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY ts DESC, seq DESC LIMIT :limit"
+        )
+        async with self._engine.connect() as conn:
+            rows = (await conn.execute(sql, params)).all()
+        return [_as_dict(r[0]) for r in rows]
 
     # ----- RunSnapshot -----
 
@@ -594,6 +690,17 @@ def _as_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         return json.loads(value)
     return dict(value)
+
+
+def _row_to_user(row: Any) -> User:
+    """users 表行 → User。列序：user_id, email, password_hash, display_name, created_at。"""
+    return User(
+        user_id=row[0],
+        email=row[1],
+        password_hash=row[2],
+        display_name=row[3] or "",
+        created_at=row[4],
+    )
 
 
 __all__ = [

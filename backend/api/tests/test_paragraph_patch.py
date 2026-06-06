@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.api import create_app
+from backend.api.security import create_access_token
 from backend.schemas import (
     AgentStatus,
     Project,
@@ -16,7 +17,10 @@ from backend.schemas import (
     ReportParagraph,
     ReportSection,
     ReporterOutput,
+    User,
 )
+
+_OWNER_ID = "u1"
 
 
 @pytest.fixture
@@ -28,6 +32,31 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     app = create_app(mode="memory")
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture
+def auth(client: TestClient) -> dict[str, str]:
+    """往 storage 塞一个 user_id=u1 的用户，返回其 Bearer header。
+
+    PATCH 路由经 get_owned_project 校验 owner == 当前用户，故项目 owner 也用 u1。
+    """
+    import asyncio
+
+    storage = client.app.state.storage
+
+    async def _seed_user() -> None:
+        await storage.state_store.create_user(
+            User(
+                user_id=_OWNER_ID,
+                email="u1@test.com",
+                password_hash="x",
+                display_name="U1",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+
+    asyncio.run(_seed_user())
+    return {"Authorization": f"Bearer {create_access_token(_OWNER_ID)}"}
 
 
 def _seed_project_and_report(client: TestClient) -> tuple[str, str]:
@@ -78,11 +107,12 @@ def _seed_project_and_report(client: TestClient) -> tuple[str, str]:
     return project.project_id, "reporter"
 
 
-def test_patch_paragraph_updates_text(client: TestClient) -> None:
+def test_patch_paragraph_updates_text(client: TestClient, auth: dict) -> None:
     pid, report_id = _seed_project_and_report(client)
     r = client.patch(
         f"/api/projects/{pid}/reports/{report_id}/paragraphs/p1",
         json={"text": "改后的文案 1"},
+        headers=auth,
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -92,52 +122,141 @@ def test_patch_paragraph_updates_text(client: TestClient) -> None:
     assert body["edit_rate"] == 0.5  # 1 改 / 2 段
 
 
-def test_patch_paragraph_unknown_returns_404(client: TestClient) -> None:
+def test_patch_paragraph_unknown_returns_404(client: TestClient, auth: dict) -> None:
     pid, report_id = _seed_project_and_report(client)
     r = client.patch(
         f"/api/projects/{pid}/reports/{report_id}/paragraphs/p_does_not_exist",
         json={"text": "x"},
+        headers=auth,
     )
     assert r.status_code == 404
 
 
-def test_patch_unknown_project_returns_404(client: TestClient) -> None:
+def test_patch_unknown_project_returns_404(client: TestClient, auth: dict) -> None:
     r = client.patch(
         "/api/projects/proj_nope/reports/reporter/paragraphs/p1",
         json={"text": "x"},
+        headers=auth,
     )
     assert r.status_code == 404
 
 
-def test_patch_non_reporter_node_rejected(client: TestClient) -> None:
+def test_patch_requires_auth(client: TestClient) -> None:
+    """不带 token → 401（鉴权隔离）。"""
+    pid, report_id = _seed_project_and_report(client)
+    r = client.patch(
+        f"/api/projects/{pid}/reports/{report_id}/paragraphs/p1",
+        json={"text": "x"},
+    )
+    assert r.status_code == 401
+
+
+def test_patch_other_users_project_forbidden(client: TestClient, auth: dict) -> None:
+    """已登录但项目属于别人 → 403（越权拦截）。"""
+    import asyncio
+
+    storage = client.app.state.storage
+    other = Project(
+        project_id="proj_other_owner",
+        project_name="x",
+        owner="someone_else",
+        created_at=datetime.now(timezone.utc),
+        target_product="X",
+        competitors=[],
+        industry="collaboration_saas",
+        analysis_dimensions=[],
+        status=ProjectStatus.DONE,
+    )
+    asyncio.run(storage.state_store.save_project(other))
+    r = client.patch(
+        "/api/projects/proj_other_owner/reports/reporter/paragraphs/p1",
+        json={"text": "x"},
+        headers=auth,
+    )
+    assert r.status_code == 403
+
+
+def test_patch_non_reporter_node_rejected(client: TestClient, auth: dict) -> None:
     pid, _ = _seed_project_and_report(client)
     r = client.patch(
         f"/api/projects/{pid}/reports/collect.notion/paragraphs/p1",
         json={"text": "x"},
+        headers=auth,
     )
     assert r.status_code == 400
 
 
-def test_patch_accumulates_edits(client: TestClient) -> None:
+def test_patch_accumulates_edits(client: TestClient, auth: dict) -> None:
     pid, report_id = _seed_project_and_report(client)
     client.patch(
         f"/api/projects/{pid}/reports/{report_id}/paragraphs/p1",
         json={"text": "改 1"},
+        headers=auth,
     )
     r2 = client.patch(
         f"/api/projects/{pid}/reports/{report_id}/paragraphs/p2",
         json={"text": "改 2"},
+        headers=auth,
     )
     assert r2.status_code == 200
     assert r2.json()["manual_edits"] == 2
     assert r2.json()["edit_rate"] == 1.0
 
 
-def test_patch_flags_optional(client: TestClient) -> None:
+def test_patch_flags_optional(client: TestClient, auth: dict) -> None:
     pid, report_id = _seed_project_and_report(client)
     r = client.patch(
         f"/api/projects/{pid}/reports/{report_id}/paragraphs/p2",
         json={"text": "修改并降级为软结论", "is_soft_conclusion": True},
+        headers=auth,
     )
     assert r.status_code == 200
     assert r.json()["paragraph"]["is_soft_conclusion"] is True
+
+
+def _reporter_output(node_id: str, n_paragraphs: int) -> ReporterOutput:
+    paras = [
+        ReportParagraph(
+            paragraph_id=f"{node_id}_p{i}",
+            text="x",
+            evidence_ids=[],
+            is_quantitative=False,
+        )
+        for i in range(n_paragraphs)
+    ]
+    draft = ReportDraft(
+        report_id=f"rpt_{node_id}",
+        version=1,
+        template_id="standard_v1",
+        sections=[
+            ReportSection(section_id="s", title="t", order=1, paragraphs=paras)
+        ],
+        summary="",
+        metadata={},
+    )
+    return ReporterOutput(
+        agent_name="reporter",
+        agent_version="1.0.0",
+        task_id=node_id,
+        trace_id="t",
+        span_id="s",
+        status=AgentStatus.SUCCESS,
+        confidence=0.9,
+        self_critique="",
+        draft=draft,
+    )
+
+
+def test_latest_report_total_paragraphs_picks_highest_version() -> None:
+    """evidence 争议重算 edit_rate 用的段落计数：取最新版本 reporter draft。"""
+    from backend.api.routes.evidence import _latest_report_total_paragraphs
+
+    outputs = {
+        "reporter": _reporter_output("reporter", 2),
+        "reporter_v2": _reporter_output("reporter_v2", 5),
+    }
+    assert _latest_report_total_paragraphs(outputs) == 5  # 取 v2
+    assert _latest_report_total_paragraphs(
+        {"reporter": _reporter_output("reporter", 3)}
+    ) == 3
+    assert _latest_report_total_paragraphs({}) == 0

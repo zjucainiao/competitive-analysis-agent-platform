@@ -15,7 +15,10 @@
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -344,6 +347,8 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
     PENALTY_SHORT_TEXT: ClassVar[float] = 0.05
     PENALTY_HIGH_ROBOTS_BLOCK_RATIO: ClassVar[float] = 0.10
     ROBOTS_BLOCK_RATIO_THRESHOLD: ClassVar[float] = 0.30
+    # 维度并行采集的最大并发线程数（防止对同一站点过猛 + 控制 LLM 并发）
+    MAX_DIMENSION_WORKERS: ClassVar[int] = 5
 
     def __init__(
         self,
@@ -363,6 +368,8 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
         self._tokens_input_acc: int = 0
         self._tokens_output_acc: int = 0
         self._cost_usd_acc: float = 0.0
+        # 维度并行采集时多线程会并发累加，用锁保护 read-modify-write。
+        self._usage_lock = threading.Lock()
 
     def _record_llm_usage(self, resp: Any) -> None:
         """累计单次 LLM 调用的 token 与成本。
@@ -372,9 +379,13 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
         """
         if resp is None:
             return
-        self._tokens_input_acc += int(getattr(resp, "tokens_input", 0) or 0)
-        self._tokens_output_acc += int(getattr(resp, "tokens_output", 0) or 0)
-        self._cost_usd_acc += float(getattr(resp, "cost_usd", 0.0) or 0.0)
+        ti = int(getattr(resp, "tokens_input", 0) or 0)
+        to = int(getattr(resp, "tokens_output", 0) or 0)
+        cost = float(getattr(resp, "cost_usd", 0.0) or 0.0)
+        with self._usage_lock:
+            self._tokens_input_acc += ti
+            self._tokens_output_acc += to
+            self._cost_usd_acc += cost
 
     # ----- Mock -----
 
@@ -446,8 +457,12 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
         errors: list[AgentError] = []
         all_sources: list[RawSourceDoc] = []
 
-        for dimension in inp.dimensions:
-            dim_sources, dim_errors = self._collect_dimension(
+        # 各维度相互独立（scrape 全 httpx + 工具内部已加锁，token 累加也加锁），
+        # 并行采集把单产品耗时从 ~维度数×串行 降到 ~最慢单维度。
+        # 关键：每个维度提交前 copy_context()，把 LLM trace contextvar（node_id /
+        # trace_id）带进 worker 线程，否则并发产生的 LLM call 会丢失 node 归属。
+        def _run_dimension(dimension: CollectDimension):
+            return self._collect_dimension(
                 dimension=dimension,
                 inp=inp,
                 search_providers=search_providers,
@@ -455,6 +470,23 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
                 robots=robots,
                 limiter=limiter,
             )
+
+        dims = list(inp.dimensions)
+        if len(dims) <= 1:
+            results = [_run_dimension(d) for d in dims]
+        else:
+            contexts = [contextvars.copy_context() for _ in dims]
+            with ThreadPoolExecutor(
+                max_workers=min(len(dims), self.MAX_DIMENSION_WORKERS)
+            ) as pool:
+                futures = [
+                    pool.submit(ctx.run, _run_dimension, dim)
+                    for dim, ctx in zip(dims, contexts)
+                ]
+                # 按提交顺序取结果 → all_sources 维度顺序与串行一致（确定性）
+                results = [f.result() for f in futures]
+
+        for dim_sources, dim_errors in results:
             all_sources.extend(dim_sources)
             errors.extend(dim_errors)
 

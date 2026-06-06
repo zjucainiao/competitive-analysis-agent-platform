@@ -15,13 +15,14 @@
 
 ---
 
-## 2. 6 个检查维度
+## 2. 7 个检查维度
 
 | Dimension | 含义 | 主要工具 |
 |---|---|---|
 | `fact_consistency` | 报告结论 vs Evidence 是否一致 | NLI / LLM entailment |
 | `evidence_completeness` | 关键结论是否都有 evidence 支撑 | 字段扫描 |
 | `schema_completeness` | Profile 必填字段是否齐 | Schema 校验 |
+| `coverage_density` | 已选维度是否被报告实质展开（信息密度）| 规则（段落/claim 比） |
 | `logic_consistency` | 报告内部前后是否自洽 | LLM contradiction check |
 | `freshness` | 引用证据是否过期 | 时间戳对比 |
 | `expression` | 表达是否规范、无绝对化 | 规则 + LLM |
@@ -119,6 +120,31 @@ def check_entailment(text: str, evidences: list[Evidence]) -> EntailmentResult:
 
 **routing**：
 - 表达问题 → 回 Reporter（minor，通常一次就能改好）
+
+---
+
+### 3.7 coverage_density（信息密度 / 章节覆盖）
+
+**动机**：报告"偏薄"不靠全局字数下限来兜（那会逼模型注水）。真正该拦的是：
+Analyst 产出了某维度的 claim（且有 evidence 支撑），Reporter 却把该章节写成
+占位 / 软结论一句话，导致信息密度过低。
+
+**规则检查**（不调 LLM）：
+- 仅评估"Reporter 本可以渲染"的维度：该维度至少有一条 claim 带 evidence
+  （全无 evidence 的维度交给 `evidence_completeness` 路由到上游，不重复责怪 Reporter）。
+- 实质段落定义：`not is_soft_conclusion and text.strip()`（占位 / 软结论天然排除）。
+- 维度有 N 条带证据 claim，但报告章节 0 个实质段落 → **major**。
+- 维度 claim 数 ≥ 3，但实质段落 / 带证据 claim < 0.5（密度过低）→ **minor**。
+- 维度 claim 少（甚至 1 条）→ 章节短是诚实的短，不罚。
+
+**score**：各维度 `min(1, 实质段落/带证据claim)` 的均值；pass 阈值 0.80。
+
+**routing**：
+- 章节空 / 偏薄 → 回 Reporter（让它把可用 claim 逐条展开，不要折叠成占位）。
+
+> 与 Reporter 侧改动配套：section prompt 要求"每条 claim 一段 + 至多 1 段软结论
+> 小结"，段落目标按 claim 数动态缩放（见 `agents/reporter`）。两端共同保证
+> "厚度由证据丰富度决定"，而非字数配额。
 
 ---
 

@@ -37,7 +37,7 @@ class ProjectCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     project_name: str
-    owner: str
+    # owner 不再由客户端传入：服务端从 JWT 的当前用户派生（防越权伪造归属）。
     target_product: str
     competitors: list[str]
     analysis_mode: AnalysisMode = AnalysisMode.COMPETITIVE_COMPARE

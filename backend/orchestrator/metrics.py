@@ -10,7 +10,8 @@ v1 公式（详见 docs/METRICS.md）：
 
 - ``accuracy``           : 最新 QAVerdict.dimension_results 所有维度分数算术平均
 - ``coverage``           : QA schema_completeness 维度分数（等价于 profile 必填覆盖）
-- ``edit_rate``          : 人工编辑过的段落占报告总段落比例（v1 未接前端 PATCH，固定 0）
+- ``edit_rate``          : 人工修正率（manual_edits / 报告段落数）。本函数算 0；
+  真实值由 reports/evidence 的 PATCH 路径累加，``_persist_metrics`` 跨重跑保留
 - ``evidence_count``     : ∑ ExtractorOutput.evidences 长度
 - ``fields_filled_ratio``: 同 coverage（保留独立字段方便前端做不同维度展示）
 - ``total_tokens``       : ∑ AgentOutputBase.(tokens_input + tokens_output)
@@ -51,6 +52,7 @@ def compute_project_metrics(
     return ProjectMetrics(
         accuracy=accuracy,
         coverage=fields_filled_ratio,
+        # 0 占位：真实 edit_rate 由 PATCH 路径维护，_persist_metrics 会保留旧值
         edit_rate=0.0,
         evidence_count=evidence_count,
         fields_filled_ratio=fields_filled_ratio,

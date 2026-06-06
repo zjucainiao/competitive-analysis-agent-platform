@@ -121,9 +121,16 @@ from .orchestrator import (
     NodeExecutionRequest,
     NodeExecutionResult,
 )
+from .user import (
+    User,
+    UserPublic,
+)
 
 __all__ = [
     "SCHEMA_VERSION",
+    # user / auth
+    "User",
+    "UserPublic",
     # agent_io
     "AgentError",
     "AgentInputBase",

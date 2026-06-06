@@ -214,6 +214,58 @@ def test_collector_rework_creates_versioned_per_product() -> None:
         assert n.metadata["product"] in {"Notion", "ClickUp", "Asana"}
 
 
+def test_collector_rework_narrows_to_named_product() -> None:
+    """QA issue 点名某个产品 → 只返工该产品的 collector，不碰其它产品。"""
+    plan = _make_plan()
+    issue = QAIssue(
+        issue_id="iss_dim_empty",
+        dimension=QADimension.EVIDENCE_COMPLETENESS,
+        severity="critical",  # type: ignore[arg-type]
+        location="analysis.dimensions[pricing_comparison]",
+        problem="Notion 的 pricing 维度无任何数据源",
+        suggested_fix="重新采集 Notion 的 pricing 来源",
+        target_agent="collector",  # type: ignore[arg-type]
+        required_inputs={
+            "dimension": "pricing_comparison",
+            "competitors_involved": ["Notion"],
+        },
+    )
+    verdict = _make_verdict(
+        routings=[QARouting(target_agent="collector", reason="Notion pricing 缺源")],
+        issues=[issue],
+    )
+    outcome = FeedbackRouter().apply(verdict=verdict, plan=plan, qa_round_count=0)
+    new_ids = {n.node_id for n in outcome.new_nodes}
+    # 只返工 Notion，ClickUp / Asana 不受影响
+    assert new_ids == {"collect.notion_v2"}
+
+
+def test_collector_rework_falls_back_when_product_unmatched() -> None:
+    """点名的产品在 plan 里找不到对应节点 → 安全回退到全部返工（不丢返工）。"""
+    plan = _make_plan()
+    issue = QAIssue(
+        issue_id="iss_unknown",
+        dimension=QADimension.SCHEMA_COMPLETENESS,
+        severity="major",  # type: ignore[arg-type]
+        location="profile",
+        problem="未知产品字段缺失",
+        suggested_fix="重采",
+        target_agent="collector",  # type: ignore[arg-type]
+        required_inputs={"product": "NonExistentProduct"},
+    )
+    verdict = _make_verdict(
+        routings=[QARouting(target_agent="collector", reason="r")],
+        issues=[issue],
+    )
+    outcome = FeedbackRouter().apply(verdict=verdict, plan=plan, qa_round_count=0)
+    new_ids = {n.node_id for n in outcome.new_nodes}
+    assert new_ids == {
+        "collect.asana_v2",
+        "collect.clickup_v2",
+        "collect.notion_v2",
+    }
+
+
 def test_collector_rework_redirects_extractor_input_refs() -> None:
     plan = _make_plan()
     verdict = _make_verdict(routings=[QARouting(target_agent="collector", reason="r")])

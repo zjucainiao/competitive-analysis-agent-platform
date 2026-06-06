@@ -146,6 +146,61 @@ async def test_pg_qa_verdicts_ordered_desc(
     assert ids.index(v2.verdict_id) < ids.index(v1.verdict_id)
 
 
+async def test_pg_llm_calls_persist_filter_and_survive(
+    engine, state_store, make_project
+):
+    project = make_project(project_id=f"pg-llm-{uuid.uuid4().hex[:8]}")
+    await state_store.save_project(project)
+    pid = project.project_id
+
+    def _rec(ts, node_id, agent, phase):
+        return {
+            "timestamp": ts,
+            "trace_id": f"trace_{pid}",
+            "span_id": None,
+            "node_id": node_id,
+            "agent_name": agent,
+            "model": "doubao",
+            "phase": phase,
+            "tokens_input": 10,
+            "tokens_output": 20,
+            "duration_s": 0.5,
+            "finish_reason": "stop",
+            "cost_usd": 0.0,
+            "prompt_preview": f"{phase} preview",
+            "response_preview": "ok",
+        }
+
+    await state_store.append_llm_calls(
+        pid,
+        [
+            _rec(1.0, "collect.coda", "collector", "tool_call"),
+            _rec(2.0, "reporter", "reporter", "tool_call"),
+            _rec(3.0, "reporter_v2", "reporter", "json_mode"),
+        ],
+    )
+
+    # 倒序（最新优先）
+    all_calls = await state_store.list_llm_calls(pid)
+    assert [c["node_id"] for c in all_calls] == [
+        "reporter_v2",
+        "reporter",
+        "collect.coda",
+    ]
+    # node_id 过滤
+    only_v2 = await state_store.list_llm_calls(pid, node_id="reporter_v2")
+    assert len(only_v2) == 1 and only_v2[0]["phase"] == "json_mode"
+    # agent_name 过滤
+    reporters = await state_store.list_llm_calls(pid, agent_name="reporter")
+    assert {c["node_id"] for c in reporters} == {"reporter", "reporter_v2"}
+
+    # 「重启存活」：换全新 store 实例（同 engine = 同 DB），数据仍在
+    fresh = PostgresStateStore(engine)
+    survived = await fresh.list_llm_calls(pid)
+    assert len(survived) == 3
+    assert survived[0]["prompt_preview"] == "json_mode preview"
+
+
 # ----- Checkpointer -----
 
 

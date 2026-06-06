@@ -14,6 +14,7 @@ BaseAgent 依赖的最小 Protocol 接口，作为跨窗口约定。
 
 from __future__ import annotations
 
+import threading
 import time
 import traceback
 from abc import ABC, abstractmethod
@@ -164,24 +165,31 @@ class SelfCritiqueRequiredError(ValueError):
 
 
 class _LLMUsageCounter:
-    """单次 ``invoke()`` 期内的 LLM 用量累加器。"""
+    """单次 ``invoke()`` 期内的 LLM 用量累加器。
 
-    __slots__ = ("tokens_input", "tokens_output", "cost_usd")
+    Agent 可能并行发起多个 LLM 调用（如 Reporter 并行生成章节 / entailment），
+    ``add`` 的 read-modify-write 用锁保护。
+    """
+
+    __slots__ = ("tokens_input", "tokens_output", "cost_usd", "_lock")
 
     def __init__(self) -> None:
         self.tokens_input: int = 0
         self.tokens_output: int = 0
         self.cost_usd: float = 0.0
+        self._lock = threading.Lock()
 
     def reset(self) -> None:
-        self.tokens_input = 0
-        self.tokens_output = 0
-        self.cost_usd = 0.0
+        with self._lock:
+            self.tokens_input = 0
+            self.tokens_output = 0
+            self.cost_usd = 0.0
 
     def add(self, *, tokens_in: int, tokens_out: int, cost: float) -> None:
-        self.tokens_input += tokens_in
-        self.tokens_output += tokens_out
-        self.cost_usd += cost
+        with self._lock:
+            self.tokens_input += tokens_in
+            self.tokens_output += tokens_out
+            self.cost_usd += cost
 
 
 class _TrackingLLMWrapper:

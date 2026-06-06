@@ -19,7 +19,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.api.deps import get_agent_registry
+from backend.api.deps import get_agent_registry, get_current_user
 from backend.orchestrator import AgentRegistry
 
 router = APIRouter(tags=["discovery"])
@@ -95,8 +95,9 @@ class _DiscoverLLMResponse(BaseModel):
 async def discover_competitors(
     req: DiscoverCompetitorsRequest,
     registry: AgentRegistry = Depends(get_agent_registry),
+    _user=Depends(get_current_user),
 ) -> DiscoverCompetitorsResponse:
-    """调一次 LLM 推荐竞品。前端 auto_discover 模式专用。"""
+    """调一次 LLM 推荐竞品。前端 auto_discover 模式专用。需登录（防匿名刷 LLM）。"""
     llm = registry.llm
     if llm is None:
         raise HTTPException(

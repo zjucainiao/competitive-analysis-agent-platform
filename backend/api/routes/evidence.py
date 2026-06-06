@@ -26,12 +26,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from ulid import ULID
 
-from backend.api.deps import get_orchestrator, get_storage
+from backend.api.deps import get_orchestrator, get_owned_project, get_storage
 from backend.orchestrator import Orchestrator
 from backend.orchestrator.orchestrator import _apply_feedback_outcome
 from backend.schemas import (
     Evidence,
     ExtractorOutput,
+    Project,
     ProjectMetrics,
     ProjectStatus,
     QADimension,
@@ -84,13 +85,8 @@ async def patch_evidence(
         default=False,
         description="True 时自动派生 reporter_v{n+1} 节点 + 起后台 run",
     ),
+    project: Project = Depends(get_owned_project),
 ) -> EvidenceDisputeResponse:
-    project = await storage.state_store.get_project(project_id)
-    if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"project {project_id!r} not found",
-        )
 
     outputs = await storage.state_store.list_node_outputs(project_id)
 
@@ -120,8 +116,19 @@ async def patch_evidence(
 
     await storage.state_store.save_node_output(project_id, target_node_id, updated_output)
 
+    # manual_edits +1，并按最新报告段落数重算 edit_rate（与 reports.py PATCH 路径
+    # 口径一致：edit_rate = manual_edits / total_paragraphs，[0,1] 截顶）。
     metrics = project.metrics or ProjectMetrics()
-    new_metrics = metrics.model_copy(update={"manual_edits": metrics.manual_edits + 1})
+    manual_edits = metrics.manual_edits + 1
+    total_paragraphs = _latest_report_total_paragraphs(outputs)
+    edit_rate = (
+        min(manual_edits / total_paragraphs, 1.0)
+        if total_paragraphs > 0
+        else metrics.edit_rate
+    )
+    new_metrics = metrics.model_copy(
+        update={"manual_edits": manual_edits, "edit_rate": edit_rate}
+    )
     await storage.state_store.save_project(project.model_copy(update={"metrics": new_metrics}))
 
     # ----- 自动联动重审 -----
@@ -215,6 +222,18 @@ async def patch_evidence(
 # ============================================================
 # 辅助
 # ============================================================
+
+
+def _latest_report_total_paragraphs(outputs: dict) -> int:
+    """最新 reporter draft 的段落总数（把 manual_edits 换算成 edit_rate 用）。"""
+    versioned = sorted(
+        (k for k in outputs if k.startswith("reporter_v")), reverse=True
+    )
+    final_key = versioned[0] if versioned else "reporter"
+    reporter_out = outputs.get(final_key)
+    if not isinstance(reporter_out, ReporterOutput) or reporter_out.draft is None:
+        return 0
+    return sum(len(s.paragraphs) for s in reporter_out.draft.sections)
 
 
 def _find_paragraphs_citing(

@@ -195,6 +195,39 @@ async def test_state_store_qa_verdicts_ordered_desc(
     assert [v.verdict_id for v in verdicts] == [v2.verdict_id, v1.verdict_id]
 
 
+async def test_state_store_llm_calls_append_list_filter():
+    ss = InMemoryStateStore()
+
+    def _rec(ts, node_id, agent, phase):
+        return {
+            "timestamp": ts,
+            "node_id": node_id,
+            "agent_name": agent,
+            "phase": phase,
+            "prompt_preview": f"{phase} preview",
+        }
+
+    await ss.append_llm_calls(
+        "p1",
+        [
+            _rec(1.0, "collect.coda", "collector", "tool_call"),
+            _rec(2.0, "reporter", "reporter", "tool_call"),
+        ],
+    )
+    await ss.append_llm_calls("p1", [_rec(3.0, "reporter_v2", "reporter", "json_mode")])
+    # 跨 project 隔离
+    await ss.append_llm_calls("p2", [_rec(9.0, "x", "collector", "tool_call")])
+
+    all_p1 = await ss.list_llm_calls("p1")
+    assert [c["node_id"] for c in all_p1] == ["reporter_v2", "reporter", "collect.coda"]
+    assert await ss.list_llm_calls("p1", node_id="reporter_v2") != []
+    assert {
+        c["node_id"] for c in await ss.list_llm_calls("p1", agent_name="reporter")
+    } == {"reporter", "reporter_v2"}
+    assert len(await ss.list_llm_calls("p2")) == 1
+    assert len(await ss.list_llm_calls("p1", limit=1)) == 1
+
+
 # ---------- EventBus ----------
 
 

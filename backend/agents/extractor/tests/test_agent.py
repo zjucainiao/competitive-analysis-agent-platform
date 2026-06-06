@@ -693,3 +693,31 @@ def test_overall_rating_conflict_flagged(notion_raw_sources) -> None:
         is FieldStatus.CONFLICTING
     )
     assert any(e.code == "CONFLICTING_FACTS" for e in out.errors)
+
+
+# ---------- 回归：LLM 把 limits 返回成 str 不应崩 Extractor ----------
+
+
+def test_coerce_str_dict_handles_non_dict_limits() -> None:
+    """LLM 抽取的 ``limits`` 可能是 str/list/None；以前 .items() 直接崩
+    （AttributeError: 'str' object has no attribute 'items'）。"""
+    from backend.agents.extractor.agent import _coerce_str_dict
+
+    assert _coerce_str_dict({"storage": "100GB"}) == {"storage": "100GB"}
+    assert _coerce_str_dict("无限制") == {"summary": "无限制"}
+    assert _coerce_str_dict(["a", "b"]) == {"0": "a", "1": "b"}
+    assert _coerce_str_dict(None) == {}
+    assert _coerce_str_dict("") == {}
+    assert _coerce_str_dict(123) == {}
+
+
+def test_safe_pricing_plan_survives_string_limits() -> None:
+    """带 str 类型 limits 的定价档位应被正常解析（而非整个 Extractor 崩）。"""
+    from backend.agents.extractor.agent import _safe_pricing_plan
+
+    plan = _safe_pricing_plan(
+        {"name": "Pro", "price_per_seat_monthly_usd": 10, "limits": "无限制"}
+    )
+    assert plan is not None
+    assert plan.name == "Pro"
+    assert plan.limits == {"summary": "无限制"}

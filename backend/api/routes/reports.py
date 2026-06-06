@@ -19,7 +19,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.api.deps import get_storage
+from backend.api.deps import get_owned_project, get_storage
 from backend.schemas import (
     Project,
     ProjectMetrics,
@@ -62,14 +62,8 @@ async def patch_paragraph(
     paragraph_id: str,
     req: ParagraphPatchRequest,
     storage: Storage = Depends(get_storage),
+    project: Project = Depends(get_owned_project),
 ) -> ParagraphPatchResponse:
-    project = await storage.state_store.get_project(project_id)
-    if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"project {project_id!r} not found",
-        )
-
     if not report_node_id.startswith("reporter"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

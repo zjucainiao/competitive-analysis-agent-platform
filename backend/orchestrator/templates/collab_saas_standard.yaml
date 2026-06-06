@@ -71,7 +71,7 @@ nodes:
     type: agent_call
     agent: reporter
     depends_on: [analyst]
-    timeout_ms: 120000
+    timeout_ms: 300000
     max_retries: 2
 
   - id: qa

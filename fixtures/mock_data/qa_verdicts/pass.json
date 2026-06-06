@@ -20,6 +20,12 @@
       "pass": true,
       "notes": "3 个 Profile 字段填充率均 ≥ 0.8。"
     },
+    "coverage_density": {
+      "dimension": "coverage_density",
+      "score": 1.0,
+      "pass": true,
+      "notes": "信息密度均值 100%（实质段落 / 带证据 claim）。"
+    },
     "logic_consistency": {
       "dimension": "logic_consistency",
       "score": 0.96,

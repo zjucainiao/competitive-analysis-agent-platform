@@ -22,9 +22,15 @@ dependencies = [
     # openai / deepseek 通过 OpenAI 兼容接口共用 openai SDK
     "openai>=1.40",
 
+    # 鉴权（JWT 签发/校验 + bcrypt 密码哈希）
+    "pyjwt>=2.8",
+    "bcrypt>=4.0",
+
     # 存储
     "asyncpg>=0.29",
     "sqlalchemy>=2.0",
+    # sqlalchemy 异步引擎（postgres 模式）运行时必需，否则 create_async_engine 报错
+    "greenlet>=3.0",
     "alembic>=1.13",
     "redis>=5.0",
     "chromadb>=0.5",

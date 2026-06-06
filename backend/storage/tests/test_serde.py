@@ -48,14 +48,16 @@ def test_load_missing_agent_name_raises():
 
 def test_dump_load_reporter_output_roundtrip():
     draft = ReportDraft(
-        draft_id="d1",
-        project_id="p1",
-        title="t",
+        report_id="rpt_1",
+        version=1,
+        template_id="standard_v1",
         sections=[
-            ReportSection(section_id="s1", title="overview", paragraphs=[])
+            ReportSection(
+                section_id="s1", title="overview", order=1, paragraphs=[]
+            )
         ],
-        executive_summary="",
-        markdown="",
+        summary="",
+        metadata={},
     )
     out = ReporterOutput(
         agent_name="reporter",
@@ -71,4 +73,5 @@ def test_dump_load_reporter_output_roundtrip():
     payload = dump_output(out)
     rebuilt = load_output(payload)
     assert isinstance(rebuilt, ReporterOutput)
-    assert rebuilt.draft.draft_id == "d1"
+    assert rebuilt.draft.report_id == "rpt_1"
+    assert rebuilt.draft.sections[0].section_id == "s1"

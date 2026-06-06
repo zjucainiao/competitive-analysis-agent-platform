@@ -169,9 +169,10 @@ def _safe_pricing_plan(value: dict[str, Any]) -> PricingPlan | None:
             max_seats=_coerce_optional_int(value.get("max_seats")),
             target_segment=value.get("target_segment"),
             included_features=_coerce_str_list(value.get("included_features")),
-            limits={str(k): str(v) for k, v in (value.get("limits") or {}).items()},
+            limits=_coerce_str_dict(value.get("limits")),
         )
-    except ValidationError:
+    except (ValidationError, ValueError, TypeError, AttributeError, KeyError):
+        # 单条定价档位数据畸形（LLM 输出不规范）→ 跳过它，不拖垮整个 Extractor
         return None
 
 
@@ -260,6 +261,25 @@ def _coerce_str_list(v: Any) -> list[str]:
     if isinstance(v, list):
         return [str(x).strip() for x in v if str(x).strip()]
     return []
+
+
+def _coerce_str_dict(v: Any) -> dict[str, str]:
+    """把 LLM 抽取的 ``limits`` 等字段稳健地转成 ``dict[str, str]``。
+
+    LLM 有时把本该是 dict 的字段返回成字符串（如 "无限制" / "100GB 存储"）或
+    list，直接 ``.items()`` 会 AttributeError 把整个 Extractor 搞挂。这里：
+    - dict → 逐项 str 化
+    - 非空 str → 保留到 ``{"summary": v}``（不丢信息）
+    - list → 用序号当 key
+    - 其它 → {}
+    """
+    if isinstance(v, dict):
+        return {str(k): str(val) for k, val in v.items()}
+    if isinstance(v, str):
+        return {"summary": v.strip()} if v.strip() else {}
+    if isinstance(v, list):
+        return {str(i): str(x) for i, x in enumerate(v) if str(x).strip()}
+    return {}
 
 
 # ---------- Extractor ----------

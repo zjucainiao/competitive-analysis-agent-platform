@@ -29,6 +29,7 @@ class QADimension(str, Enum):
     LOGIC_CONSISTENCY = "logic_consistency"
     FRESHNESS = "freshness"
     EXPRESSION = "expression"
+    COVERAGE_DENSITY = "coverage_density"
 
 
 class QADimensionResult(BaseModel):

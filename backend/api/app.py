@@ -21,6 +21,7 @@ from backend.schemas import SCHEMA_VERSION
 from backend.storage import build_storage, init_storage
 
 from .routes import (
+    auth,
     discovery,
     events,
     evidence,
@@ -133,6 +134,7 @@ def create_app(
             "storage_mode": mode,
         }
 
+    app.include_router(auth.router, prefix="/api")
     app.include_router(projects.router, prefix="/api")
     app.include_router(runs.router, prefix="/api")
     app.include_router(reports.router, prefix="/api")
