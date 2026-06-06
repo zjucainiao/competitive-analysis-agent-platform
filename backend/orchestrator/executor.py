@@ -15,29 +15,29 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
-from ulid import ULID
-
 from backend.schemas import (
     AgentError,
     AgentInputBase,
     AgentOutputBase,
     AgentStatus,
-    AnalystInput,
-    CollectorInput,
-    CompetitorProfile,
     DAGNode,
     Evidence,
-    ExtractorInput,
     NodeExecutionResult,
     NodeStatus,
     NodeType,
     Project,
-    QAInput,
-    ReporterInput,
 )
-from backend.schemas.evidence import CollectDimension
 
 from .agent_registry import AgentRegistry
+from .inputs import (
+    BuildInputError,
+    new_span_id,
+    build_collector_input,
+    build_extractor_input,
+    build_analyst_input,
+    build_reporter_input,
+    build_qa_input,
+)
 
 
 # ---------- 常量 ----------
@@ -57,37 +57,8 @@ _CONTROL_NODE_TYPES = frozenset(
 )
 
 
-class BuildInputError(ValueError):
-    """无法从 Project + 上游 outputs 装配出 Agent input。"""
-
-
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _new_span_id() -> str:
-    return f"span_{ULID()}"
-
-
-def _industry_schema_id(project: Project) -> str:
-    """``collaboration_saas`` + ``1.0.0`` → ``collaboration_saas_v1``。"""
-    major = project.industry_schema_version.split(".", 1)[0]
-    return f"{project.industry}_v{major}"
-
-
-def _profiles_from_outputs(
-    outputs: dict[str, AgentOutputBase],
-) -> dict[str, CompetitorProfile]:
-    """从已完成节点 outputs 中收集所有 Extractor profile（key=product 显示名）。"""
-    profiles: dict[str, CompetitorProfile] = {}
-    for nid, out in outputs.items():
-        if not nid.startswith("extract."):
-            continue
-        profile = getattr(out, "profile", None)
-        if profile is None:
-            continue
-        profiles[profile.basic_info.name] = profile
-    return profiles
 
 
 class Executor:
@@ -179,7 +150,7 @@ class Executor:
 
         # 2. 重试循环
         for attempt in range(node.max_retries + 1):
-            span_id = _new_span_id()
+            span_id = new_span_id()
             ctx_token = set_trace_context(
                 trace_id=self.trace_id,
                 span_id=span_id,
@@ -321,7 +292,7 @@ class Executor:
             mock_agent.invoke,
             input_obj,
             trace_id=self.trace_id,
-            span_id=_new_span_id(),
+            span_id=new_span_id(),
             node_id=node.node_id,
         )
 
@@ -350,27 +321,13 @@ class Executor:
 
     def _build_collector_input(
         self, node: DAGNode, qa_feedback: dict | None
-    ) -> CollectorInput:
-        product = node.metadata.get("product")
-        if not product:
-            raise BuildInputError(
-                f"node {node.node_id}: collector metadata missing 'product'"
-            )
-        dims = node.metadata.get("collect_dimensions") or []
-        if not dims:
-            raise BuildInputError(
-                f"node {node.node_id}: collector metadata missing 'collect_dimensions'"
-            )
-        return CollectorInput(
-            task_id=node.node_id,
-            project_id=self.project.project_id,
+    ):
+        return build_collector_input(
+            self.project,
             trace_id=self.trace_id,
-            span_id=_new_span_id(),
-            product_name=product,
+            product=node.metadata.get("product"),
             official_url=node.metadata.get("official_url"),
-            industry=self.project.industry,
-            dimensions=[CollectDimension(d) for d in dims],
-            constraints=self.project.collect_constraints,
+            dims=node.metadata.get("collect_dimensions") or [],
             qa_feedback=qa_feedback,
         )
 
@@ -379,7 +336,7 @@ class Executor:
         node: DAGNode,
         outputs: dict[str, AgentOutputBase],
         qa_feedback: dict | None,
-    ) -> ExtractorInput:
+    ):
         product = node.metadata.get("product")
         if not product:
             raise BuildInputError(
@@ -392,20 +349,11 @@ class Executor:
                 f"node {node.node_id}: missing upstream collector output "
                 f"(input_refs={node.input_refs}, available={list(outputs)})"
             )
-        collector_out = outputs[upstream_id]
-        raw_sources = getattr(collector_out, "raw_sources", None)
-        if raw_sources is None:
-            raise BuildInputError(
-                f"node {node.node_id}: upstream {upstream_id!r} has no raw_sources"
-            )
-        return ExtractorInput(
-            task_id=node.node_id,
-            project_id=self.project.project_id,
+        return build_extractor_input(
+            self.project,
             trace_id=self.trace_id,
-            span_id=_new_span_id(),
-            product_name=product,
-            industry_schema_id=_industry_schema_id(self.project),
-            raw_sources=raw_sources,
+            product=product,
+            collector_output=outputs[upstream_id],
             qa_feedback=qa_feedback,
         )
 
@@ -414,21 +362,11 @@ class Executor:
         node: DAGNode,
         outputs: dict[str, AgentOutputBase],
         qa_feedback: dict | None,
-    ) -> AnalystInput:
-        profiles = _profiles_from_outputs(outputs)
-        if not profiles:
-            raise BuildInputError(
-                f"node {node.node_id}: no extractor outputs available"
-            )
-        return AnalystInput(
-            task_id=node.node_id,
-            project_id=self.project.project_id,
+    ):
+        return build_analyst_input(
+            self.project,
             trace_id=self.trace_id,
-            span_id=_new_span_id(),
-            target_product=self.project.target_product,
-            competitors=list(self.project.competitors),
-            profiles=profiles,
-            dimensions=list(self.project.analysis_dimensions),
+            outputs=outputs,
             qa_feedback=qa_feedback,
         )
 
@@ -437,22 +375,16 @@ class Executor:
         node: DAGNode,
         outputs: dict[str, AgentOutputBase],
         qa_feedback: dict | None,
-    ) -> ReporterInput:
+    ):
         analyst_out = self._latest_output(outputs, prefix_or_id="analyst")
         if analyst_out is None:
             raise BuildInputError(
                 f"node {node.node_id}: missing analyst output"
             )
-        return ReporterInput(
-            task_id=node.node_id,
-            project_id=self.project.project_id,
+        return build_reporter_input(
+            self.project,
             trace_id=self.trace_id,
-            span_id=_new_span_id(),
-            project_name=self.project.project_name,
-            analysis=analyst_out.result,  # type: ignore[attr-defined]
-            template_id=self.project.report_template_id,
-            output_format="markdown",
-            target_audience=self.project.target_audience,
+            analyst_output=analyst_out,
             qa_feedback=qa_feedback,
         )
 
@@ -461,24 +393,20 @@ class Executor:
         node: DAGNode,
         outputs: dict[str, AgentOutputBase],
         qa_feedback: dict | None,
-    ) -> QAInput:
+    ):
         reporter_out = self._latest_output(outputs, prefix_or_id="reporter")
         analyst_out = self._latest_output(outputs, prefix_or_id="analyst")
         if reporter_out is None or analyst_out is None:
             raise BuildInputError(
                 f"node {node.node_id}: missing reporter/analyst upstream output"
             )
-        profiles = _profiles_from_outputs(outputs)
         prior_verdicts = self._prior_qa_verdicts(outputs, exclude_node_id=node.node_id)
-        return QAInput(
-            task_id=node.node_id,
-            project_id=self.project.project_id,
+        return build_qa_input(
+            self.project,
             trace_id=self.trace_id,
-            span_id=_new_span_id(),
-            draft=reporter_out.draft,  # type: ignore[attr-defined]
-            analysis=analyst_out.result,  # type: ignore[attr-defined]
-            profiles=profiles,
-            evidence_store_handle=None,
+            reporter_output=reporter_out,
+            analyst_output=analyst_out,
+            outputs=outputs,
             prior_verdicts=prior_verdicts,
         )
 
@@ -603,6 +531,6 @@ class Executor:
 
 
 __all__ = [
-    "BuildInputError",
+    "BuildInputError",  # BuildInputError re-exported for backward compat; canonical source is .inputs
     "Executor",
 ]

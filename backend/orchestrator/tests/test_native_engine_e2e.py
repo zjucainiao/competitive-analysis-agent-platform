@@ -1,0 +1,139 @@
+"""端到端验证 ``ORCH_ENGINE=native`` 分支接入 ``Orchestrator.run()``。
+
+复用 ``test_native_graph`` 的桩 Agent / 假 registry / demo Project,配合
+``build_storage(mode="memory")`` 的内存三件套,跑通整条原生流水线,并断言:
+- ``run()`` 产出含 reporter 的 ``NodeExecutionResult`` 流;
+- 节点输出被真正落进 ``state_store``(reporter + qa 均可查回)。
+
+仅在 env 置位时走 native 分支;默认 legacy 路径不受影响(见
+``test_native_engine_legacy_default_untouched``)。
+"""
+from __future__ import annotations
+
+import pytest
+
+from backend.storage import build_storage
+
+from backend.orchestrator.tests.test_native_graph import (
+    _FakeRegistry,
+    _StubQA,
+    _block_reporter_verdict,
+    _load_demo_project,
+    _pass_verdict,
+)
+
+
+@pytest.fixture
+def stub_registry() -> _FakeRegistry:
+    """桩 registry:QA 单轮即 pass(不触发返工)。"""
+    return _FakeRegistry(_StubQA([_pass_verdict()]))
+
+
+@pytest.fixture
+def two_product_project():
+    """两产品 demo Project(target=Notion, competitor=Asana)。"""
+    return _load_demo_project(products=["Notion", "Asana"])
+
+
+@pytest.fixture
+def memory_storage():
+    """内存三件套(state_store / event_bus / checkpointer)。"""
+    return build_storage(mode="memory")
+
+
+# 区分两套引擎落库结果的判据:native 用真实产品字符串做扇出引用键
+# (``collect.Notion`` 首字母大写,取自 project.target_product),legacy 模板
+# 用小写化的 product slug(``collect.notion``)且带 start/join_extract/end 等
+# 结构节点。靠首字母大小写即可可靠区分本次到底走了哪条引擎分支。
+_NATIVE_MARKER = "collect.Notion"   # native only
+_LEGACY_MARKER = "collect.notion"   # legacy template only
+
+
+@pytest.mark.asyncio
+async def test_native_engine_persists_outputs(
+    monkeypatch, stub_registry, two_product_project, memory_storage
+):
+    """native 分支跑完后,reporter/qa 输出落进 state_store。"""
+    monkeypatch.setenv("ORCH_ENGINE", "native")
+    from backend.orchestrator.orchestrator import Orchestrator
+
+    orch = Orchestrator(registry=stub_registry, storage=memory_storage)
+    plan = orch.plan(two_product_project)
+    results = [r async for r in orch.run(plan, two_product_project)]
+
+    assert any(r.node_id == "reporter" for r in results)
+    saved = await memory_storage.state_store.list_node_outputs(
+        two_product_project.project_id
+    )
+    assert "reporter" in saved and "qa" in saved
+    # 确认确实走了 native 引擎(而非 legacy 也恰好落了 reporter/qa)
+    assert _NATIVE_MARKER in saved
+    assert _LEGACY_MARKER not in saved
+    # native 扇出键带真实产品名,出现在结果流里
+    assert any(r.node_id == _NATIVE_MARKER for r in results)
+
+
+@pytest.mark.asyncio
+async def test_native_engine_legacy_default_untouched(
+    monkeypatch, stub_registry, two_product_project, memory_storage
+):
+    """不设 ORCH_ENGINE 时走 legacy:落库结果应是 legacy 模板形状,
+    不应出现 native-only 的引用键,证明默认路径未被 native 分支侵入。"""
+    monkeypatch.delenv("ORCH_ENGINE", raising=False)
+    from backend.orchestrator.orchestrator import Orchestrator
+
+    orch = Orchestrator(registry=stub_registry, storage=memory_storage)
+    plan = orch.plan(two_product_project)
+    results = [r async for r in orch.run(plan, two_product_project)]
+
+    # legacy 至少跑出若干节点结果
+    assert results
+    saved = await memory_storage.state_store.list_node_outputs(
+        two_product_project.project_id
+    )
+    # 走的是 legacy:有 legacy marker,没有 native marker
+    assert _LEGACY_MARKER in saved
+    assert _NATIVE_MARKER not in saved
+
+
+@pytest.mark.asyncio
+async def test_native_engine_persists_reworked_output(
+    monkeypatch, two_product_project, memory_storage
+):
+    """QA 返工后 reporter 的第二次 draft 必须被落库(不能被 seen_refs 去重掉)。
+
+    _StubQA 序列: [block_reporter, pass]
+      - 第 1 次 reporter → draft.version == 1
+      - QA 阻断 → reporter 再跑
+      - 第 2 次 reporter → draft.version == 2
+      - 第 2 次 QA → pass
+
+    Bug(修复前): seen_refs 集合在第 1 次 reporter 后就把 "reporter" 加入,
+      第 2 次 reporter 产出新对象时被跳过 → state_store 保留 version==1(旧)。
+    Fix: 改用 seen dict 按 id() 去重 → 新对象 id 不同 → 重新落库 → version==2。
+    """
+    monkeypatch.setenv("ORCH_ENGINE", "native")
+    from backend.orchestrator.orchestrator import Orchestrator
+
+    rework_registry = _FakeRegistry(
+        _StubQA([_block_reporter_verdict(), _pass_verdict()])
+    )
+    orch = Orchestrator(registry=rework_registry, storage=memory_storage)
+    plan = orch.plan(two_product_project)
+    results = [r async for r in orch.run(plan, two_product_project)]
+
+    # 流里应包含两次 reporter 结果
+    reporter_results = [r for r in results if r.node_id == "reporter"]
+    assert len(reporter_results) == 2, (
+        f"expected 2 reporter results (initial + rework), got {len(reporter_results)}"
+    )
+
+    # 落库的 reporter output 必须是返工后的 draft(version==2)
+    persisted = await memory_storage.state_store.get_node_output(
+        two_product_project.project_id, "reporter"
+    )
+    assert persisted is not None, "reporter output was not persisted at all"
+    assert persisted.draft.version == 2, (
+        f"expected reworked draft version 2, got {persisted.draft.version} "
+        "(version 1 means the stale first-pass draft was kept — bug not fixed)"
+    )

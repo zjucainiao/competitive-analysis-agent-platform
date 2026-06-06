@@ -31,9 +31,11 @@ LangGraph 的 checkpoint 会在每轮 dispatch 后自动落盘；崩溃可由 ``
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any, AsyncIterator
 
 from langgraph.graph import END, START, StateGraph
+from ulid import ULID
 
 from backend.schemas import (
     AgentOutputBase,
@@ -47,6 +49,7 @@ from backend.schemas import (
     QAOutput,
     QAVerdict,
 )
+from backend.observability.llm_call_log import list_calls
 from backend.storage import Storage
 from backend.storage.langgraph_adapter import to_langgraph_saver
 
@@ -97,7 +100,15 @@ class Orchestrator:
         - DAGPlan 一次 ``save_dag_plan``
         - 每个节点完成后 ``save_node_output`` + ``publish(project:{pid}:nodes, result)``
         - LangGraph 自动 checkpoint state（thread_id=project_id）
+
+        引擎选择由 ``ORCH_ENGINE`` 环境变量控制（默认 ``legacy``，行为不变）：
+        ``native`` 时改走 ``backend.orchestrator.graph`` 的原生 LangGraph 图。
         """
+        if os.getenv("ORCH_ENGINE", "legacy") == "native":
+            async for r in self._run_native(plan, project):
+                yield r
+            return
+
         await self.storage.state_store.save_dag_plan(plan)
 
         executor = Executor(registry=self.registry, project=project)
@@ -113,6 +124,93 @@ class Orchestrator:
             state = OrchestratorState.model_validate(snap)
             for result in state.last_batch_results:
                 yield result
+
+    async def _run_native(
+        self,
+        plan: DAGPlan,
+        project: Project,
+    ) -> AsyncIterator[NodeExecutionResult]:
+        """原生 LangGraph 引擎执行(``ORCH_ENGINE=native``)。
+
+        与 legacy ``run`` 行为对齐的对外契约:
+        - 入口先 ``save_dag_plan(plan)`` 落一份占位 plan(满足签名/前端先有形状),
+          跑完后用 ``run_state_to_dagplan`` 的投影 plan 覆盖。
+        - 每个新出现的 ``outputs`` 引用(``collect.Notion`` / ``reporter`` 等)落一次
+          ``save_node_output`` 并广播 ``project:{pid}:nodes``,同时 yield 一个
+          ``NodeExecutionResult``。
+        - checkpoint 复用项目 checkpointer(经 ``to_langgraph_saver``),其 serde
+          已能 round-trip outputs 里的 Pydantic ``AgentOutputBase``(与 legacy 同链路)。
+
+        ``outputs`` 在 ``stream_mode="values"`` 下是跨 superstep 合并后的全量 dict;
+        ``seen`` dict 按对象 id 去重：同一 Python 对象不重复落库/广播/yield,
+        但 QA 返工后 reporter 产出新对象时(id 不同)会重新落库,确保存储始终是最新 draft。
+        """
+        from .graph import build_native_graph
+        from .projection import run_state_to_dagplan
+        from .run_state import RunState as _RunState
+
+        # 占位 plan：满足前端"先有 DAG 形状"，跑完被投影 plan 覆盖。
+        await self.storage.state_store.save_dag_plan(plan)
+
+        graph = build_native_graph(
+            self.registry,
+            project=project,
+            checkpointer=to_langgraph_saver(self.storage.checkpointer),
+        )
+        init = _RunState(
+            project_id=project.project_id,
+            run_id=f"run_{ULID()}",
+            analysis_mode=project.analysis_mode.value,
+            products=[project.target_product, *project.competitors],
+        ).model_dump()
+        config = {"configurable": {"thread_id": project.project_id}}
+        channel = f"project:{project.project_id}:nodes"
+
+        seen: dict[str, int] = {}  # ref -> id() of last-persisted output object
+        final_state: dict[str, Any] | None = None
+        async for snap in graph.astream(init, config=config, stream_mode="values"):
+            final_state = snap
+            for ref, out in snap["outputs"].items():
+                if out is None:
+                    continue
+                if seen.get(ref) == id(out):  # already persisted THIS exact output object
+                    continue
+                seen[ref] = id(out)
+                # 先落盘后广播：避免 WS 拿到尚未持久化的引用。
+                await self.storage.state_store.save_node_output(
+                    project.project_id, ref, out
+                )
+                res = NodeExecutionResult(
+                    project_id=project.project_id,
+                    node_id=ref,
+                    status=NodeStatus.SUCCESS,
+                    output=out,
+                )
+                await self.storage.event_bus.publish(channel, res)
+                yield res
+
+        # 跑完用投影 plan 覆盖占位 plan(供旧 /state + 前端 Phase 2 前消费)。
+        # astream 快照里 history 是 NodeRun 对象,projection 契约要的是 dict 列表,
+        # 故先 model_validate→model_dump 归一化(与 projection 文档约定一致)。
+        if final_state is not None:
+            normalized = _RunState.model_validate(final_state).model_dump()
+            proj_plan, _ = run_state_to_dagplan(normalized, project=project)
+            await self.storage.state_store.save_dag_plan(proj_plan)
+
+            # 持久化所有 QA verdict(legacy 引擎在 _process_qa_routing 里逐条落库;
+            # native 引擎在此从 final_state["verdicts"] 一次性落库)。
+            # astream stream_mode="values" 下 verdicts 是累积合并列表;
+            # 元素可能是 QAVerdict 对象(直接使用)或 dict(跨 serde 边界反序列化后);
+            # 两种情况均兼容,确保 list_qa_verdicts 可回放全部轮次。
+            raw_verdicts: list[Any] = final_state.get("verdicts", [])
+            for raw in raw_verdicts:
+                if isinstance(raw, QAVerdict):
+                    verdict = raw
+                else:
+                    verdict = QAVerdict.model_validate(raw)
+                await self.storage.state_store.save_qa_verdict(
+                    project.project_id, verdict
+                )
 
     async def resume(
         self, project_id: str, project: Project
@@ -186,6 +284,26 @@ class Orchestrator:
         # 2. 并发上限
         batch = ready[: self.max_parallel]
 
+        # 2.5 先把本批次标记 RUNNING 并落库 + 广播：让前端 DAG / Trace 在节点
+        #     执行的这几分钟里显示"运行中"高亮，而不是一直 pending（看着像卡住）。
+        #     纯观测，失败不阻塞主流程。
+        running_channel = f"project:{project.project_id}:nodes"
+        for node in batch:
+            try:
+                await self.storage.state_store.update_node_status(
+                    project.project_id, node.node_id, NodeStatus.RUNNING
+                )
+                await self.storage.event_bus.publish(
+                    running_channel,
+                    NodeExecutionResult(
+                        project_id=project.project_id,
+                        node_id=node.node_id,
+                        status=NodeStatus.RUNNING,
+                    ),
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
         # 3. 并发执行
         results: list[NodeExecutionResult] = await asyncio.gather(
             *[
@@ -211,6 +329,9 @@ class Orchestrator:
                 await self.storage.state_store.save_node_output(
                     project.project_id, r.node_id, r.output
                 )
+                # 顺带把该节点本轮的 LLM 调用流水从 ring buffer 落库，
+                # 让 Trace tab 在进程重启后仍可查（observability 永不阻塞主流程）。
+                await self._persist_node_llm_calls(project.project_id, r)
             await self.storage.state_store.update_node_status(
                 project.project_id, r.node_id, r.status
             )
@@ -250,6 +371,30 @@ class Orchestrator:
             "qa_round_count": qa_round_count,
             "last_batch_results": results,
         }
+
+    async def _persist_node_llm_calls(self, project_id: str, result: Any) -> None:
+        """把某节点本轮的 LLM 调用从 ring buffer 落到 state_store。
+
+        在节点 invoke（跑在 to_thread 工作线程）结束后的 async 上下文里调用，
+        此时 ring buffer 已有该节点的记录。trace_id 取自 output（与 BaseAgent
+        进入时 set 的 contextvar 一致），按 node_id 精确过滤。
+        失败永不抛 —— 观测层不能搞挂主流程。
+        """
+        out = getattr(result, "output", None)
+        if out is None:
+            return
+        try:
+            recs = list_calls(
+                trace_id=getattr(out, "trace_id", None),
+                node_id=getattr(result, "node_id", None),
+                limit=500,
+            )
+            if recs:
+                await self.storage.state_store.append_llm_calls(
+                    project_id, [r.to_dict() for r in recs]
+                )
+        except Exception:  # noqa: BLE001
+            pass
 
     async def _persist_metrics(
         self,
@@ -382,15 +527,25 @@ def _apply_node_results(
         if r is None:
             new_nodes.append(node)
             continue
-        new_nodes.append(
-            node.model_copy(
-                update={
-                    "status": r.status,
-                    "started_at": r.started_at,
-                    "ended_at": r.ended_at,
-                }
-            )
-        )
+        update: dict[str, Any] = {
+            "status": r.status,
+            "started_at": r.started_at,
+            "ended_at": r.ended_at,
+        }
+        # 失败节点：output 为 None 时错误本会丢失。把错误写进 node.metadata，
+        # 让 /state 返回、前端能显示"为什么失败"（如超时）而不是只一个红块。
+        if r.status == NodeStatus.FAILED and r.error is not None:
+            meta = dict(node.metadata)
+            meta["error"] = {
+                "code": r.error.code,
+                "message": r.error.message,
+                "severity": r.error.severity,
+            }
+            attempts = (r.metadata or {}).get("attempts")
+            if attempts is not None:
+                meta["attempts"] = attempts
+            update["metadata"] = meta
+        new_nodes.append(node.model_copy(update=update))
     return plan.model_copy(update={"nodes": new_nodes})
 
 
