@@ -30,6 +30,7 @@ from backend.orchestrator.inputs import (
     build_extractor_input,
     build_qa_input,
     build_reporter_input,
+    new_span_id,
 )
 from backend.orchestrator.routing import decide_qa_route
 from backend.orchestrator.run_agent import AgentRunResult, run_agent_node
@@ -106,12 +107,23 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
 
         targets = rework_products(返工时) or products(首跑)。
         round = qa_round + 1(首跑 qa_round=0 → round=1)。
+
+        worker 看不到全局 state,故把该产品对应的 qa_feedback(若返工有)打包进
+        Send payload(键 ``collect.{product}``,见 routing.decide_qa_route 文档)。
         """
         targets = state.rework_products or state.products
         round_ = state.qa_round + 1
+        fb = state.qa_feedback_by_node
         return Command(
             goto=[
-                Send("collect_one", {"product": p, "round": round_})
+                Send(
+                    "collect_one",
+                    {
+                        "product": p,
+                        "round": round_,
+                        "qa_feedback": fb.get(f"collect.{p}"),
+                    },
+                )
                 for p in targets
             ]
         )
@@ -130,7 +142,7 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
             product=product,
             official_url=None,
             dims=dims,
-            qa_feedback=None,
+            qa_feedback=payload.get("qa_feedback"),
         )
         res = await run_agent_node(
             registry,
@@ -164,6 +176,7 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
         """
         targets = state.rework_products or state.products
         round_ = state.qa_round + 1
+        fb = state.qa_feedback_by_node
         return Command(
             goto=[
                 Send(
@@ -172,6 +185,7 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
                         "product": p,
                         "collector_output": state.outputs.get(f"collect.{p}"),
                         "round": round_,
+                        "qa_feedback": fb.get(f"extract.{p}"),
                     },
                 )
                 for p in targets
@@ -187,7 +201,7 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
             trace_id=trace_id,
             product=product,
             collector_output=payload["collector_output"],
-            qa_feedback=None,
+            qa_feedback=payload.get("qa_feedback"),
         )
         res = await run_agent_node(
             registry,
@@ -221,7 +235,7 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
             project,
             trace_id=trace_id,
             outputs=state.outputs,
-            qa_feedback=None,
+            qa_feedback=state.qa_feedback_by_node.get("analyst"),
         )
         res = await run_agent_node(
             registry,
@@ -245,13 +259,33 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
         }
 
     async def reporter(state) -> dict:
-        """normal 节点:基于 analyst result 跑 reporter(回环时产新版 draft)。"""
+        """normal 节点:基于 analyst result 跑 reporter(回环时产新版 draft)。
+
+        fail-soft:若上游 analyst 输出缺失/为 None(analyst 失败),不再无脑
+        ``state.outputs["analyst"]`` 触 KeyError,而是直接早退返回一条 failed
+        NodeRun(无 outputs),让 qa 节点接力判断并优雅终止。
+        """
         round_ = state.qa_round + 1
+        analyst_output = state.outputs.get("analyst")
+        if analyst_output is None:
+            return {
+                "outputs": {},
+                "history": [
+                    NodeRun(
+                        node="reporter",
+                        agent="reporter",
+                        round=round_,
+                        status="failed",
+                        span_id=new_span_id(),
+                        output_ref=None,
+                    )
+                ],
+            }
         inp = build_reporter_input(
             project,
             trace_id=trace_id,
-            analyst_output=state.outputs["analyst"],
-            qa_feedback=None,
+            analyst_output=analyst_output,
+            qa_feedback=state.qa_feedback_by_node.get("reporter"),
         )
         res = await run_agent_node(
             registry,
@@ -283,11 +317,35 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
           reporter;route_update 含 qa_round / rework_* / aborted 等。
         """
         round_ = state.qa_round + 1
+        reporter_output = state.outputs.get("reporter")
+        analyst_output = state.outputs.get("analyst")
+        # fail-soft:上游 reporter / analyst 任一缺失(上游失败)→ 直接 END,
+        # 不构造 QAInput(否则 .draft / .result 会 AttributeError),记一条 failed
+        # NodeRun 并标记 aborted,让 _run_native 投影与终态逻辑优雅收尾。
+        if reporter_output is None or analyst_output is None:
+            return Command(
+                goto=END,
+                update={
+                    "outputs": {},
+                    "history": [
+                        NodeRun(
+                            node="qa",
+                            agent="qa",
+                            round=round_,
+                            status="failed",
+                            span_id=new_span_id(),
+                            output_ref=None,
+                        )
+                    ],
+                    "aborted": True,
+                    "abort_reason": "upstream output missing",
+                },
+            )
         inp = build_qa_input(
             project,
             trace_id=trace_id,
-            reporter_output=state.outputs["reporter"],
-            analyst_output=state.outputs["analyst"],
+            reporter_output=reporter_output,
+            analyst_output=analyst_output,
             outputs=state.outputs,
             prior_verdicts=list(state.verdicts),
         )

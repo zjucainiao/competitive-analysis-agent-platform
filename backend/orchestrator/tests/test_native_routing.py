@@ -165,3 +165,51 @@ def test_mixed_agent_issues_only_uses_chosen_agent_products() -> None:
     assert upd["rework_target"] == "collector"
     # ONLY Notion (from collector's issue), NOT Asana (extractor's issue)
     assert upd["rework_products"] == ["Notion"]
+
+
+def test_qa_feedback_by_node_reporter_key() -> None:
+    """reporter routing → qa_feedback_by_node has 'reporter' key with from_verdict_id."""
+    goto, upd = decide_qa_route(
+        _verdict(
+            routing=[QARouting(target_agent="reporter", reason="rewrite section", payload={})],
+            blocking=True,
+        ),
+        qa_round=0,
+        max_rounds=3,
+        products=["Notion", "Asana"],
+    )
+    assert goto == "reporter"
+    fb = upd.get("qa_feedback_by_node", {})
+    assert "reporter" in fb, f"expected 'reporter' key in qa_feedback_by_node, got {list(fb.keys())}"
+    payload = fb["reporter"]
+    assert "from_verdict_id" in payload, (
+        f"expected 'from_verdict_id' in reporter payload, got {list(payload.keys())}"
+    )
+
+
+def test_qa_feedback_by_node_extractor_asana_key() -> None:
+    """extractor routing naming product 'Asana' → qa_feedback_by_node has 'extract.Asana' key."""
+    issue = _issue(
+        target="extractor",
+        required_inputs={"product": "Asana"},
+        issue_id="iss_asana_fb",
+    )
+    goto, upd = decide_qa_route(
+        _verdict(
+            routing=[QARouting(target_agent="extractor", reason="missing data", payload={})],
+            blocking=True,
+            issues=[issue],
+        ),
+        qa_round=0,
+        max_rounds=3,
+        products=["Notion", "Asana"],
+    )
+    assert goto == "extract_dispatch"
+    fb = upd.get("qa_feedback_by_node", {})
+    assert "extract.Asana" in fb, (
+        f"expected 'extract.Asana' key in qa_feedback_by_node, got {list(fb.keys())}"
+    )
+    payload = fb["extract.Asana"]
+    assert "from_verdict_id" in payload, (
+        f"expected 'from_verdict_id' in extract.Asana payload, got {list(payload.keys())}"
+    )

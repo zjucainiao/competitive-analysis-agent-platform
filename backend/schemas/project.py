@@ -155,6 +155,9 @@ class RunSnapshot(BaseModel):
     verdicts: list[QAVerdict]
     metrics: "ProjectMetrics | None" = None
     final_status: str
+    # native 引擎 RunState.history 的 dict 投影(回放真相源)。Stage A 仅占位默认空,
+    # 端到端写入(RunStateView)由 Stage B 落地;此处保持向后兼容(已有快照无此字段)。
+    history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # Pydantic 前向引用：ProjectMetricsSnapshot.metrics / RunSnapshot.metrics 引用了下面定义的 ProjectMetrics

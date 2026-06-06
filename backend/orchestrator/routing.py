@@ -111,11 +111,58 @@ def decide_qa_route(
     else:
         rework = []
 
+    qa_feedback_by_node = _build_qa_feedback_by_node(
+        verdict, chosen=chosen, rework=rework, qa_round=qa_round + 1
+    )
+
     return _AGENT_TO_ENTRY[chosen], {
         "qa_round": qa_round + 1,
         "rework_target": chosen,
         "rework_products": rework,
+        "qa_feedback_by_node": qa_feedback_by_node,
     }
+
+
+# 逻辑 Agent → rework 节点入口前缀(per-product 用于拼 ``{prefix}.{product}``)
+_AGENT_NODE_PREFIX: dict[str, str] = {
+    "collector": "collect",
+    "extractor": "extract",
+}
+
+
+def _build_qa_feedback_by_node(
+    verdict: Any, *, chosen: str, rework: list[str], qa_round: int
+) -> dict[str, dict]:
+    """为 chosen 返工目标构造 ``{entry_node_id: qa_feedback_payload}``。
+
+    复用 feedback_router._build_qa_feedback_payload 生成的 payload(与 legacy
+    完全同形:含 from_verdict_id / issues / instructions / must_address /
+    revision)。键名约定(与 nodes.py 读取处一一对应):
+
+    - collector → ``collect.{product}``(rework 里每个产品一个键)
+    - extractor → ``extract.{product}``
+    - analyst   → ``analyst``
+    - reporter  → ``reporter``
+
+    chosen 名下若有多条 routing,取第一条生成 payload(legacy 亦按 routing 逐条
+    处理,这里聚合为单一目标已足够覆盖返工指令)。
+    """
+    from backend.orchestrator.feedback_router import _build_qa_feedback_payload
+
+    routing_list = getattr(verdict, "routing", None) or []
+    chosen_routing = next(
+        (r for r in routing_list if r.target_agent == chosen), None
+    )
+    if chosen_routing is None:
+        return {}
+    payload = _build_qa_feedback_payload(verdict, chosen_routing, qa_round=qa_round)
+
+    prefix = _AGENT_NODE_PREFIX.get(chosen)
+    if prefix is not None:
+        # per-product:每个待返工产品一个键
+        return {f"{prefix}.{p}": payload for p in rework}
+    # 全局 Agent:键即节点名
+    return {chosen: payload}
 
 
 __all__ = ["decide_qa_route"]

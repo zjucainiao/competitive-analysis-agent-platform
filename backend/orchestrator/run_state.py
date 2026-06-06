@@ -45,6 +45,11 @@ class RunState(BaseModel):
     qa_round: int = 0
     rework_products: list[str] = Field(default_factory=list)
     rework_target: Optional[str] = None
+    # QA 返工反馈,按"消费该反馈的入口节点 ID"作键(last-write-wins,无 reducer):
+    # per-product Agent → ``collect.{product}`` / ``extract.{product}``;
+    # 全局 Agent → ``analyst`` / ``reporter``。由 qa 节点每轮经 decide_qa_route
+    # 整体覆盖写入,rework 节点从这里取对应 payload 注入 build_*_input。
+    qa_feedback_by_node: dict[str, dict] = Field(default_factory=dict)
     aborted: bool = False
     abort_reason: str = ""
 
