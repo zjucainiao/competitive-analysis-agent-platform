@@ -23,11 +23,31 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
+
+
+def _parallel_map(fn, items: list, *, max_workers: int) -> list:
+    """对独立任务并行求值，保持输入顺序。
+
+    每个任务提交前 ``copy_context()``，把 LLM trace 的 node_id/trace_id 带进
+    worker 线程（否则并发产生的 LLM call 会丢节点归属）。``max_workers<=1`` 或
+    单元素时退化为串行。
+    """
+    if len(items) <= 1 or max_workers <= 1:
+        return [fn(it) for it in items]
+    contexts = [contextvars.copy_context() for _ in items]
+    with ThreadPoolExecutor(max_workers=min(len(items), max_workers)) as pool:
+        futures = [
+            pool.submit(ctx.run, fn, it) for it, ctx in zip(items, contexts)
+        ]
+        return [f.result() for f in futures]
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -51,6 +71,7 @@ from backend.schemas import (
     ReportParagraph,
     ReportSection,
 )
+from backend.schemas.labels import dimension_label
 
 from .templates import (
     ReportSectionTemplate,
@@ -131,6 +152,10 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
     PENALTY_THIN_REPORT: ClassVar[float] = 0.15
     # self-correct loop
     MAX_REPAIR_ATTEMPTS: ClassVar[int] = 3
+    MAX_ENTAILMENT_CHECKS: ClassVar[int] = 32
+    # 并行度：章节生成 / entailment 判定 / repair 重写都是独立 LLM 调用，
+    # 并行执行把 reporter 总壁钟从"调用数×串行"降到接近"最慢单调用"。
+    MAX_LLM_WORKERS: ClassVar[int] = 8
 
     def __init__(
         self,
@@ -293,8 +318,22 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
         banned_hits = 0
         unverified_hits = 0
 
-        for sec_tpl in sorted(template.sections, key=lambda s: s.order):
-            section, sec_errors, sec_banned, sec_unverified = self._build_section(
+        # 各章节相互独立（每节自己的 LLM 调用 + 校验），并行生成；结果按 order
+        # 收集，顺序与串行一致。token 累加器已加锁，trace context 由 _parallel_map
+        # 逐任务 copy_context 传播。
+        #
+        # 只渲染本次实际分析过的维度章节：固定模板含 pricing/SWOT 等全维度，
+        # 但用户可能只选了 feature_comparison。跳过未分析维度，避免交付物里出现
+        # 「## 定价策略对比 暂无…」这类空占位。overview / disclaimer（dimension=None）始终保留。
+        analysed_dims = set(inp.analysis.dimensions.keys())
+        ordered_tpls = [
+            t
+            for t in sorted(template.sections, key=lambda s: s.order)
+            if t.dimension is None or t.dimension in analysed_dims
+        ]
+
+        def _build_one(sec_tpl: ReportSectionTemplate):
+            return self._build_section(
                 tpl=sec_tpl,
                 template=template,
                 inp=inp,
@@ -303,6 +342,11 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                 ev_db=ev_db,
                 allow_llm=allow_llm,
             )
+
+        section_results = _parallel_map(
+            _build_one, ordered_tpls, max_workers=self.MAX_LLM_WORKERS
+        )
+        for section, sec_errors, sec_banned, sec_unverified in section_results:
             sections.append(section)
             errors.extend(sec_errors)
             banned_hits += sec_banned
@@ -313,6 +357,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
         repair_stats = self._run_self_correct(sections, inp, ev_db, errors)
         repair_attempts = repair_stats["repair_attempts"]
         forced_fallbacks = repair_stats["forced_fallbacks"]
+        entailment_checks = repair_stats["entailment_checks"]
 
         # self-correct 改写过段落 → 重新统计 banned_term / unverified_quantity
         # 让 metadata 与 confidence 反映修复后的真实状态
@@ -325,6 +370,9 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                 )
                 banned_hits += sec_banned
                 unverified_hits += sec_unverified
+
+        # 过滤掉未分析维度后，标题里写死的「N. 」序号会跳号（如 1/2/5）→ 连续重排。
+        sections = _renumber_sections(sections)
 
         total_paragraphs = sum(len(s.paragraphs) for s in sections)
         word_count = sum(
@@ -354,6 +402,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                 "unverified_quantity_hits": unverified_hits,
                 "repair_attempts": repair_attempts,
                 "forced_fallbacks": forced_fallbacks,
+                "entailment_checks": entailment_checks,
                 "target_audience": template.target_audience,
             },
         )
@@ -379,6 +428,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
             unverified_hits=unverified_hits,
             repair_attempts=repair_attempts,
             forced_fallbacks=forced_fallbacks,
+            entailment_checks=entailment_checks,
             template=template,
             errors=errors,
         )
@@ -420,7 +470,11 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
             section = self._disclaimer_section(tpl, template)
         else:
             section = None
-            if allow_llm and self.llm is not None:
+            has_dimension_claims = (
+                tpl.dimension is not None
+                and inp.analysis.dimensions.get(tpl.dimension) is not None
+            )
+            if allow_llm and self.llm is not None and has_dimension_claims:
                 try:
                     section = self._llm_section(
                         tpl=tpl,
@@ -507,6 +561,10 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
             dim_obj = inp.analysis.dimensions.get(tpl.dimension)
         local_claims = dim_obj.claims if dim_obj else []
         allowed_claim_ids = sorted(c.claim_id for c in local_claims)
+        # 段落密度按 claim 数动态决定（不设全局字数下限）：claim 越多写越多，
+        # claim 少则诚实地短。下限仍是模板 min_paragraphs（通常 1），上限留给
+        # LLM 判断——prompt 已要求"每条 claim 一段 + 至多 1 段小结"。
+        target_paragraphs = max(tpl.min_paragraphs, len(local_claims))
         # evidence 仅暴露与本章节绑定 dimension 相关的子集（避免 prompt 膨胀）
         allowed_ev = sorted(
             {e for c in local_claims for e in c.evidence_ids if e in valid_evidence}
@@ -531,6 +589,12 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
             style=tpl.style,
             target_audience=template.target_audience,
         )
+        # QA 返工反馈是最高优先级指令，且要在 trace 的 prompt_preview（前若干字符）里
+        # 可见 —— 所以 prepend 到 system 顶部，而不是埋在 user message 末尾被截断。
+        # 这让"决策回放"在真实 API 运行里也能一眼看到 reporter_v2 注入了 QA FEEDBACK。
+        qa_block = _render_qa_feedback_block(inp.qa_feedback)
+        if qa_block.strip():
+            sys_rendered = f"{qa_block}\n\n{sys_rendered}"
         usr_rendered = _render(
             user_template,
             project_name=inp.project_name,
@@ -540,7 +604,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
             dimension=tpl.dimension.value if tpl.dimension else "(none)",
             allowed_claim_ids=", ".join(allowed_claim_ids),
             allowed_evidence_ids=", ".join(allowed_ev),
-            min_paragraphs=str(tpl.min_paragraphs),
+            min_paragraphs=str(target_paragraphs),
             claims_json=json.dumps(
                 [
                     {
@@ -556,7 +620,6 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                 indent=2,
             ),
             evidences_json=json.dumps(ev_excerpts, ensure_ascii=False, indent=2),
-            qa_feedback_block=_render_qa_feedback_block(inp.qa_feedback),
         )
 
         resp = self.llm.chat(
@@ -564,7 +627,8 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
             messages=[{"role": "user", "content": usr_rendered}],
             response_format=ReportSection,
             temperature=0.3,
-            max_tokens=2000,
+            # 输出预算随段落密度缩放（厚章节不被截断），有上限防失控
+            max_tokens=min(4000, max(2000, 600 * target_paragraphs)),
         )
         try:
             section = _coerce_pydantic(resp, ReportSection)
@@ -691,20 +755,29 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
            - 含 entailment 失败 → 整段从 section 移除；section 空了补 1 段
              "本章节涉及结论待人工复核"的占位
 
-        返回 ``{"repair_attempts": int, "forced_fallbacks": int}``，喂给
-        metadata / confidence / status / critique。
+        返回 ``{"repair_attempts": int, "forced_fallbacks": int,
+        "entailment_checks": int}``，喂给 metadata / confidence / status /
+        critique。
 
         关闭条件（直接返回 0/0）：
         - ``self.self_correct=False``
         - ``ev_db`` 为空（没 evidence 无法判定，避免误伤）
         """
         if not self.self_correct or not ev_db:
-            return {"repair_attempts": 0, "forced_fallbacks": 0}
+            return {
+                "repair_attempts": 0,
+                "forced_fallbacks": 0,
+                "entailment_checks": 0,
+            }
 
         verdict_cache: dict[tuple[str, str], EntailmentVerdict | None] = {}
         entail_enabled = (
             self.entailment_check and not self.mock and self.llm is not None
         )
+        # entailment 判定 / repair 重写并行化：entailment 的 LLM 调用放在锁外
+        # 才能真正并发；budget 计数 + verdict_cache 读写在锁内保证线程安全。
+        cache_lock = threading.Lock()
+        entail_state = {"checks": 0, "exhausted": False}
 
         def compute_issue(para: ReportParagraph) -> _RepairIssue | None:
             if para.is_soft_conclusion or not para.evidence_ids:
@@ -716,45 +789,79 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
             for kind, value in extract_quantities(para.text):
                 if not quantity_supported(kind, value, evs):
                     issue.unverified_quantities.append((kind, value))
+            if issue.unverified_quantities:
+                return issue
             if entail_enabled:
                 key = (para.paragraph_id, para.text)
-                if key in verdict_cache:
-                    verdict = verdict_cache[key]
-                else:
+                need_call = False
+                verdict: EntailmentVerdict | None = None
+                with cache_lock:
+                    if key in verdict_cache:
+                        verdict = verdict_cache[key]
+                    elif entail_state["checks"] >= self.MAX_ENTAILMENT_CHECKS:
+                        entail_state["exhausted"] = True
+                        return issue if issue.is_dirty else None
+                    else:
+                        entail_state["checks"] += 1
+                        need_call = True
+                if need_call:
+                    # LLM 调用在锁外 → 多段 entailment 真正并发
                     verdict = self._judge_entailment(para, evs)
-                    verdict_cache[key] = verdict
+                    with cache_lock:
+                        verdict_cache[key] = verdict
                 if verdict is not None and not verdict.entailed:
                     issue.entailment_reason = verdict.reason
             return issue if issue.is_dirty else None
 
+        def _detect_dirty() -> list[tuple[ReportParagraph, _RepairIssue]]:
+            paras = [p for s in sections for p in s.paragraphs]
+            issues = _parallel_map(
+                compute_issue, paras, max_workers=self.MAX_LLM_WORKERS
+            )
+            return [
+                (p, iss) for p, iss in zip(paras, issues) if iss is not None
+            ]
+
         repair_attempts = 0
         for _attempt in range(self.MAX_REPAIR_ATTEMPTS):
-            dirty: list[tuple[ReportParagraph, _RepairIssue]] = []
-            for section in sections:
-                for para in section.paragraphs:
-                    issue = compute_issue(para)
-                    if issue is not None:
-                        dirty.append((para, issue))
+            dirty = _detect_dirty()
             if not dirty:
                 break
             repair_attempts += 1
             if self.llm is None or self.mock:
                 break  # 没 LLM 时直接进 force fallback
-            for para, issue in dirty:
+
+            def _repair(item: tuple[ReportParagraph, _RepairIssue]):
+                para, issue = item
                 evs = [ev_db[e] for e in para.evidence_ids if e in ev_db]
-                repaired = self._llm_repair_paragraph(para, issue, evs)
+                return para, self._llm_repair_paragraph(para, issue, evs)
+
+            for para, repaired in _parallel_map(
+                _repair, dirty, max_workers=self.MAX_LLM_WORKERS
+            ):
                 if repaired is None or not repaired.text.strip():
                     continue
                 para.text = repaired.text
-                # 文本变了 → 重新校准 is_quantitative，并清掉旧 entailment 缓存
+                # 文本变了 → 重新校准 is_quantitative（新文本 = 新 cache key）
                 para.is_quantitative = bool(extract_quantities(para.text))
 
-        # 强制降级兜底：仍脏的段落 → 剥数字 / 丢段
+        # 强制降级兜底：仍脏的段落 → 剥数字 / 丢段。
+        # 修复后文本变了需重判 → 先并行重新检测一遍，再串行做 keep/strip/drop。
+        _final_paras = [p for s in sections for p in s.paragraphs]
+        _issue_by_para = {
+            id(p): iss
+            for p, iss in zip(
+                _final_paras,
+                _parallel_map(
+                    compute_issue, _final_paras, max_workers=self.MAX_LLM_WORKERS
+                ),
+            )
+        }
         forced = 0
         for section in sections:
             kept: list[ReportParagraph] = []
             for para in section.paragraphs:
-                issue = compute_issue(para)
+                issue = _issue_by_para.get(id(para))
                 if issue is None:
                     kept.append(para)
                     continue
@@ -809,7 +916,25 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                 )
             section.paragraphs = kept
 
-        return {"repair_attempts": repair_attempts, "forced_fallbacks": forced}
+        if entail_state["exhausted"]:
+            errors.append(
+                AgentError(
+                    code="ENTAILMENT_CHECK_BUDGET_EXHAUSTED",
+                    message=(
+                        "reporter reached internal entailment check budget "
+                        f"({self.MAX_ENTAILMENT_CHECKS}); remaining paragraphs "
+                        "will be left for QA review"
+                    ),
+                    severity="warn",
+                    retriable=True,
+                )
+            )
+
+        return {
+            "repair_attempts": repair_attempts,
+            "forced_fallbacks": forced,
+            "entailment_checks": entail_state["checks"],
+        }
 
     def _llm_repair_paragraph(
         self,
@@ -872,7 +997,10 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
     ) -> ReportSection:
         target = inp.analysis.target_product
         competitors = "、".join(inp.analysis.competitors) or "（暂无）"
-        dims = "、".join(d.value for d in inp.analysis.dimensions.keys()) or "（暂无）"
+        dims = (
+            "、".join(dimension_label(d.value) for d in inp.analysis.dimensions.keys())
+            or "（暂无）"
+        )
         para = ReportParagraph(
             paragraph_id=f"p_{tpl.section_id}_01",
             text=(
@@ -1002,9 +1130,10 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
         target = analysis.target_product
         competitors = "、".join(analysis.competitors)
         parts.append(f"以 {target} 为目标的竞品对比（vs {competitors}）。")
-        for dim, dim_obj in analysis.dimensions.items():
+        # 各维度摘要拼成读者向正文；不带 [feature_comparison] 这类内部枚举标签
+        for dim_obj in analysis.dimensions.values():
             if dim_obj.summary.strip():
-                parts.append(f"[{dim.value}] {dim_obj.summary.strip()}")
+                parts.append(dim_obj.summary.strip())
         parts.append(f"目标读者：{template.target_audience}。")
         return " ".join(parts)
 
@@ -1059,6 +1188,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
         unverified_hits: int,
         repair_attempts: int,
         forced_fallbacks: int,
+        entailment_checks: int,
         template: ReportTemplate,
         errors: list[AgentError],
     ) -> str:
@@ -1081,6 +1211,8 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
             lines.append(
                 f"self-correct 跑了 {repair_attempts} 轮 LLM 重写来清理 hallucination"
             )
+        if entailment_checks:
+            lines.append(f"entailment judge 执行 {entailment_checks} 次")
         if forced_fallbacks:
             lines.append(
                 f"self-correct 后仍有 {forced_fallbacks} 段被强制改成 qualitative "
@@ -1231,6 +1363,23 @@ def _format_claim_paragraph(claim: AnalysisClaim) -> str:
     out = claim.text.strip()
     if claim.qualifier:
         out = f"{out}（{claim.qualifier}）"
+    return out
+
+
+# 标题里写死的「3. 」「4、」前缀；过滤章节后用来剥离再连续重排
+_SECTION_NUM_PREFIX = re.compile(r"^\s*\d+\s*[\.、]\s*")
+
+
+def _renumber_sections(sections: list[ReportSection]) -> list[ReportSection]:
+    """把章节标题的前导序号按当前顺序连续重排（1,2,3…），消除过滤后的跳号。
+
+    标题不含前导数字（如「摘要」）则原样保留，不强加序号。
+    """
+    out: list[ReportSection] = []
+    for i, sec in enumerate(sections, start=1):
+        base = _SECTION_NUM_PREFIX.sub("", sec.title)
+        new_title = f"{i}. {base}" if base != sec.title else sec.title
+        out.append(sec.model_copy(update={"title": new_title}) if new_title != sec.title else sec)
     return out
 
 

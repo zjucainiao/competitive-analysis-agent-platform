@@ -2,8 +2,8 @@
 
 覆盖：
 1. mock + standard_v1 跑通：5 章节 + 全部段落引用合法 + summary 与 metadata 正确
-2. mock + investor_v1：positioning 维度缺失 → 占位 soft 段，整体不 fail
-3. mock + pm_v1：differentiation 维度缺失 → 占位 soft 段
+2. mock + investor_v1：positioning 维度缺失 → 省略该章节（不渲染占位），整体不 fail
+3. mock + pm_v1：differentiation 维度缺失 → 省略该章节（不渲染占位）
 4. TEMPLATE_NOT_FOUND：未注册的 template_id → status=FAILED + 错误码
 5. MISSING_CITATION：注入空 evidence_ids 的 factual 段落 → _post_validate 抛
 6. UNVERIFIED_QUANTITY：is_quantitative=True 段落数字找不到 evidence 原值 → 抛
@@ -125,14 +125,20 @@ def test_mock_investor_v1_handles_missing_dimension() -> None:
     inp = load_demo_input(template_id="investor_v1", target_audience="投资人")
     out = agent.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id)
 
-    # positioning 维度在 fixture 中缺失 → 应当出现占位 soft 段，不能 FAILED
+    # positioning 维度在 fixture 中缺失 → 该章节直接省略（交付物不留「暂无…」占位），不能 FAILED
     assert out.status in (AgentStatus.SUCCESS, AgentStatus.PARTIAL)
     section_ids = [s.section_id for s in out.draft.sections]
-    assert "sec_positioning" in section_ids
-    positioning = next(s for s in out.draft.sections if s.section_id == "sec_positioning")
-    assert positioning.paragraphs, "positioning 章节至少要有占位段"
-    # 占位段必须 soft_conclusion，否则会触发 MISSING_CITATION
-    assert positioning.paragraphs[0].is_soft_conclusion is True
+    assert "sec_positioning" not in section_ids
+    # 仍保留概览 + 已分析维度章节 + 数据来源声明
+    assert "sec_overview" in section_ids
+    assert "sec_source" in section_ids
+    # 省略后序号连续重排，无跳号
+    nums = [
+        int(s.title.split(".", 1)[0])
+        for s in out.draft.sections
+        if s.title[:1].isdigit()
+    ]
+    assert nums == list(range(1, len(nums) + 1))
 
 
 # ---------- 3. pm_v1（含 differentiation 缺失） ----------
@@ -143,10 +149,11 @@ def test_mock_pm_v1_handles_missing_dimension() -> None:
     inp = load_demo_input(template_id="pm_v1", target_audience="PM")
     out = agent.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id)
 
+    # differentiation 维度缺失 → 对应章节省略，整体不 fail
     assert out.status in (AgentStatus.SUCCESS, AgentStatus.PARTIAL)
-    opp = next(s for s in out.draft.sections if s.section_id == "sec_opportunities")
-    assert opp.paragraphs
-    assert opp.paragraphs[0].is_soft_conclusion is True
+    section_ids = [s.section_id for s in out.draft.sections]
+    assert "sec_opportunities" not in section_ids
+    assert "sec_overview" in section_ids and "sec_source" in section_ids
 
 
 # ---------- 4. TEMPLATE_NOT_FOUND ----------
@@ -992,6 +999,9 @@ def test_qa_feedback_reaches_real_llm_section_prompt() -> None:
 
         def chat(self, *, system: str, messages: list[dict], **kwargs: Any) -> Any:
             uc = next((m["content"] for m in messages if m["role"] == "user"), "")
+            # system + user 都记下：qa_feedback 现在 prepend 到 system 顶部
+            # （为了在 trace 的 prompt_preview 里可见，见 reporter/agent.py）
+            captured.append(system)
             captured.append(uc)
             # 让 Reporter 失败 fallback heuristic（我们只关心 prompt 是否含反馈）
             raise RuntimeError("capture done")
@@ -1026,7 +1036,7 @@ def test_qa_feedback_reaches_real_llm_section_prompt() -> None:
 
     assert captured, "Reporter 没调到 LLM，wiring 路径未触达"
     joined = "\n".join(captured)
-    # 关键断言：QA 反馈文本必须真的出现在 user prompt 里
+    # 关键断言：QA 反馈文本必须真的出现在 prompt 里（system prompt 顶部）
     assert "QA Feedback" in joined
     assert "用户标了 ev_n_pricing_xyz" in joined
     assert "iss_disputed_para_777" in joined

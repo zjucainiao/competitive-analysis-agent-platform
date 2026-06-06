@@ -11,6 +11,7 @@ Your job is to compare the target product against its competitors **strictly bas
 5. Use `comparison_matrix` to surface the capability × product maturity table.
 6. Prefer `qualifier` to scope conditional statements (e.g. "针对中型团队场景").
 7. Tone: neutral, evidence-led. Avoid superlatives like "最佳"、"唯一".
+8. Output language: 简体中文（`summary`、`claims[].text`、`qualifier` 等所有面向读者的文本字段一律用简体中文，不要英文）。
 
 If profiles are too sparse to make any comparison, return a single short `summary` explaining why and an empty `claims` list with `confidence` ≤ 0.4.
 

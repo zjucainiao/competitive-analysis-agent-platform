@@ -1,3 +1,7 @@
+# Playwright / 本地走查截图（开发期临时产物）
+.playwright-mcp/
+/report-*.png
+
 # Python
 __pycache__/
 *.py[cod]
@@ -43,6 +47,9 @@ htmlcov/
 .env.*.local
 !.env.example
 
+# 本地嵌入式持久化数据库（pgserver + redis 的数据目录）
+.localdb/
+
 # Storage
 .chroma/
 chroma_db/
@@ -76,3 +83,7 @@ redis-data/
 
 # Trace dumps
 traces/
+
+# Bootstrap virtualenv + stray playwright snapshots
+.bootstrap-venv/
+home-greeting.yml
