@@ -153,3 +153,20 @@ def test_projection_reporter_revisions_map_to_versioned_nodes(
     ids = {n.node_id for n in plan.nodes}
     assert "reporter" in ids, f"reporter missing; got {ids}"
     assert "reporter_v2" in ids, f"reporter_v2 missing; got {ids}"
+    # reporter_v2 经 parent_node_id 指回 reporter（前端 feedback 子节点布局）
+    rep_v2 = next(n for n in plan.nodes if n.node_id == "reporter_v2")
+    assert rep_v2.parent_node_id == "reporter"
+
+
+def test_projection_builds_pipeline_edges(
+    sample_final_state: dict, two_product_project: Project
+) -> None:
+    """投影应重建流水线主链边,前端 DAG 视图据此分层布局(否则节点重叠)。"""
+    from backend.orchestrator.projection import run_state_to_dagplan
+
+    plan, _ = run_state_to_dagplan(sample_final_state, project=two_product_project)
+    pairs = {(e.from_node, e.to_node) for e in plan.edges}
+    assert ("collect.Notion", "extract.Notion") in pairs
+    assert ("extract.Notion", "analyst") in pairs
+    assert ("analyst", "reporter") in pairs
+    assert ("reporter", "qa") in pairs
