@@ -9,3 +9,4 @@
 | 日期 | 主题 | 文档 |
 |---|---|---|
 | 2026-06-06 | 编排完全原生 LangGraph(每节点=一个 Agent) | [design](2026-06-06-langgraph-native-orchestration-design.md) · [plan(Phase 0+1)](2026-06-06-langgraph-native-orchestration-plan.md) |
+| 2026-06-07 | Phase 2:native 转默认 + RunStateView(Stage D 前端迁移推迟) | [design+status](2026-06-07-phase2-native-default-runstateview.md) |
