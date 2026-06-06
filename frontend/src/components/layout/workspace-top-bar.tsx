@@ -14,6 +14,7 @@ import { ThemeToggle } from "./theme-toggle";
 import { RunHistoryBadge } from "./run-history-badge";
 import { WorkspaceActions } from "./workspace-actions";
 import { BrandMark } from "./brand-mark";
+import { UserMenu } from "./user-menu";
 import type { RunRef } from "@/lib/api/types";
 import type { RunStatus } from "@/lib/workspace-actions";
 
@@ -131,7 +132,7 @@ export function WorkspaceTopBar({
         {onToggleRail ? (
           <RailToggleButton open={!!railOpen} onClick={onToggleRail} />
         ) : null}
-        <UserChip />
+        <UserMenu />
       </div>
     </div>
   );
@@ -187,18 +188,6 @@ function formatDuration(ms: number): string {
   const s = totalSec % 60;
   const pad = (n: number) => n.toString().padStart(2, "0");
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
-}
-
-function UserChip() {
-  return (
-    <button
-      type="button"
-      aria-label="用户菜单"
-      className="flex h-8 w-8 items-center justify-center rounded-full bg-bg-sunken text-[10px] font-semibold text-text-secondary hover:bg-bg-hover"
-    >
-      XF
-    </button>
-  );
 }
 
 /** rail 收/展 toggle 按钮 */

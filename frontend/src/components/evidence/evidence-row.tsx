@@ -49,6 +49,7 @@ export function EvidenceRow({
   selected,
   expanded,
   isDisputedOverride,
+  paragraphHref,
   onToggleSelect,
   onToggleExpand,
   onToggleDisputed,
@@ -58,6 +59,8 @@ export function EvidenceRow({
   selected: boolean;
   expanded: boolean;
   isDisputedOverride: boolean;
+  /** 反向跳转链接构造器（注入当前真实 project/run；demo 模式回退到 demo run）。 */
+  paragraphHref: (paragraphId: string) => string;
   onToggleSelect: () => void;
   onToggleExpand: () => void;
   onToggleDisputed: () => void;
@@ -205,7 +208,7 @@ export function EvidenceRow({
                 {refs.map((r) => (
                   <li key={r.paragraphId}>
                     <Link
-                      href={`/projects/demo/runs/01?tab=report#para-${r.paragraphId}`}
+                      href={paragraphHref(r.paragraphId)}
                       className="group flex items-start gap-2 rounded-sm bg-bg-sunken px-2.5 py-1.5 hover:bg-accent-bg/50"
                     >
                       <span

@@ -35,6 +35,7 @@ export function ReportParagraph({
   paragraph,
   index,
   showV2,
+  reviewMode,
   isFocused,
   onEvidenceClick,
   onFocusEvidence,
@@ -43,6 +44,8 @@ export function ReportParagraph({
   paragraph: MockParagraph;
   index: number;
   showV2: boolean;
+  /** 审阅模式：显示 QA 提示 / 数据核对标 / 编辑标等审阅信息；关闭时纯净阅读 */
+  reviewMode: boolean;
   isFocused: boolean;
   onEvidenceClick: (evidenceId: string) => void;
   onFocusEvidence: (evidenceId: string | null) => void;
@@ -59,6 +62,8 @@ export function ReportParagraph({
 
   const displayText = edited ? draft : paragraph.text;
   const hasIssue = !!paragraph.qaIssue;
+  /* 审阅信息只在审阅模式露出；纯净阅读模式下隐藏（证据芯片始终保留） */
+  const showIssue = reviewMode && hasIssue;
   const evidences = paragraph.evidenceIds
     .map((id) => lookupEvidence(id))
     .filter((e) => e != null);
@@ -158,14 +163,29 @@ export function ReportParagraph({
         "transition-colors duration-120 ease-out-quart",
         "hover:bg-accent-bg/30",
         isFocused && "bg-accent-bg/50 ring-1 ring-accent-border",
-        hasIssue && "border-l-2 border-l-rework-base"
+        showIssue && "border-l-2 border-l-rework-base"
       )}
       onMouseEnter={() => {
         if (paragraph.evidenceIds[0]) onFocusEvidence(paragraph.evidenceIds[0]);
       }}
       onMouseLeave={() => onFocusEvidence(null)}
     >
-      {hasIssue ? <QaIssueLine issue={paragraph.qaIssue!} /> : null}
+      {showIssue ? <QaIssueLine issue={paragraph.qaIssue!} /> : null}
+
+      {/* hover 露出 ✎ 编辑：绝对定位角标，纯净模式下也不占阅读版面 */}
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className={cn(
+          "absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+          "border border-border-subtle bg-bg-raised/90 text-text-muted backdrop-blur-sm",
+          "opacity-0 transition-all duration-120 ease-out-quart",
+          "group-hover:opacity-100 hover:border-accent-border hover:bg-accent-bg hover:text-accent-base"
+        )}
+      >
+        <PenLineIcon className="h-3 w-3" />
+        <span>编辑</span>
+      </button>
 
       <p
         className={cn(
@@ -173,52 +193,31 @@ export function ReportParagraph({
           paragraph.isSoftConclusion && "text-text-secondary italic"
         )}
       >
-        <span className="mr-2 select-none font-mono text-[11px] text-text-muted tabular-nums">
-          {String(index + 1).padStart(2, "0")}
-        </span>
         {displayText}
-        {edited ? <UserEditedBadge /> : null}
+        {reviewMode && edited ? <UserEditedBadge /> : null}
       </p>
 
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {evidences.map((ev, i) => (
-          <EvidenceChip
-            key={ev!.id}
-            evidence={ev!}
-            index={i + 1}
-            onClick={() => onEvidenceClick(ev!.id)}
-          />
-        ))}
-        {paragraph.isQuantitative && verifiedNumberCount > 0 ? (
-          <span
-            className="inline-flex items-center gap-1 rounded-pill border border-success-border bg-success-bg px-1.5 py-0.5 text-[10px] font-medium text-success-base"
-            title="数字校验通过：可在 evidence 中找到字面"
-          >
-            <span className="font-mono">#{verifiedNumberCount}</span>
-            <span>verified</span>
-          </span>
-        ) : null}
-        {paragraph.isSoftConclusion ? (
-          <span className="inline-flex items-center rounded-pill border border-border-default bg-bg-sunken px-1.5 py-0.5 text-[10px] text-text-muted">
-            soft conclusion
-          </span>
-        ) : null}
-
-        {/* hover 露出 ✎ 编辑 */}
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className={cn(
-            "ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
-            "border border-transparent text-text-muted",
-            "opacity-0 transition-all duration-120 ease-out-quart",
-            "group-hover:opacity-100 hover:border-accent-border hover:bg-accent-bg hover:text-accent-base"
-          )}
-        >
-          <PenLineIcon className="h-3 w-3" />
-          <span>Edit</span>
-        </button>
-      </div>
+      {/* 证据链：仅审阅模式显示（纯净模式只读正文，观感优先） */}
+      {reviewMode ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {evidences.map((ev) => (
+            <EvidenceChip
+              key={ev!.id}
+              evidence={ev!}
+              onClick={() => onEvidenceClick(ev!.id)}
+            />
+          ))}
+          {paragraph.isQuantitative && verifiedNumberCount > 0 ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-pill border border-success-border bg-success-bg px-2 py-0.5 text-[10px] font-medium text-success-base"
+              title="段落中的数字已在 evidence 原文中逐一核对"
+            >
+              <CheckIcon className="h-2.5 w-2.5" />
+              <span>{verifiedNumberCount} 项数据已核对</span>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       {showingV2Preview ? <V2Preview v2={v2!} current={displayText} /> : null}
     </div>
@@ -273,13 +272,35 @@ function UserEditedBadge() {
   );
 }
 
+/** evidence.sourceType → 简短人类可读标签（芯片里给读者看，不暴露机器枚举值） */
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  homepage: "官网",
+  features: "功能页",
+  features_page: "功能页",
+  pricing: "定价页",
+  pricing_page: "定价页",
+  help_docs: "帮助文档",
+  docs: "帮助文档",
+  changelog: "更新日志",
+  customer_cases: "案例",
+  cases: "案例",
+  blog: "博客",
+  user_review: "用户评价",
+  user_reviews: "用户评价",
+  review: "用户评价",
+  reviews: "用户评价",
+  app_market: "应用市场",
+};
+
+function sourceTypeLabel(sourceType: string): string {
+  return SOURCE_TYPE_LABELS[sourceType] ?? "公开来源";
+}
+
 function EvidenceChip({
   evidence,
-  index,
   onClick,
 }: {
   evidence: MockEvidence | undefined;
-  index: number;
   onClick: () => void;
 }) {
   if (!evidence) return null;
@@ -296,8 +317,8 @@ function EvidenceChip({
         e.stopPropagation();
         onClick();
       }}
-      className="inline-flex items-center gap-1 rounded-pill border border-border-default bg-bg-raised px-1.5 py-0.5 text-[10px] font-medium text-text-secondary transition-colors duration-120 ease-out-quart hover:border-accent-border hover:text-accent-base"
-      title={`${evidence.id} · ${evidence.sourceLabel} · authority ${evidence.authority}`}
+      className="inline-flex items-center gap-1 rounded-pill border border-border-default bg-bg-raised px-2 py-0.5 text-[11px] font-medium text-text-secondary transition-colors duration-120 ease-out-quart hover:border-accent-border hover:text-accent-base"
+      title={`点击查看原文 · ${evidence.sourceLabel} · 可信度 ${evidence.authority}`}
     >
       <span
         className={cn(
@@ -305,8 +326,8 @@ function EvidenceChip({
           toneBase[status] ?? "bg-text-muted"
         )}
       />
-      <span className="font-mono">{evidence.id.slice(3, 11)}</span>
-      <span className="text-text-muted">#{index}</span>
+      <span>{evidence.product}</span>
+      <span className="text-text-muted">· {sourceTypeLabel(evidence.sourceType)}</span>
     </button>
   );
 }

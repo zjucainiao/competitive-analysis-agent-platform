@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { emitIntervention } from "@/lib/workspace-actions";
 import {
   createProject,
+  describeError,
   discoverCompetitors,
   startRun,
   ApiError,
@@ -47,7 +48,7 @@ const INDUSTRIES = [
     label: "协作办公 SaaS",
     examples: "Notion · ClickUp · Asana · Lark",
     icon: GlobeIcon,
-    note: "task / docs / kanban / automation",
+    note: "任务 / 文档 / 看板 / 自动化",
     available: true,
   },
   {
@@ -55,7 +56,7 @@ const INDUSTRIES = [
     label: "CRM SaaS",
     examples: "Salesforce · HubSpot · Pipedrive",
     icon: BuildingIcon,
-    note: "lead / pipeline / customer lifecycle",
+    note: "线索 / 商机管道 / 客户生命周期",
     available: true,
   },
   {
@@ -63,7 +64,7 @@ const INDUSTRIES = [
     label: "跨境电商 SaaS",
     examples: "Shopify · BigCommerce · Wix Stores",
     icon: ShoppingCartIcon,
-    note: "store / payment / logistics / multi-language",
+    note: "店铺 / 支付 / 物流 / 多语言",
     available: true,
   },
   {
@@ -71,18 +72,18 @@ const INDUSTRIES = [
     label: "教育 SaaS",
     examples: "Canvas · Blackboard · 钉钉教育 · 学习通",
     icon: GraduationCapIcon,
-    note: "course / assessment / classroom / analytics",
+    note: "课程 / 测评 / 课堂 / 数据分析",
     available: true,
   },
 ];
 
 const DIMENSIONS = [
-  { id: "feature_comparison", label: "Features", hint: "功能对比矩阵" },
-  { id: "pricing_comparison", label: "Pricing", hint: "定价档与溢价" },
-  { id: "user_feedback", label: "User feedback", hint: "G2 / Capterra 评价洞察" },
-  { id: "swot", label: "SWOT", hint: "围绕 target 视角" },
-  { id: "differentiation_opportunities", label: "Differentiation", hint: "差异化机会" },
-  { id: "positioning", label: "Positioning", hint: "定位 / 目标用户重叠" },
+  { id: "feature_comparison", label: "功能对比", hint: "功能对比矩阵" },
+  { id: "pricing_comparison", label: "定价对比", hint: "定价档与溢价" },
+  { id: "user_feedback", label: "用户口碑", hint: "G2 / Capterra 评价洞察" },
+  { id: "swot", label: "SWOT", hint: "围绕目标产品视角" },
+  { id: "differentiation_opportunities", label: "差异化机会", hint: "可切入的差异化点" },
+  { id: "positioning", label: "市场定位", hint: "定位 / 目标用户重叠" },
 ];
 
 const MODES = [
@@ -209,7 +210,7 @@ export function WizardLayout() {
         : `${target} vs ${competitors.join(" / ")}`;
     const payload = {
       project_name: projectName,
-      owner: "demo-user",
+      // owner 由后端从登录用户派生
       target_product: target,
       competitors: analysisMode === "single_research" ? [] : competitors,
       analysis_mode: analysisMode,
@@ -234,18 +235,15 @@ export function WizardLayout() {
         });
       } catch (e) {
         if (e instanceof ApiError && e.status === 409) {
-          toast.warning("Run 已在运行，跳到 workspace");
+          toast.warning("已有一次运行在进行中，跳到工作区查看");
         } else {
-          toast.error("启动 Run 失败", {
-            description: e instanceof Error ? e.message : String(e),
-          });
+          toast.error("启动分析失败", { description: describeError(e) });
         }
       }
       void revalidate.projects();
       router.push(`/projects/${project.project_id}/runs/${project.project_id}?tab=dag`);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error("创建项目失败", { description: msg });
+      toast.error("创建项目失败", { description: describeError(e) });
       setSubmitting(false);
     }
   };
@@ -861,45 +859,20 @@ function Step4Mode({
       <section>
         <div className="text-sm font-medium text-text-primary">运行模式</div>
         <p className="mt-0.5 text-[11px] text-text-muted">
-          mode = mock / hybrid / real。Collector 是否走真实抓取 + LLM 是否调用真实
-          key
+          分析全程使用真实 LLM + 真实网页采集，产出带原文引用的报告。
         </p>
-        <ul className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
-          {MODES.map((m) => {
-            const Icon = m.icon;
-            const active = mode === m.id;
-            return (
-              <li key={m.id}>
-                <button
-                  type="button"
-                  onClick={() => onChangeMode(m.id)}
-                  className={cn(
-                    "h-full w-full rounded-md border bg-bg-raised p-3 text-left transition-colors duration-120 ease-out-quart",
-                    active
-                      ? "border-accent-border bg-accent-bg/40"
-                      : "border-border-subtle hover:border-border-default"
-                  )}
-                >
-                  <div className="flex items-center justify-between">
-                    <Icon
-                      className={cn(
-                        "h-4 w-4",
-                        active ? "text-accent-base" : "text-text-muted"
-                      )}
-                    />
-                    <ModeBadge label={m.badge} tone={m.badgeTone} />
-                  </div>
-                  <div className="mt-2 font-medium text-text-primary">
-                    {m.label}
-                  </div>
-                  <div className="mt-1 text-[11px] text-text-muted leading-relaxed">
-                    {m.note}
-                  </div>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="mt-3 flex items-start gap-3 rounded-md border border-accent-border bg-accent-bg/30 p-3">
+          <ServerCogIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent-base" />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-text-primary">Real</span>
+              <ModeBadge label="burns key" tone="warning" />
+            </div>
+            <div className="mt-1 text-[11px] leading-relaxed text-text-muted">
+              全真 LLM + 真采集，会消耗 API key 额度。
+            </div>
+          </div>
+        </div>
       </section>
 
       <section className="rounded-md border border-border-subtle bg-bg-sunken/50 p-4">

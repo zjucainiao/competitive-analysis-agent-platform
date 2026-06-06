@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { DownloadIcon, CopyIcon } from "lucide-react";
+import { DownloadIcon, CopyIcon, ListChecksIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -39,6 +39,9 @@ interface ReportLayoutProps {
   apiEvidences?: ApiEvidence[];
   apiProjectId?: string;
   apiVerdicts?: ApiQAVerdict[];
+  /** 项目级目标/竞品（report 头标题用，避免依赖 draft.metadata 兜底成 "—"） */
+  apiTarget?: string;
+  apiCompetitors?: string[];
 }
 
 /**
@@ -50,19 +53,31 @@ interface ReportLayoutProps {
  *  - Evidence 查找：EvidenceLookupProvider 注入 ApiEvidence map，子组件透明使用
  */
 export function ReportLayout(props: ReportLayoutProps = {}) {
-  const { apiReporter, apiEvidences, apiProjectId, apiVerdicts } = props;
+  const {
+    apiReporter,
+    apiEvidences,
+    apiProjectId,
+    apiVerdicts,
+    apiTarget,
+    apiCompetitors,
+  } = props;
   const isApi = !!apiReporter;
 
   /* report data: API 或 mock */
   const report: MockReport = useMemo(() => {
     if (isApi && apiReporter) {
-      return apiDraftToMockReport(apiReporter.output.draft, apiVerdicts ?? []);
+      return apiDraftToMockReport(apiReporter.output.draft, apiVerdicts ?? [], {
+        target: apiTarget,
+        competitors: apiCompetitors,
+      });
     }
     return MOCK_REPORT;
-  }, [isApi, apiReporter, apiVerdicts]);
+  }, [isApi, apiReporter, apiVerdicts, apiTarget, apiCompetitors]);
 
   const api = useWorkspaceApi();
   const [showV2, setShowV2] = useState(false);
+  /* 审阅模式：默认关（纯净阅读）；打开后段落显示 QA 提示 / 数据核对标 / 编辑标 */
+  const [reviewMode, setReviewMode] = useState(false);
   const [focusedEvidence, setFocusedEvidence] = useState<string | null>(null);
   const [pinnedEvidence, setPinnedEvidence] = useState<string | null>(null);
   const [disputed, setDisputed] = useState<Set<string>>(new Set());
@@ -215,6 +230,8 @@ export function ReportLayout(props: ReportLayoutProps = {}) {
           report={report}
           localEdits={localEdits}
           showV2={showV2}
+          reviewMode={reviewMode}
+          onToggleReview={() => setReviewMode((v) => !v)}
         />
         <EditHistoryToggle
           showV2={showV2}
@@ -226,9 +243,14 @@ export function ReportLayout(props: ReportLayoutProps = {}) {
         <div
           className={cn(
             "grid gap-8",
+            // 审阅模式才挂右侧证据抽屉那一列；纯净模式正文独占更宽版面
             sectionFocus
-              ? "grid-cols-[minmax(0,1fr)_360px]"
-              : "grid-cols-[180px_minmax(0,1fr)_360px]"
+              ? reviewMode
+                ? "grid-cols-[minmax(0,1fr)_360px]"
+                : "grid-cols-[minmax(0,1fr)]"
+              : reviewMode
+                ? "grid-cols-[180px_minmax(0,1fr)_360px]"
+                : "grid-cols-[180px_minmax(0,1fr)]"
           )}
         >
           {!sectionFocus ? (
@@ -246,6 +268,7 @@ export function ReportLayout(props: ReportLayoutProps = {}) {
                 section={s}
                 globalParagraphStart={start}
                 showV2={showV2}
+                reviewMode={reviewMode}
                 focusedParagraphId={focusedParagraphId}
                 onEvidenceClick={handleEvidenceClick}
                 onFocusEvidence={(eid) =>
@@ -262,13 +285,15 @@ export function ReportLayout(props: ReportLayoutProps = {}) {
             ))}
           </article>
 
-          <EvidenceDrawer
-            focusedId={focusedEvidence}
-            pinnedId={pinnedEvidence}
-            disputed={disputed}
-            onUnpin={() => setPinnedEvidence(null)}
-            onToggleDisputed={handleToggleDisputed}
-          />
+          {reviewMode ? (
+            <EvidenceDrawer
+              focusedId={focusedEvidence}
+              pinnedId={pinnedEvidence}
+              disputed={disputed}
+              onUnpin={() => setPinnedEvidence(null)}
+              onToggleDisputed={handleToggleDisputed}
+            />
+          ) : null}
         </div>
       </div>
     </EvidenceLookupProvider>
@@ -281,10 +306,14 @@ function ReportHeader({
   report,
   localEdits,
   showV2,
+  reviewMode,
+  onToggleReview,
 }: {
   report: MockReport;
   localEdits: Record<string, string>;
   showV2: boolean;
+  reviewMode: boolean;
+  onToggleReview: () => void;
 }) {
   const handleDownload = () => {
     const md = renderReportAsMarkdown(localEdits, showV2);
@@ -313,31 +342,36 @@ function ReportHeader({
     <header className="flex flex-wrap items-end justify-between gap-3 border-b border-border-subtle pb-4">
       <div>
         <div className="text-xs font-medium uppercase tracking-wider text-text-muted">
-          Report · v{report.version}
+          竞品分析报告{report.version > 1 ? ` · v${report.version}` : ""}
         </div>
         <h1 className="mt-1 text-xl font-semibold text-text-primary">
           {report.target} vs {report.competitors.join(" · ")}
         </h1>
-        <p className="mt-1 text-sm text-text-secondary">{report.summary}</p>
+        <p className="mt-1.5 max-w-[680px] text-sm leading-relaxed text-text-secondary">
+          {report.summary}
+        </p>
       </div>
       <div className="flex items-end gap-4">
         <div className="hidden md:flex flex-col items-end gap-1 text-xs text-text-muted">
-          <Stat label="template" value={report.templateId} mono />
-          <div className="flex items-center gap-3">
-            <Stat
-              label="claims"
-              value={String(report.metadata.claimCount)}
-              mono
-            />
-            <Stat
-              label="evidence"
-              value={String(report.metadata.evidenceCount)}
-              mono
-            />
-          </div>
-          <Stat label="generated" value={report.generatedAt} mono />
+          <Stat label="证据" value={`${report.metadata.evidenceCount} 条`} />
+          <Stat label="生成于" value={report.generatedAt} />
         </div>
         <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant={reviewMode ? "default" : "outline"}
+            onClick={onToggleReview}
+            className="gap-1.5"
+            title={
+              reviewMode
+                ? "审阅模式开：显示 QA 提示 / 数据核对 / 编辑标记。点击切回纯净阅读"
+                : "纯净阅读模式。点击打开审阅模式查看 QA 提示 / 数据核对 / 编辑标记"
+            }
+            aria-pressed={reviewMode}
+          >
+            <ListChecksIcon className="h-3 w-3" />
+            <span>{reviewMode ? "审阅模式" : "审阅"}</span>
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -390,7 +424,8 @@ function Stat({
 
 function apiDraftToMockReport(
   draft: ApiReportDraft,
-  verdicts: ApiQAVerdict[]
+  verdicts: ApiQAVerdict[],
+  project?: { target?: string; competitors?: string[] }
 ): MockReport {
   /* 把 verdict 的 issues 按 location 索引，方便挂到段落上 */
   const issueByLocation = new Map<string, ReturnType<typeof issueToHint>>();
@@ -424,10 +459,15 @@ function apiDraftToMockReport(
     version: draft.version,
     templateId: draft.template_id,
     generatedAt: new Date().toISOString().replace("T", " ").slice(0, 19),
-    /* target / competitors 通常在 ClientWorkspace 已知；这里 fallback 用 metadata */
+    /* 优先用项目级 target/competitors；缺失才回退 draft.metadata */
     target:
-      (draft.metadata?.target as string | undefined) ?? "—",
-    competitors: (draft.metadata?.competitors as string[] | undefined) ?? [],
+      project?.target ??
+      (draft.metadata?.target as string | undefined) ??
+      "—",
+    competitors:
+      project?.competitors ??
+      (draft.metadata?.competitors as string[] | undefined) ??
+      [],
     summary: draft.summary,
     sections,
     metadata: {

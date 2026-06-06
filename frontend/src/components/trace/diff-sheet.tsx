@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { CopyIcon } from "lucide-react";
-import { DIFF_PAIRS } from "@/lib/trace-mock";
+import { DIFF_PAIRS, type DiffPair } from "@/lib/trace-mock";
 import { emitIntervention } from "@/lib/workspace-actions";
 import { cn } from "@/lib/utils";
 
@@ -18,17 +18,50 @@ import { cn } from "@/lib/utils";
  * v1 ↔ v2 prompt diff 抽屉。
  *
  * 评分项「Agent 决策回放 · QA 反馈闭环可视化」的杀手锏：
- *   并排 monospace 显示 reporter_v1 system prompt vs reporter_v2 system prompt，
+ *   并排 monospace 显示 v1 system prompt vs v2 system prompt，
  *   diff 行用绿/红/灰按 prefix 着色，让评委一眼看到 QA FEEDBACK 是怎么注入的。
+ *
+ * ``pair`` 缺省时回退到 mock DIFF_PAIRS[0]；API 模式下由 TraceLayout 用真实
+ * 返工节点的 prompt_preview（含 prepend 到 system 顶部的 QA FEEDBACK）构造，
+ * 让「决策回放」在真实运行里也成立，而非只在 demo。
  */
 export function DiffSheet({
   open,
   onOpenChange,
+  pair: pairProp,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  pair?: DiffPair | null;
 }) {
-  const pair = DIFF_PAIRS[0];
+  // null = API 模式但本次运行还没有返工轮次（区别于 demo 的 undefined → mock）
+  if (pairProp === null) {
+    return (
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent
+          side="right"
+          className="!w-[min(960px,95vw)] !max-w-none gap-0 overflow-y-auto p-0"
+        >
+          <SheetHeader className="gap-2 border-b border-border-subtle p-5">
+            <SheetTitle className="text-base font-semibold">
+              v1 ↔ v2 prompt diff
+            </SheetTitle>
+            <SheetDescription className="text-xs text-text-secondary">
+              本次运行暂无返工轮次
+            </SheetDescription>
+          </SheetHeader>
+          <div className="p-10 text-center text-sm text-text-muted">
+            QA 尚未打回任何 Agent（全部通过，或 reporter 返工未触发）。
+            <br />
+            一旦出现 <code className="font-mono">*_v2</code> 节点，这里会用真实
+            prompt_preview 展示 QA FEEDBACK 注入对比。
+          </div>
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
+  const pair = pairProp ?? DIFF_PAIRS[0];
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -69,7 +102,12 @@ export function DiffSheet({
             </div>
           </div>
 
-          <DiffGrid left={pair.leftContent} right={pair.rightContent} />
+          <DiffGrid
+            left={pair.leftContent}
+            right={pair.rightContent}
+            leftTitle={pair.leftLabel}
+            rightTitle={pair.rightLabel}
+          />
 
           <p className="mt-4 text-[11px] text-text-muted leading-relaxed">
             高亮行：<span className="text-success-base font-medium">绿 +</span> v2
@@ -83,7 +121,17 @@ export function DiffSheet({
   );
 }
 
-function DiffGrid({ left, right }: { left: string; right: string }) {
+function DiffGrid({
+  left,
+  right,
+  leftTitle = "reporter · v1",
+  rightTitle = "reporter_v2",
+}: {
+  left: string;
+  right: string;
+  leftTitle?: string;
+  rightTitle?: string;
+}) {
   const leftLines = left.split("\n");
   const rightLines = right.split("\n");
   const leftSet = new Set(leftLines);
@@ -91,11 +139,11 @@ function DiffGrid({ left, right }: { left: string; right: string }) {
   return (
     <div className="grid grid-cols-2 gap-3">
       <DiffColumn
-        title="reporter · v1"
+        title={leftTitle}
         lines={leftLines.map((line) => ({ line, kind: "ctx" as const }))}
       />
       <DiffColumn
-        title="reporter_v2"
+        title={rightTitle}
         lines={rightLines.map((line) => ({
           line,
           kind: leftSet.has(line)

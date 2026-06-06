@@ -102,7 +102,9 @@ function DetailBody({ nodeId, data }: { nodeId: string; data: DagNodeData }) {
       {data.status === "rework" && !data.parentNodeId ? (
         <ReworkBanner actions={actions} />
       ) : null}
-      {data.status === "error" ? <ErrorBanner actions={actions} /> : null}
+      {data.status === "error" ? (
+        <ErrorBanner actions={actions} message={data.errorMessage} />
+      ) : null}
 
       <div className="space-y-5 p-5">
         <Metrics data={data} />
@@ -200,7 +202,13 @@ function ReworkBanner({ actions }: { actions: ActionDef[] }) {
   );
 }
 
-function ErrorBanner({ actions }: { actions: ActionDef[] }) {
+function ErrorBanner({
+  actions,
+  message,
+}: {
+  actions: ActionDef[]
+  message?: string | null
+}) {
   const retry = actions.find((a) => a.id.endsWith(".retry"));
   return (
     <div className="border-b border-error-border bg-error-bg px-5 py-4">
@@ -212,6 +220,11 @@ function ErrorBanner({ actions }: { actions: ActionDef[] }) {
           <div className="text-xs font-medium uppercase tracking-wider text-error-base">
             Node failed
           </div>
+          {message ? (
+            <p className="mt-1 font-mono text-[11px] text-error-base/90 leading-snug break-words">
+              {message}
+            </p>
+          ) : null}
           <p className="mt-1 text-sm text-text-secondary leading-snug">
             该节点执行失败，下游节点暂停。可以重试，或跳过让下游用 partial
             数据继续。

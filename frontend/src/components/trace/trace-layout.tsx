@@ -6,6 +6,7 @@ import { InfoIcon } from "lucide-react";
 import {
   TRACE_SPANS,
   summarizeTrace,
+  type DiffPair,
   type FullLLMCall,
   type TraceSpan,
   type TraceSummary,
@@ -59,6 +60,12 @@ export function TraceLayout({ apiState }: TraceLayoutProps = {}) {
 
   const summary: TraceSummary = useMemo(() => summarizeTrace(spans), [spans]);
 
+  /* 真实返工对的 v1↔v2 prompt diff（API 模式）。null = 本次运行还没返工轮次。 */
+  const apiDiffPair = useMemo(
+    () => (isApi ? buildApiDiffPair(spans) : undefined),
+    [isApi, spans]
+  );
+
   const visibleSpans = useMemo(() => {
     let arr = spans;
     if (filter === "errors") {
@@ -107,8 +114,8 @@ export function TraceLayout({ apiState }: TraceLayoutProps = {}) {
         {visibleSpans.length === 0 ? (
           <div className="p-10 text-center text-sm text-text-muted">
             {isApi
-              ? "暂无 span · 等 Orchestrator 开始派发节点"
-              : "no spans matching filter"}
+              ? "暂无执行记录 · 等流水线开始跑各节点"
+              : "没有匹配筛选的记录"}
           </div>
         ) : (
           <ol className="divide-y divide-border-subtle">
@@ -134,9 +141,27 @@ export function TraceLayout({ apiState }: TraceLayoutProps = {}) {
           看到 reporter_v2 system prompt 里已经注入了 QA FEEDBACK 章节；
           点击右上「diff v1 ↔ v2」并排对比 v1/v2 prompt。
         </div>
+      ) : apiDiffPair ? (
+        <div className="rounded-md border border-dashed border-border-default bg-bg-sunken/60 px-4 py-3 text-[11px] text-text-muted">
+          <strong className="font-medium text-text-secondary">
+            决策回放（真实运行）
+          </strong>
+          ：本次运行触发了 QA 返工 ——{" "}
+          <code className="font-mono">{apiDiffPair.rightLabel}</code> 的 system
+          prompt 顶部已注入 QA FEEDBACK（来自{" "}
+          <code className="font-mono">GET /api/projects/&#123;id&#125;/llm-calls</code>{" "}
+          的真实 prompt_preview）。点击右上「diff v1 ↔ v2」并排对比{" "}
+          <code className="font-mono">{apiDiffPair.leftLabel}</code> ↔{" "}
+          <code className="font-mono">{apiDiffPair.rightLabel}</code>。
+        </div>
       ) : null}
 
-      <DiffSheet open={diffOpen} onOpenChange={setDiffOpen} />
+      <DiffSheet
+        open={diffOpen}
+        onOpenChange={setDiffOpen}
+        /* demo: undefined → mock diff；API 有返工 → 真实 diff；API 无返工 → null → 空状态 */
+        pair={isApi ? (apiDiffPair ?? null) : undefined}
+      />
     </div>
   );
 }
@@ -228,6 +253,36 @@ function apiCallToFull(c: LLMCallRecord): FullLLMCall {
     finishReason,
     durationMs: Math.round(c.duration_s * 1000),
     costUsd: c.cost_usd,
+  };
+}
+
+/** 从真实 span 构造 v1↔v2 prompt diff：取一个返工节点（parent_node_id != null）
+ *  及其父节点，各自第一条 LLM call 的 prompt_preview 做并排对比。返工节点的
+ *  preview 顶部含 prepend 到 system 的 QA FEEDBACK，父节点没有 → diff 自然高亮注入。
+ *  没有返工轮次（或缺 LLM call 记录）时返回 undefined。 */
+function buildApiDiffPair(spans: TraceSpan[]): DiffPair | undefined {
+  const reworks = spans.filter(
+    (s) => s.parentNodeId !== null && s.llmCalls.length > 0
+  );
+  // 优先 reporter 返工：它把 QA FEEDBACK prepend 到 system 顶部，diff 最直观
+  const rework =
+    reworks.find((s) => s.agent === "reporter") ?? reworks[0];
+  if (!rework || rework.parentNodeId === null) return undefined;
+  const parent = spans.find((s) => s.nodeId === rework.parentNodeId);
+  if (!parent || parent.llmCalls.length === 0) return undefined;
+
+  const leftContent = parent.llmCalls[0].systemPrompt;
+  const rightContent = rework.llmCalls[0].systemPrompt;
+  if (!leftContent || !rightContent) return undefined;
+
+  return {
+    id: `diff-${rework.nodeId}`,
+    label: `${rework.agent} · prompt（真实运行）`,
+    description: `真实运行：${rework.nodeId} 的 system prompt 顶部注入了 QA FEEDBACK（来源 prompt_preview）`,
+    leftLabel: parent.nodeId,
+    rightLabel: rework.nodeId,
+    leftContent,
+    rightContent,
   };
 }
 

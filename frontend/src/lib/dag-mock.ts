@@ -33,6 +33,8 @@ export interface DagNodeData {
   revision: number;
   parentNodeId: string | null;
   storyHint?: string;
+  /** 失败原因（来自 node.metadata.error，如超时）；非失败节点为 null。 */
+  errorMessage?: string | null;
 }
 
 export interface DagNodeRecord {

@@ -2,6 +2,7 @@
 
 import { ThemeToggle } from "./theme-toggle";
 import { CmdTrigger } from "./cmd-trigger";
+import { UserMenu } from "./user-menu";
 
 /**
  * 主内容区上方的 slim top bar（56px 高，不占整页宽度，只占主内容区）。
@@ -28,20 +29,9 @@ export function TopBar({
         {right}
         <CmdTrigger />
         <ThemeToggle />
-        <UserChip />
+        <UserMenu />
       </div>
     </div>
   );
 }
 
-function UserChip() {
-  return (
-    <button
-      type="button"
-      aria-label="用户菜单"
-      className="flex h-7 w-7 items-center justify-center rounded-full bg-bg-sunken text-[10px] font-semibold text-text-secondary hover:bg-bg-hover"
-    >
-      XF
-    </button>
-  );
-}

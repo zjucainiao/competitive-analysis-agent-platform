@@ -44,12 +44,19 @@ function Button({
   className,
   variant = "default",
   size = "default",
+  render,
+  nativeButton,
   ...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
   return (
     <ButtonPrimitive
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      render={render}
+      // 通过 render 渲染成非原生元素（如 <Link> / <a>）时关掉 nativeButton，
+      // 否则 Base UI 报 "expected a native <button>" 无障碍警告。
+      // 调用方显式传 nativeButton 时尊重其值。
+      nativeButton={nativeButton ?? render === undefined}
       {...props}
     />
   )

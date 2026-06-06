@@ -1,12 +1,12 @@
 import Link from "next/link";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { CmdTrigger } from "./cmd-trigger";
 import { ThemeToggle } from "./theme-toggle";
+import { UserMenu } from "./user-menu";
 
 /**
  * 顶导航 52px。整站常驻。
  *  - 左：Atlas 品牌标 + 顶级链接
- *  - 右：⌘K 命令面板 + 头像占位（v1 不接 auth）
+ *  - 右：⌘K 命令面板 + 主题 + 用户菜单（头像 → 邮箱 / 登出）
  */
 export function GlobalNav() {
   return (
@@ -28,11 +28,7 @@ export function GlobalNav() {
         <div className="ml-auto flex items-center gap-2">
           <CmdTrigger />
           <ThemeToggle />
-          <Avatar className="h-8 w-8 border border-border-default">
-            <AvatarFallback className="bg-bg-sunken text-xs font-medium text-text-secondary">
-              XF
-            </AvatarFallback>
-          </Avatar>
+          <UserMenu />
         </div>
       </div>
     </header>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { SearchIcon, AlertTriangleIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -47,6 +47,17 @@ export function EvidenceLayout({
 }: EvidenceLayoutProps = {}) {
   const api = useWorkspaceApi();
   const isApi = apiEvidences !== undefined;
+
+  // 反向跳转链接：真实 workspace 用当前 project/run；demo/mock 回退到 demo run。
+  const paragraphHref = useCallback(
+    (paragraphId: string) => {
+      const base = api
+        ? `/projects/${api.projectId}/runs/${api.runId}`
+        : "/projects/demo/runs/01";
+      return `${base}?tab=report#para-${paragraphId}`;
+    },
+    [api]
+  );
 
   const allEvidences = useMemo<MockEvidence[]>(() => {
     if (isApi && apiEvidences) {
@@ -270,6 +281,7 @@ export function EvidenceLayout({
                   selected={selected.has(ev.id)}
                   expanded={expandedId === ev.id}
                   isDisputedOverride={disputedOverride.has(ev.id)}
+                  paragraphHref={paragraphHref}
                   onToggleSelect={() => handleToggleSelect(ev.id)}
                   onToggleExpand={() =>
                     setExpandedId((cur) => (cur === ev.id ? null : ev.id))

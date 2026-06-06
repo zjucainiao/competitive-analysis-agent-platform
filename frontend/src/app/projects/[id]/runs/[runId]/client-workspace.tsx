@@ -2,9 +2,16 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertTriangleIcon, Loader2Icon, PlugZapIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  BarChart3Icon,
+  FileTextIcon,
+  Loader2Icon,
+  PlugZapIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
+import { WorkspaceEmpty } from "@/components/layout/workspace-empty";
 import { WorkspaceShell } from "@/components/layout/workspace-shell";
 import { WorkspaceDetailsRail } from "@/components/layout/workspace-details-rail";
 import { type StatusTone } from "@/components/layout/status-pill";
@@ -123,21 +130,37 @@ function TabBody({
           </div>
         </div>
       )}
-      {tab === "report" && (
-        <ReportLayout
-          apiReporter={latestReporter}
-          apiEvidences={allEvidences}
-          apiProjectId={projectId ?? undefined}
-          apiVerdicts={state.verdicts}
-        />
-      )}
+      {tab === "report" &&
+        (latestReporter ? (
+          <ReportLayout
+            apiReporter={latestReporter}
+            apiEvidences={allEvidences}
+            apiProjectId={projectId ?? undefined}
+            apiVerdicts={state.verdicts}
+            apiTarget={state.project?.target_product}
+            apiCompetitors={state.project?.competitors}
+          />
+        ) : (
+          <WorkspaceEmpty
+            icon={FileTextIcon}
+            title="报告尚未生成"
+            desc="等流水线跑到 reporter 节点产出草稿，报告会显示在这里。"
+          />
+        ))}
       {tab === "trace" && <TraceLayout apiState={state} />}
       {tab === "evidence" && (
         <EvidenceLayout apiEvidences={allEvidences} apiOutputs={state.outputs} />
       )}
-      {tab === "metrics" && (
-        <MetricsLayout ctx={ctx} apiProject={state.project} />
-      )}
+      {tab === "metrics" &&
+        (state.project?.metrics ? (
+          <MetricsLayout ctx={ctx} apiProject={state.project} />
+        ) : (
+          <WorkspaceEmpty
+            icon={BarChart3Icon}
+            title="指标尚未生成"
+            desc="首次跑完后，这里会显示准确率、覆盖率、Token、人工修正率等指标。"
+          />
+        ))}
     </>
   );
 }
@@ -198,7 +221,7 @@ function ApiWorkspace({
 }) {
   const { data: state, error, isLoading, mutate } = useProjectState(projectId);
 
-  const { status: wsStatus } = useProjectEvents(projectId, {
+  const { status: wsStatus, reconnect: wsReconnect } = useProjectEvents(projectId, {
     onMessage: (msg) => {
       void revalidate.projectState(projectId);
       if (msg.status === "failed" && msg.error) {
@@ -229,6 +252,8 @@ function ApiWorkspace({
       state={state}
       tab={tab}
       wsConnected={wsStatus === "open"}
+      wsStatus={wsStatus}
+      onReconnect={wsReconnect}
       projectId={projectId}
     />
   );
@@ -238,11 +263,15 @@ function ApiWorkspaceShell({
   state,
   tab,
   wsConnected,
+  wsStatus,
+  onReconnect,
   projectId,
 }: {
   state: ProjectStateResponse;
   tab: TabKey;
   wsConnected: boolean;
+  wsStatus: string;
+  onReconnect: () => void;
   projectId: string;
 }) {
   const ctx = useMemo(() => projectToRunContext(state.project), [state.project]);
@@ -254,6 +283,7 @@ function ApiWorkspaceShell({
   const apiContext = useMemo(
     () => ({
       projectId,
+      runId: ctx.runId,
       revalidate: () =>
         Promise.all([
           revalidate.projectState(projectId),
@@ -261,7 +291,7 @@ function ApiWorkspaceShell({
           revalidate.projects(),
         ]),
     }),
-    [projectId]
+    [projectId, ctx.runId]
   );
 
   // 计算 DAG 整体进度：成功 / 失败 / 跳过算"已结束"，其余算"未结束"
@@ -294,14 +324,29 @@ function ApiWorkspaceShell({
           <WorkspaceDetailsRail
             nodeId={selected?.id ?? null}
             data={selected?.data ?? null}
+            projectId={projectId}
+            state={state}
             onClose={() => setSelected(null)}
           />
         }
       >
         {!wsConnected && (
           <div className="mb-4 flex items-center gap-2 rounded-md border border-warning-border bg-warning-bg px-3 py-1.5 text-[11px] text-warning-base">
-            <AlertTriangleIcon className="h-3 w-3" />
-            <span>WebSocket 未连接 · 每 30 秒兜底刷新</span>
+            <AlertTriangleIcon className="h-3 w-3 shrink-0" />
+            <span>
+              {wsStatus === "connecting"
+                ? "正在连接实时进度…"
+                : "实时连接已断开，已转为定时刷新"}
+            </span>
+            {wsStatus !== "connecting" && (
+              <button
+                type="button"
+                onClick={onReconnect}
+                className="ml-auto rounded px-1.5 py-0.5 font-medium underline-offset-2 hover:underline"
+              >
+                重连
+              </button>
+            )}
           </div>
         )}
         <TabBody

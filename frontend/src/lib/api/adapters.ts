@@ -326,6 +326,9 @@ export function apiStateToDagData(state: ProjectStateResponse): {
       revision: n.revision,
       parentNodeId: n.parent_node_id,
       storyHint: n.metadata?.story_hint as string | undefined,
+      errorMessage:
+        (n.metadata?.error as { message?: string } | undefined)?.message ??
+        null,
     };
     return {
       id: n.node_id,

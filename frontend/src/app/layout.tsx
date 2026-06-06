@@ -3,6 +3,8 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { ShortcutsHelp } from "@/components/layout/shortcuts-help";
+import { AuthProvider } from "@/lib/auth-context";
+import { AuthGate } from "@/components/layout/auth-gate";
 import "./globals.css";
 
 const inter = Inter({
@@ -57,8 +59,12 @@ export default function RootLayout({
         />
       </head>
       <body className="text-foreground min-h-full flex flex-col">
-        <TooltipProvider delay={150}>{children}</TooltipProvider>
-        <ShortcutsHelp />
+        <AuthProvider>
+          <AuthGate>
+            <TooltipProvider delay={150}>{children}</TooltipProvider>
+            <ShortcutsHelp />
+          </AuthGate>
+        </AuthProvider>
         <Toaster />
       </body>
     </html>

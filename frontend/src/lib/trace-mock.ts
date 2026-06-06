@@ -487,7 +487,17 @@ export function summarizeTrace(spans: TraceSpan[]): TraceSummary {
 
 /* ── v1 ↔ v2 diff payload (Reporter prompt comparison) ──────────────── */
 
-export const DIFF_PAIRS = [
+export interface DiffPair {
+  id: string;
+  label: string;
+  description: string;
+  leftLabel: string;
+  rightLabel: string;
+  leftContent: string;
+  rightContent: string;
+}
+
+export const DIFF_PAIRS: DiffPair[] = [
   {
     id: "reporter-system",
     label: "Reporter · system prompt",

@@ -15,6 +15,8 @@ import { createContext, useContext, type ReactNode } from "react";
  */
 export interface WorkspaceApi {
   projectId: string;
+  /** 当前 run id，用于深链（如 evidence 反向跳转回 report 段落）。 */
+  runId: string;
   /** 触发 SWR /state 立刻重拉（也会顺手让 projects 列表失效）。 */
   revalidate: () => void | Promise<unknown>;
 }

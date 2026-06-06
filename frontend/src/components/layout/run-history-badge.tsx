@@ -9,9 +9,8 @@ import type { RunRef } from "@/lib/api/types";
  *
  * - 只在 API 模式有 ≥1 个 run 时显示
  * - 用原生 details/summary 避免引入 popover 依赖
- * - 当前 active run 高亮；过去 run 显示 timestamp + final_status；点击仅 toast
- *   （v1 不实现 RunSnapshot 切换 UI——后端 GET /runs/{run_id}/state 已经准备好，
- *   只是 workspace 当前只显示 latest，切换历史 view 是更深的 refactor）
+ * - 当前 active run 高亮；过去 run 显示 timestamp + final_status
+ * - 只读的运行历史参考（工作区显示最新一次 run 的状态）
  */
 export function RunHistoryBadge({
   runs,
@@ -28,7 +27,7 @@ export function RunHistoryBadge({
     <details className="group relative">
       <summary
         className="inline-flex cursor-pointer items-center gap-1 rounded-pill border border-border-default bg-bg-raised px-2 py-0.5 text-[11px] font-medium text-text-secondary transition-colors duration-120 hover:border-border-strong hover:text-text-primary"
-        title="切换 run 快照（v1 read-only 列表）"
+        title="运行历史"
       >
         <span className="font-mono tabular-nums" data-num>
           {runs.length} runs
@@ -86,11 +85,6 @@ export function RunHistoryBadge({
             </li>
           ))}
         </ol>
-        <div className="border-t border-border-subtle bg-bg-sunken/60 px-3 py-2 text-[10px] leading-snug text-text-muted">
-          切换到历史 run 的完整 state 走 GET
-          <code className="mx-1 font-mono">/runs/{`{run_id}`}/state</code>
-          · v1 暂未实现快照视图，列表仅 read-only
-        </div>
       </div>
     </details>
   );

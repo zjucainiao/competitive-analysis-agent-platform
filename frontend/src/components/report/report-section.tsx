@@ -7,6 +7,7 @@ export function ReportSection({
   section,
   globalParagraphStart,
   showV2,
+  reviewMode,
   focusedParagraphId,
   onEvidenceClick,
   onFocusEvidence,
@@ -15,6 +16,7 @@ export function ReportSection({
   section: MockSection;
   globalParagraphStart: number;
   showV2: boolean;
+  reviewMode: boolean;
   focusedParagraphId: string | null;
   onEvidenceClick: (evidenceId: string) => void;
   onFocusEvidence: (evidenceId: string | null) => void;
@@ -45,6 +47,7 @@ export function ReportSection({
             paragraph={p}
             index={globalParagraphStart + i}
             showV2={showV2}
+            reviewMode={reviewMode}
             isFocused={p.id === focusedParagraphId}
             onEvidenceClick={onEvidenceClick}
             onFocusEvidence={onFocusEvidence}

@@ -51,17 +51,67 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * 把任意错误转成给用户看的中文提示：优先后端 detail，常见状态码给友好话术，
+ * 兜底才用原始 message。toast 里用它，避免暴露 "POST /api/... → 400" 这种开发文案。
+ */
+export function describeError(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.status === 0) return "无法连接后端，请确认服务正在运行";
+    if (e.status === 401) return "登录已过期，请重新登录";
+    if (e.status === 403) return "没有权限执行此操作";
+    if (e.status === 409) return "已有一个运行正在进行中";
+    const detail =
+      e.body && typeof e.body === "object" && "detail" in e.body
+        ? (e.body as { detail: unknown }).detail
+        : null;
+    if (typeof detail === "string" && detail) return detail;
+    if (e.status >= 500) return "服务器出错了，请稍后重试";
+    return "请求失败，请重试";
+  }
+  return e instanceof Error ? e.message : String(e);
+}
+
+/* ── auth token ──────────────────────────────────────────────────────────
+ * JWT 存 localStorage，并缓存在内存里（避免每次请求读 storage / SSR 安全）。
+ * 401 时由 onUnauthorized 钩子通知 auth-context 跳登录页。 */
+
+const TOKEN_KEY = "caap_token";
+let _token: string | null = null;
+let _onUnauthorized: (() => void) | null = null;
+
+export function setAuthToken(token: string | null): void {
+  _token = token;
+  if (typeof window === "undefined") return;
+  if (token) window.localStorage.setItem(TOKEN_KEY, token);
+  else window.localStorage.removeItem(TOKEN_KEY);
+}
+
+export function getAuthToken(): string | null {
+  if (_token) return _token;
+  if (typeof window === "undefined") return null;
+  _token = window.localStorage.getItem(TOKEN_KEY);
+  return _token;
+}
+
+/** auth-context 注册：收到 401 时清 token + 跳登录。 */
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  _onUnauthorized = fn;
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit
 ): Promise<T> {
   let res: Response;
+  const token = getAuthToken();
   try {
     res = await fetch(`${API_BASE}${path}`, {
       cache: "no-store",
       ...init,
       headers: {
         "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(init?.headers ?? {}),
       },
     });
@@ -71,6 +121,11 @@ async function request<T>(
       `Network error: ${e instanceof Error ? e.message : String(e)}`,
       null
     );
+  }
+  if (res.status === 401) {
+    // token 失效/缺失：清掉并通知上层跳登录
+    setAuthToken(null);
+    _onUnauthorized?.();
   }
   const ct = res.headers.get("content-type") ?? "";
   const body = ct.includes("application/json")
@@ -355,7 +410,48 @@ export function exportProjectUrl(
 /* ── ws helper ───────────────────────────────────────────────────────── */
 
 export function eventsWsUrl(projectId: string): string {
-  return `${WS_BASE}/api/projects/${encodeURIComponent(projectId)}/events`;
+  // 浏览器 WebSocket 不能带 Authorization header，token 走 query param。
+  const token = getAuthToken();
+  const base = `${WS_BASE}/api/projects/${encodeURIComponent(projectId)}/events`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+}
+
+/* ── auth ────────────────────────────────────────────────────────────── */
+
+export interface AuthUser {
+  user_id: string;
+  email: string;
+  display_name: string;
+  created_at: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  user: AuthUser;
+}
+
+export function register(
+  email: string,
+  password: string,
+  displayName = ""
+): Promise<TokenResponse> {
+  return request<TokenResponse>("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email, password, display_name: displayName }),
+  });
+}
+
+export function login(email: string, password: string): Promise<TokenResponse> {
+  return request<TokenResponse>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function fetchMe(): Promise<AuthUser> {
+  return request<AuthUser>("/api/auth/me");
 }
 
 /* ── health ──────────────────────────────────────────────────────────── */

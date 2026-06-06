@@ -120,7 +120,7 @@ export type AnalysisMode =
 
 export interface ProjectCreateRequest {
   project_name: string;
-  owner: string;
+  // owner 由后端从 JWT 派生，前端不再传（传了会被 extra=forbid 拒绝）
   target_product: string;
   competitors: string[];
   analysis_mode?: AnalysisMode;
@@ -341,7 +341,8 @@ export type QADimension =
   | "schema_completeness"
   | "logic_consistency"
   | "freshness"
-  | "expression";
+  | "expression"
+  | "coverage_density";
 
 export interface QAIssue {
   issue_id: string;

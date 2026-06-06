@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { useProjects } from "@/lib/api/hooks";
 import { apiProjectToCard } from "@/components/projects-list/adapters";
 import { StatusPill } from "@/components/layout/status-pill";
+import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 
 /**
@@ -58,6 +59,7 @@ export default function HomePage() {
 
 function HeroSearchCard() {
   const router = useRouter();
+  const { user } = useAuth();
   const [query, setQuery] = useState("");
 
   const greeting = useMemo(() => {
@@ -68,6 +70,9 @@ function HeroSearchCard() {
     if (h < 18) return "下午好";
     return "晚上好";
   }, []);
+
+  // 当前登录用户名（昵称 → 邮箱前缀 → 兜底）
+  const name = user?.display_name?.trim() || user?.email?.split("@")[0] || "你好";
 
   function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -83,7 +88,7 @@ function HeroSearchCard() {
     <section className="relative px-2 py-6">
       <div className="relative z-10">
         <h1 className="text-2xl font-semibold tracking-tight text-text-primary md:text-3xl">
-          怡峰，{greeting}
+          {name}，{greeting}
         </h1>
         <p className="mt-2 text-sm text-text-secondary leading-relaxed">
           挑一个想了解的产品，几分钟就能拿到一份带原文引用的对比报告。

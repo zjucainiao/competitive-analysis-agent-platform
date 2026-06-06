@@ -45,12 +45,11 @@ import { revalidate } from "@/lib/api/hooks";
  * 全局 ⌘K 命令面板。
  *
  * 命令源（grouped）：
- *  - Navigate     · 5 tab + Projects / Metrics / Design system
- *  - Jump to node · 13 DAG nodes（仅在 workspace 路径下显示）
- *  - Workspace    · Pause / Override v1 / Export / Share / New analysis
- *  - System       · Toggle theme（占位）/ Open docs
+ *  - Navigate         · 5 tab + Projects / Metrics / Design system
+ *  - Workspace actions · Pause / Override / Stop / Export / Share / New（仅 workspace）
+ *  - Jump to node / Search evidence（仅 workspace）
  *
- * 评分项「交互设计流畅」的关键键盘入口。Sprint 2 接 API 后命令源扩展为动态。
+ * 键盘优先的全局入口。主题切换在顶栏的 ThemeToggle。
  */
 export function CmdTrigger() {
   const [open, setOpen] = useState(false);
