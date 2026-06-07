@@ -39,7 +39,9 @@ import {
   pauseRun,
   stopRun,
 } from "@/lib/api/client";
-import { revalidate } from "@/lib/api/hooks";
+import { revalidate, useProjectState } from "@/lib/api/hooks";
+import { apiStateToDagData, aggregateEvidences } from "@/lib/api/adapters";
+import { apiEvidenceToMock } from "@/lib/evidence-context";
 
 /**
  * 全局 ⌘K 命令面板。
@@ -81,6 +83,25 @@ export function CmdTrigger() {
     if (m[1] === "demo") return null; // demo 不接 API
     return m[1];
   }, [pathname]);
+
+  /* ⌘K「跳节点 / 搜证据」数据源：真实工作台读当前项目真实 state（与
+   * client-workspace 共享 SWR 缓存，不额外打请求）；demo / 非 workspace
+   * （workspaceProjectId 为 null → hook 不 fetch）回退预置示例，避免真实项目里漏 demo 数据。 */
+  const { data: wsState } = useProjectState(workspaceProjectId);
+  const jumpNodes = useMemo(
+    () =>
+      workspaceProjectId && wsState
+        ? apiStateToDagData(wsState).nodes
+        : DEMO_DAG_NODES,
+    [workspaceProjectId, wsState]
+  );
+  const searchEvidences = useMemo(
+    () =>
+      workspaceProjectId && wsState
+        ? aggregateEvidences(wsState.outputs).map(apiEvidenceToMock)
+        : listEvidences(),
+    [workspaceProjectId, wsState]
+  );
 
   /** Workspace action 真实调用 + 失败 toast + 拉新 state */
   const runApi = (label: string, op: (pid: string) => Promise<unknown>) => async () => {
@@ -307,39 +328,42 @@ export function CmdTrigger() {
                 </CommandItem>
               </CommandGroup>
 
-              <CommandGroup heading="Jump to node">
-                {DEMO_DAG_NODES.map((n) => (
-                  <CommandItem
-                    key={n.id}
-                    keywords={[
-                      n.data.label,
-                      n.data.agent,
-                      n.id,
-                      n.data.status,
-                    ]}
-                    onSelect={runCmd(() => {
-                      const sp = new URLSearchParams(searchParams.toString());
-                      sp.set("tab", "dag");
-                      sp.set("node", n.id);
-                      router.push(`${pathname}?${sp.toString()}`);
-                      toast.info(`已选中 ${n.data.label}`, {
-                        description: `${n.data.agent} · ${n.data.status}`,
-                      });
-                    })}
-                  >
-                    <NodeStatusDot status={n.data.status} />
-                    <span>{n.data.label}</span>
-                    <span className="ml-auto font-mono text-[10px] text-text-muted">
-                      {n.data.agent}
-                    </span>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
+              {jumpNodes.length > 0 ? (
+                <CommandGroup heading="Jump to node">
+                  {jumpNodes.map((n) => (
+                    <CommandItem
+                      key={n.id}
+                      keywords={[
+                        n.data.label,
+                        n.data.agent,
+                        n.id,
+                        n.data.status,
+                      ]}
+                      onSelect={runCmd(() => {
+                        const sp = new URLSearchParams(searchParams.toString());
+                        sp.set("tab", "dag");
+                        sp.set("node", n.id);
+                        router.push(`${pathname}?${sp.toString()}`);
+                        toast.info(`已选中 ${n.data.label}`, {
+                          description: `${n.data.agent} · ${n.data.status}`,
+                        });
+                      })}
+                    >
+                      <NodeStatusDot status={n.data.status} />
+                      <span>{n.data.label}</span>
+                      <span className="ml-auto font-mono text-[10px] text-text-muted">
+                        {n.data.agent}
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              ) : null}
 
-              <CommandGroup heading="Search evidence">
-                {listEvidences()
-                  .slice(0, 8)
-                  .map((ev) => (
+              {searchEvidences.length > 0 ? (
+                <CommandGroup heading="Search evidence">
+                  {searchEvidences
+                    .slice(0, 8)
+                    .map((ev) => (
                     <CommandItem
                       key={ev.id}
                       keywords={[
@@ -371,7 +395,8 @@ export function CmdTrigger() {
                       </span>
                     </CommandItem>
                   ))}
-              </CommandGroup>
+                </CommandGroup>
+              ) : null}
             </>
           ) : null}
         </CommandList>
