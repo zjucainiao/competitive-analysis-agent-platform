@@ -124,6 +124,8 @@ function TabBody({
           <div className="min-h-0 flex-1">
             {runState ? (
               <WorkflowStepper
+                // run 切换（run_id 变）→ remount，重置「手动选中阶段」回到跟随实时
+                key={runState.run_id ?? projectId ?? "ws"}
                 view={runState}
                 onOpenDetail={(runRef) => {
                   const rec = dagData.nodes.find((n) => n.id === runRef);

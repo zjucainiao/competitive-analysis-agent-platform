@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 export type TabKey = "dag" | "report" | "trace" | "evidence" | "metrics";
 
 export const TABS: Array<{ key: TabKey; label: string }> = [
-  { key: "dag", label: "DAG" },
+  { key: "dag", label: "工作流" },
   { key: "report", label: "Report" },
   { key: "trace", label: "Trace" },
   { key: "evidence", label: "Evidence" },

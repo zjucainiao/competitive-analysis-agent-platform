@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
  */
 
 const TABS: Array<{ key: string; label: string; icon: LucideIcon }> = [
-  { key: "dag", label: "任务流转", icon: WorkflowIcon },
+  { key: "dag", label: "工作流", icon: WorkflowIcon },
   { key: "report", label: "报告", icon: FileTextIcon },
   { key: "trace", label: "决策回放", icon: ClockIcon },
   { key: "evidence", label: "证据库", icon: LibraryIcon },

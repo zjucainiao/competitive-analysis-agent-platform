@@ -172,7 +172,7 @@ export function CmdTrigger() {
               onSelect={runCmd(() => goToTab("dag"))}
             >
               <WorkflowIcon />
-              <span>DAG · 任务流转</span>
+              <span>工作流</span>
               <CommandShortcut>tab</CommandShortcut>
             </CommandItem>
             <CommandItem

@@ -472,6 +472,15 @@
   animation: pulse-soft 1500ms ease-in-out infinite;
 }
 
+/* 尊重「减少动态效果」系统偏好（WCAG 2.3.3）：关闭全站无限动画，
+ * 前庭功能障碍 / 晕动症用户不再被常驻自旋 / 脉冲影响。 */
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-soft,
+  .animate-spin {
+    animation: none !important;
+  }
+}
+
 /* ============================================================================
  * View Transitions API (Chromium / Safari TP / Firefox flag)
  * 评分项「交互设计流畅」加分。无支持时默默退化为即时切换。

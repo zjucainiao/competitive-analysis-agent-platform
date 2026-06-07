@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   CheckIcon,
   LoaderIcon,
@@ -8,6 +9,7 @@ import {
   OctagonXIcon,
   FileTextIcon,
   ClockIcon,
+  HashIcon,
   ChevronRightIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -15,6 +17,7 @@ import {
   runViewToStepper,
   formatDuration,
   formatTokens,
+  formatTokenTotal,
   type StepVM,
   type StepStatus,
 } from "@/lib/workflow-model";
@@ -52,6 +55,26 @@ const DOT_BG: Record<StepStatus, string> = {
   rework: "bg-rework-base text-text-inverse border-rework-base",
   error: "bg-error-base text-text-inverse border-error-base",
   pending: "bg-bg-raised text-text-muted border-border-default",
+};
+
+/** 小圆点（详情里每产品行）的纯底色。 */
+const DOT_SOLID: Record<StepStatus, string> = {
+  success: "bg-success-base",
+  running: "bg-running-base",
+  rework: "bg-rework-base",
+  error: "bg-error-base",
+  pending: "bg-border-strong",
+};
+
+/** 连接线配色：与圆点状态语义一致（success 绿 / rework 橙 / error 红 /
+ * running 渐变 / pending 灰虚线），避免返工/失败阶段后的线被画成「等待」。 */
+const CONNECTOR: Record<StepStatus, string> = {
+  success: "bg-success-base",
+  rework: "bg-rework-base",
+  error: "bg-error-base",
+  running: "bg-gradient-to-r from-running-base to-border-default",
+  pending:
+    "bg-[repeating-linear-gradient(90deg,var(--color-border-default)_0_6px,transparent_6px_12px)]",
 };
 
 const TEXT_TONE: Record<StepStatus, string> = {
@@ -129,38 +152,41 @@ export function WorkflowStepper({
   return (
     <div className="flex h-full flex-col gap-4">
       {/* 步进器条 */}
-      <ol className="flex items-start rounded-xl border border-border-subtle bg-bg-raised px-4 py-5 shadow-card">
+      <ol
+        className="flex items-start rounded-xl border border-border-subtle bg-bg-raised px-4 py-5 shadow-card"
+        aria-label="工作流阶段"
+      >
         {vm.steps.map((s, i) => {
           const isLast = i === vm.steps.length - 1;
           const isActive = i === active;
           return (
             <Fragment key={s.stage}>
               <li className="relative flex min-w-0 flex-1 flex-col items-center">
-                {/* 连接线（到下一步）：本步完成则实色，否则虚线 */}
+                {/* 连接线（到下一步）：配色随本步状态，居中于圆点中线 */}
                 {!isLast ? (
                   <span
                     className={cn(
-                      "absolute left-1/2 top-[14px] -z-0 h-0.5 w-full",
-                      s.status === "success"
-                        ? "bg-success-base"
-                        : s.status === "running"
-                          ? "bg-gradient-to-r from-running-base to-border-default"
-                          : "bg-[repeating-linear-gradient(90deg,var(--color-border-default)_0_6px,transparent_6px_12px)]"
+                      "absolute left-1/2 top-5 -z-0 h-0.5 w-full -translate-y-1/2",
+                      CONNECTOR[s.status]
                     )}
+                    aria-hidden
                   />
                 ) : null}
 
                 <button
                   type="button"
-                  onClick={() => setPicked(i)}
+                  // 再次点击当前选中阶段 → 取消固定，回到跟随实时活跃阶段
+                  onClick={() => setPicked((p) => (p === i ? null : i))}
                   className={cn(
                     "group flex flex-col items-center gap-1.5 rounded-lg px-2 py-1.5 transition-colors duration-120",
                     isActive ? "bg-accent-bg/50" : "hover:bg-bg-hover"
                   )}
-                  aria-pressed={isActive}
+                  aria-current={isActive ? "step" : undefined}
+                  aria-label={`第 ${i + 1} 步 · ${s.label} · ${STATUS_LABEL[s.status]}`}
                 >
                   <StepDot status={s.status} order={i + 1} />
                   <span
+                    title={s.label}
                     className={cn(
                       "max-w-[96px] truncate text-xs font-semibold",
                       isActive ? "text-text-primary" : "text-text-secondary"
@@ -180,12 +206,18 @@ export function WorkflowStepper({
                   {/* 副标签：多产品 / 返工轮次 */}
                   <span className="flex h-4 items-center gap-1">
                     {s.isProductStage && s.productCount > 0 ? (
-                      <span className="rounded-pill bg-bg-sunken px-1.5 text-[10px] text-text-muted">
+                      <span
+                        title={`${s.productCount} 个产品`}
+                        className="rounded-pill bg-bg-sunken px-1.5 text-[10px] text-text-muted"
+                      >
                         {s.productCount} 产品
                       </span>
                     ) : null}
                     {s.maxRound > 1 ? (
-                      <span className="rounded-pill bg-rework-bg px-1.5 text-[10px] font-medium text-rework-base">
+                      <span
+                        title={`已返工至第 ${s.maxRound} 轮`}
+                        className="rounded-pill bg-rework-bg px-1.5 text-[10px] font-medium text-rework-base"
+                      >
                         ↻ v{s.maxRound}
                       </span>
                     ) : null}
@@ -223,6 +255,15 @@ function StageDetail({
   onOpenDetail?: (runRef: string) => void;
 }) {
   const api = useWorkspaceApi();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const goToTab = (tab: string) => {
+    const sp = new URLSearchParams(searchParams.toString());
+    sp.set("tab", tab);
+    router.push(`${pathname}?${sp.toString()}`);
+  };
+
   // 全局阶段取最新一轮；产品阶段详情走 instances 列表（下方单独渲染）。
   const latestRev =
     step.revisions.length > 0
@@ -230,6 +271,12 @@ function StageDetail({
       : null;
   const headerRunRef = latestRev?.run_ref ?? step.instances[0]?.run_ref ?? null;
   const headerOut = headerRunRef ? outputs[headerRunRef] : undefined;
+
+  const records = step.isProductStage ? step.instances : step.revisions;
+  const totalTokens = records.reduce(
+    (a, r) => a + (r.tokens_input ?? 0) + (r.tokens_output ?? 0),
+    0
+  );
 
   const actions = headerRunRef
     ? nodeActionsFor({
@@ -261,6 +308,12 @@ function StageDetail({
             <ClockIcon className="h-3 w-3" />
             {formatDuration(step.durationMs)}
           </span>
+          {totalTokens > 0 ? (
+            <span className="inline-flex items-center gap-1">
+              <HashIcon className="h-3 w-3" />
+              {formatTokenTotal(totalTokens)} tok
+            </span>
+          ) : null}
         </span>
       </header>
 
@@ -277,6 +330,7 @@ function StageDetail({
             out={headerOut}
             runRef={headerRunRef}
             onOpenDetail={onOpenDetail}
+            onGoToTab={goToTab}
           />
         )}
 
@@ -322,14 +376,11 @@ function ProductInstances({
           const stepStatus = mapInstStatus(inst.status);
           return (
             <li
-              key={inst.product}
+              key={inst.run_ref ?? inst.product}
               className="flex items-center gap-3 px-3 py-2.5"
             >
               <span
-                className={cn(
-                  "h-2 w-2 shrink-0 rounded-pill",
-                  DOT_BG[stepStatus].split(" ")[0]
-                )}
+                className={cn("h-2 w-2 shrink-0 rounded-pill", DOT_SOLID[stepStatus])}
               />
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary">
                 {inst.product}
@@ -366,11 +417,13 @@ function GlobalRevisionDetail({
   out,
   runRef,
   onOpenDetail,
+  onGoToTab,
 }: {
   step: StepVM;
   out: AnyAgentOutput | undefined;
   runRef: string | null;
   onOpenDetail?: (runRef: string) => void;
+  onGoToTab?: (tab: string) => void;
 }) {
   if (!out) {
     return (
@@ -402,17 +455,40 @@ function GlobalRevisionDetail({
         </div>
       ) : null}
 
-      {runRef && onOpenDetail ? (
-        <button
-          type="button"
-          onClick={() => onOpenDetail(runRef)}
-          className="inline-flex items-center gap-0.5 text-[11px] font-medium text-accent-base hover:text-accent-hover"
-        >
-          查看完整输入 / 输出 / LLM 调用
-          <ChevronRightIcon className="h-3 w-3" />
-        </button>
-      ) : null}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        {step.stage === "reporter" && onGoToTab ? (
+          <DetailLink label="打开报告" onClick={() => onGoToTab("report")} />
+        ) : null}
+        {step.stage === "qa" && onGoToTab ? (
+          <DetailLink label="查看质检详情" onClick={() => onGoToTab("trace")} />
+        ) : null}
+        {runRef && onOpenDetail ? (
+          <DetailLink
+            label="完整输入 / 输出 / LLM 调用"
+            onClick={() => onOpenDetail(runRef)}
+          />
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+function DetailLink({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-0.5 text-[11px] font-medium text-accent-base hover:text-accent-hover"
+    >
+      {label}
+      <ChevronRightIcon className="h-3 w-3" />
+    </button>
   );
 }
 
@@ -461,6 +537,13 @@ function productMetric(out: AnyAgentOutput | undefined): string | null {
   return null;
 }
 
+/** QA 终判枚举 → 中文（避免在中文 UI 暴露 needs_revision 等裸枚举值）。 */
+const QA_STATUS_LABEL: Record<string, string> = {
+  pass: "通过",
+  needs_revision: "需修订",
+  reject: "驳回",
+};
+
 /** 全局阶段产物一句话摘要。 */
 function globalSummary(stage: string, out: AnyAgentOutput): string | null {
   if (stage === "analyst" && "result" in out && (out as AnalystOutput).result) {
@@ -473,7 +556,8 @@ function globalSummary(stage: string, out: AnyAgentOutput): string | null {
   }
   if (stage === "qa" && "verdict" in out && (out as QAOutput).verdict) {
     const v = (out as QAOutput).verdict;
-    return `质检结论：${v.overall_status} · ${v.issues.length} 处问题`;
+    const label = QA_STATUS_LABEL[v.overall_status] ?? v.overall_status;
+    return `质检结论：${label} · ${v.issues.length} 处问题`;
   }
   return null;
 }

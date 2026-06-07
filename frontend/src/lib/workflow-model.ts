@@ -59,8 +59,11 @@ function mapStatus(s: string): StepStatus {
 
 type Timed = { started_at: string | null; ended_at: string | null; duration_ms: number | null };
 
-/** 阶段真实时长：最早 started_at → 最晚 ended_at；缺时间戳则退化为 duration_ms 之和。 */
+/** 阶段真实时长：**全部记录都已结束**才用「最早 started_at → 最晚 ended_at」跨度
+ * （否则进行中阶段会被低估成「到第一个完成项为止」、还会随轮询跳变）；否则退化为
+ * 已有 duration_ms 之和，再否则返回 null（前端显示 —）。 */
 function stageDurationMs(records: Timed[]): number | null {
+  if (records.length === 0) return null;
   const parse = (t: string | null): number | null => {
     if (!t) return null;
     const n = Date.parse(t);
@@ -68,7 +71,8 @@ function stageDurationMs(records: Timed[]): number | null {
   };
   const starts = records.map((r) => parse(r.started_at)).filter((n): n is number => n !== null);
   const ends = records.map((r) => parse(r.ended_at)).filter((n): n is number => n !== null);
-  if (starts.length > 0 && ends.length > 0) {
+  // 只有「每条记录都有 ended_at」(阶段确已全部结束) 时才用墙钟跨度
+  if (starts.length > 0 && ends.length === records.length) {
     const d = Math.max(...ends) - Math.min(...starts);
     if (d >= 0) return d;
   }
@@ -77,15 +81,24 @@ function stageDurationMs(records: Timed[]): number | null {
 }
 
 /** 单阶段状态聚合：
- * - 产品阶段（instances 已是每产品最新轮）：任一 error → error；任一 rework → rework；否则 success。
+ * - 产品阶段（instances 已是每产品最新轮）：任一 error → error；任一 rework → rework；
+ *   **未跑满全部产品且整条 run 仍在跑 → pending**（仍在并行采集，交给 running 叠加点亮，
+ *   避免「跑了 1/N 就显示已完成、running 错误前移到下游」）；否则 success。
  * - 全局阶段（revisions 多轮）：取**最新一轮**的状态（返工已解决的早期轮次不应再标 rework）。
  */
-function deriveStageStatus(st: RunStageView): StepStatus {
+function deriveStageStatus(
+  st: RunStageView,
+  productTotal: number,
+  runStatus: string
+): StepStatus {
   if (PRODUCT_STAGES.has(st.stage)) {
     if (st.instances.length === 0) return "pending";
     const statuses = st.instances.map((i) => mapStatus(i.status));
     if (statuses.includes("error")) return "error";
     if (statuses.includes("rework")) return "rework";
+    if (runStatus === "running" && st.instances.length < productTotal) {
+      return "pending"; // 还没采满全部产品 → 视为进行中
+    }
     return "success";
   }
   if (st.revisions.length === 0) return "pending";
@@ -94,16 +107,20 @@ function deriveStageStatus(st: RunStageView): StepStatus {
 }
 
 export function runViewToStepper(view: RunStateView): StepperVM {
+  const productTotal = view.products.length;
   const steps: StepVM[] = view.stages.map((st) => {
     const isProductStage = PRODUCT_STAGES.has(st.stage);
     const records: Timed[] = isProductStage ? st.instances : st.revisions;
-    const maxRound = st.revisions.reduce((m, r) => Math.max(m, r.round), 0);
+    // 产品阶段返工轮次来自 instances.revision；全局阶段来自 revisions.round
+    const maxRound = isProductStage
+      ? st.instances.reduce((m, i) => Math.max(m, i.revision ?? 1), 0)
+      : st.revisions.reduce((m, r) => Math.max(m, r.round), 0);
     return {
       stage: st.stage,
       agent: st.agent,
       label: STAGE_LABEL[st.stage] ?? st.stage,
       isProductStage,
-      status: deriveStageStatus(st),
+      status: deriveStageStatus(st, productTotal, view.status),
       durationMs: stageDurationMs(records),
       productCount: st.instances.length,
       maxRound,
@@ -149,13 +166,17 @@ export function formatDuration(ms: number | null): string {
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
-/** 格式化 token（input+output 合计，≥1000 用 k）。 */
+/** 格式化 token 总量（≥1000 用 k）。 */
+export function formatTokenTotal(total: number): string {
+  if (total <= 0) return "—";
+  if (total >= 1000) return `${(total / 1000).toFixed(1)}k`;
+  return String(total);
+}
+
+/** 格式化 token（input+output 合计）。 */
 export function formatTokens(
   tin: number | null,
   tout: number | null
 ): string {
-  const total = (tin ?? 0) + (tout ?? 0);
-  if (total <= 0) return "—";
-  if (total >= 1000) return `${(total / 1000).toFixed(1)}k`;
-  return String(total);
+  return formatTokenTotal((tin ?? 0) + (tout ?? 0));
 }
