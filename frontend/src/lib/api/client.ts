@@ -13,6 +13,7 @@ import type {
   ProjectCreateRequest,
   ProjectListResponse,
   ProjectStateResponse,
+  RunStateView,
   ProjectStatus,
   QAOverrideResponse,
   RunControlResponse,
@@ -194,6 +195,13 @@ export function getProjectState(
 ): Promise<ProjectStateResponse> {
   return request<ProjectStateResponse>(
     `/api/projects/${encodeURIComponent(projectId)}/state`
+  );
+}
+
+/** LIVE RunStateView：原生引擎当前/最近一次 run 的「前端友好」视图（工作流步进器数据源）。 */
+export function getRunStateView(projectId: string): Promise<RunStateView> {
+  return request<RunStateView>(
+    `/api/projects/${encodeURIComponent(projectId)}/run-state`
   );
 }
 

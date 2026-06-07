@@ -5,12 +5,14 @@ import {
   listProjects,
   getProject,
   getProjectState,
+  getRunStateView,
 } from "./client";
 import type {
   Project,
   ProjectListResponse,
   ProjectStateResponse,
   ProjectStatus,
+  RunStateView,
 } from "./types";
 
 /**
@@ -31,6 +33,9 @@ export const KEYS = {
   },
   projectState(id: string) {
     return `/api/projects/${id}/state`;
+  },
+  runState(id: string) {
+    return `/api/projects/${id}/run-state`;
   },
 };
 
@@ -75,6 +80,21 @@ export function useProjectState(
   );
 }
 
+export function useRunState(
+  id: string | null | undefined,
+  config?: SWRConfiguration<RunStateView>
+): SWRResponse<RunStateView> {
+  return useSWR<RunStateView>(
+    id ? KEYS.runState(id) : null,
+    () => getRunStateView(id!),
+    {
+      revalidateOnFocus: false,
+      refreshInterval: 30000,
+      ...config,
+    }
+  );
+}
+
 /* ── revalidation helpers ───────────────────────────────────────────── */
 
 export const revalidate = {
@@ -91,5 +111,8 @@ export const revalidate = {
   },
   projectState(id: string) {
     return mutate(KEYS.projectState(id));
+  },
+  runState(id: string) {
+    return mutate(KEYS.runState(id));
   },
 };

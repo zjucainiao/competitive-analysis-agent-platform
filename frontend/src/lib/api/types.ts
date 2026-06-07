@@ -447,6 +447,65 @@ export interface ProjectStateResponse {
   verdicts: QAVerdict[];
 }
 
+/* ── RunStateView（原生引擎前端视图 · 工作流步进器数据源）─────────────── */
+
+/** collect/extract 阶段的单产品执行实例（取该产品最新一轮）。 */
+export interface StageInstance {
+  product: string;
+  status: AgentStatus | string;
+  revision: number;
+  run_ref: string | null;
+  span_id: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  tokens_input: number | null;
+  tokens_output: number | null;
+  cost_usd: number | null;
+  confidence: number | null;
+  duration_ms: number | null;
+}
+
+/** analyst/reporter/qa 阶段的单轮次执行修订（QA 返工产生多轮）。 */
+export interface StageRevision {
+  round: number;
+  status: AgentStatus | string;
+  run_ref: string | null;
+  span_id: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  tokens_input: number | null;
+  tokens_output: number | null;
+  cost_usd: number | null;
+  confidence: number | null;
+  duration_ms: number | null;
+}
+
+/** 单个流水线阶段视图：产品阶段用 instances，全局阶段用 revisions。 */
+export interface RunStageView {
+  stage: "collect" | "extract" | "analyst" | "reporter" | "qa" | string;
+  agent: string;
+  instances: StageInstance[];
+  revisions: StageRevision[];
+}
+
+/** 原生引擎一次 run 的完整前端视图（替代 DAGPlan 形状的 ProjectStateResponse）。 */
+export interface RunStateView {
+  project_id: string;
+  run_id: string | null;
+  status: "running" | "done" | "failed" | "aborted" | string;
+  products: string[];
+  stages: RunStageView[];
+  history: Record<string, unknown>[];
+  verdicts: QAVerdict[];
+  /** 按 run_ref（collect.Notion / reporter / reporter_v2…）键的 AgentOutput dump。 */
+  outputs: Record<string, AnyAgentOutput>;
+  qa_round: number;
+  aborted: boolean;
+  abort_reason: string | null;
+  metrics: ProjectMetrics | null;
+  computed_at: string;
+}
+
 /* ── PATCH paragraph ─────────────────────────────────────────────────── */
 
 export interface ParagraphPatchRequest {

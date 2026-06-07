@@ -16,6 +16,7 @@ import { WorkspaceShell } from "@/components/layout/workspace-shell";
 import { WorkspaceDetailsRail } from "@/components/layout/workspace-details-rail";
 import { type StatusTone } from "@/components/layout/status-pill";
 import { DagCanvas } from "@/components/dag";
+import { WorkflowStepper } from "@/components/dag/workflow-stepper";
 import { ExecutionLogCard } from "@/components/dag/execution-log-card";
 import { EditPromptDialog } from "@/components/dag/edit-prompt-dialog";
 import { ExportMenu } from "@/components/layout/export-menu";
@@ -24,7 +25,7 @@ import { TraceLayout } from "@/components/trace";
 import { EvidenceLayout } from "@/components/evidence";
 import { MetricsLayout } from "@/components/metrics";
 import { Button } from "@/components/ui/button";
-import { useProjectState, revalidate } from "@/lib/api/hooks";
+import { useProjectState, useRunState, revalidate } from "@/lib/api/hooks";
 import { useProjectEvents } from "@/lib/api/ws";
 import {
   apiStateToDagData,
@@ -38,6 +39,7 @@ import type { TabKey } from "@/components/layout/tabs-row";
 import type {
   Project,
   ProjectStateResponse,
+  RunStateView,
   RunRef,
   DAGNode,
 } from "@/lib/api/types";
@@ -80,11 +82,13 @@ export function ClientWorkspace({
 function TabBody({
   tab,
   state,
+  runState,
   projectId,
   onSelectNode,
 }: {
   tab: TabKey;
   state: ProjectStateResponse | null;
+  runState?: RunStateView | null;
   projectId: string | null;
   onSelectNode?: (id: string, data: DagNodeData | null) => void;
 }) {
@@ -118,12 +122,22 @@ function TabBody({
       {tab === "dag" && (
         <div className="flex h-[calc(100vh-7rem)] flex-col gap-4">
           <div className="min-h-0 flex-1">
-            <DagCanvas
-              nodes={dagData.nodes}
-              edges={dagData.edges}
-              isLiveData={true}
-              onSelectNode={onSelectNode}
-            />
+            {runState ? (
+              <WorkflowStepper
+                view={runState}
+                onOpenDetail={(runRef) => {
+                  const rec = dagData.nodes.find((n) => n.id === runRef);
+                  onSelectNode?.(runRef, rec?.data ?? null);
+                }}
+              />
+            ) : (
+              <DagCanvas
+                nodes={dagData.nodes}
+                edges={dagData.edges}
+                isLiveData={true}
+                onSelectNode={onSelectNode}
+              />
+            )}
           </div>
           <div className="shrink-0">
             <ExecutionLogCard state={state} />
@@ -224,6 +238,7 @@ function ApiWorkspace({
   const { status: wsStatus, reconnect: wsReconnect } = useProjectEvents(projectId, {
     onMessage: (msg) => {
       void revalidate.projectState(projectId);
+      void revalidate.runState(projectId);
       if (msg.status === "failed" && msg.error) {
         toast.error(`${msg.node_id} failed`, {
           description: msg.error.message.slice(0, 120),
@@ -275,6 +290,8 @@ function ApiWorkspaceShell({
   projectId: string;
 }) {
   const ctx = useMemo(() => projectToRunContext(state.project), [state.project]);
+  // 工作流步进器数据源（原生引擎视图）；与 /state 并存，二者皆来自同一 native run。
+  const { data: runState } = useRunState(projectId);
   const [selected, setSelected] = useState<{
     id: string;
     data: DagNodeData;
@@ -352,6 +369,7 @@ function ApiWorkspaceShell({
         <TabBody
           tab={tab}
           state={state}
+          runState={runState}
           projectId={projectId}
           onSelectNode={(id, data) =>
             data ? setSelected({ id, data }) : setSelected(null)
