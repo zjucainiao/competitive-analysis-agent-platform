@@ -12,7 +12,6 @@ import type {
   Project,
   ProjectCreateRequest,
   ProjectListResponse,
-  ProjectStateResponse,
   RunStateView,
   ProjectStatus,
   QAOverrideResponse,
@@ -187,14 +186,6 @@ export function startRun(projectId: string): Promise<RunStartedResponse> {
   return request<RunStartedResponse>(
     `/api/projects/${encodeURIComponent(projectId)}/run`,
     { method: "POST" }
-  );
-}
-
-export function getProjectState(
-  projectId: string
-): Promise<ProjectStateResponse> {
-  return request<ProjectStateResponse>(
-    `/api/projects/${encodeURIComponent(projectId)}/state`
   );
 }
 

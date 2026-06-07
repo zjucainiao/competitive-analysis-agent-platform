@@ -186,7 +186,7 @@ export function ReportLayout(props: ReportLayoutProps = {}) {
             2
           )}`,
         });
-        void revalidate.projectState(apiProjectId);
+        void revalidate.runState(apiProjectId);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         toast.error("保存失败", { description: msg });

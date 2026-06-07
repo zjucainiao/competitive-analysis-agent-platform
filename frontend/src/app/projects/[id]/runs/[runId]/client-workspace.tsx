@@ -25,7 +25,8 @@ import { TraceLayout } from "@/components/trace";
 import { EvidenceLayout } from "@/components/evidence";
 import { MetricsLayout } from "@/components/metrics";
 import { Button } from "@/components/ui/button";
-import { useProjectState, useRunState, revalidate } from "@/lib/api/hooks";
+import { useProject, useRunState, revalidate } from "@/lib/api/hooks";
+import { runViewToProjectState } from "@/lib/api/run-view-to-state";
 import { useProjectEvents } from "@/lib/api/ws";
 import {
   apiStateToDagData,
@@ -235,12 +236,24 @@ function ApiWorkspace({
   runId: string;
   tab: TabKey;
 }) {
-  const { data: state, error, isLoading, mutate } = useProjectState(projectId);
+  // Stage D：单一数据源 /run-state(RunStateView) + project，前端投影出旧 state 形状。
+  const {
+    data: project,
+    error: projectError,
+    isLoading: projectLoading,
+    mutate: mutateProject,
+  } = useProject(projectId);
+  const {
+    data: runState,
+    error: runStateError,
+    isLoading: runStateLoading,
+    mutate: mutateRunState,
+  } = useRunState(projectId);
 
   const { status: wsStatus, reconnect: wsReconnect } = useProjectEvents(projectId, {
     onMessage: (msg) => {
-      void revalidate.projectState(projectId);
       void revalidate.runState(projectId);
+      void revalidate.project(projectId);
       if (msg.status === "failed" && msg.error) {
         toast.error(`${msg.node_id} failed`, {
           description: msg.error.message.slice(0, 120),
@@ -255,18 +268,27 @@ function ApiWorkspace({
     },
   });
 
+  const error = projectError ?? runStateError;
   if (error) {
     return (
-      <ErrorView error={error} projectId={projectId} onRetry={() => mutate()} />
+      <ErrorView
+        error={error}
+        projectId={projectId}
+        onRetry={() => {
+          void mutateProject();
+          void mutateRunState();
+        }}
+      />
     );
   }
-  if (isLoading || !state) {
+  if (projectLoading || runStateLoading || !project || !runState) {
     return <LoadingView />;
   }
 
   return (
     <ApiWorkspaceShell
-      state={state}
+      project={project}
+      runState={runState}
       tab={tab}
       wsConnected={wsStatus === "open"}
       wsStatus={wsStatus}
@@ -277,23 +299,28 @@ function ApiWorkspace({
 }
 
 function ApiWorkspaceShell({
-  state,
+  project,
+  runState,
   tab,
   wsConnected,
   wsStatus,
   onReconnect,
   projectId,
 }: {
-  state: ProjectStateResponse;
+  project: Project;
+  runState: RunStateView;
   tab: TabKey;
   wsConnected: boolean;
   wsStatus: string;
   onReconnect: () => void;
   projectId: string;
 }) {
-  const ctx = useMemo(() => projectToRunContext(state.project), [state.project]);
-  // 工作流步进器数据源（原生引擎视图）；与 /state 并存，二者皆来自同一 native run。
-  const { data: runState } = useRunState(projectId);
+  // 前端投影：RunStateView + project → 旧 ProjectStateResponse 形状，喂现有组件零改动。
+  const state = useMemo(
+    () => runViewToProjectState(runState, project),
+    [runState, project]
+  );
+  const ctx = useMemo(() => projectToRunContext(project), [project]);
   const [selected, setSelected] = useState<{
     id: string;
     data: DagNodeData;
@@ -305,7 +332,7 @@ function ApiWorkspaceShell({
       runId: ctx.runId,
       revalidate: () =>
         Promise.all([
-          revalidate.projectState(projectId),
+          revalidate.runState(projectId),
           revalidate.project(projectId),
           revalidate.projects(),
         ]),

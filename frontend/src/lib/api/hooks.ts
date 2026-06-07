@@ -4,13 +4,11 @@ import useSWR, { type SWRConfiguration, type SWRResponse, mutate } from "swr";
 import {
   listProjects,
   getProject,
-  getProjectState,
   getRunStateView,
 } from "./client";
 import type {
   Project,
   ProjectListResponse,
-  ProjectStateResponse,
   ProjectStatus,
   RunStateView,
 } from "./types";
@@ -30,9 +28,6 @@ export const KEYS = {
   },
   project(id: string) {
     return `/api/projects/${id}`;
-  },
-  projectState(id: string) {
-    return `/api/projects/${id}/state`;
   },
   runState(id: string) {
     return `/api/projects/${id}/run-state`;
@@ -64,22 +59,6 @@ export function useProject(
   );
 }
 
-export function useProjectState(
-  id: string | null | undefined,
-  config?: SWRConfiguration<ProjectStateResponse>
-): SWRResponse<ProjectStateResponse> {
-  return useSWR<ProjectStateResponse>(
-    id ? KEYS.projectState(id) : null,
-    () => getProjectState(id!),
-    {
-      revalidateOnFocus: false,
-      /* 默认 30 秒 background revalidate；如果 WS 在跑，可以延长甚至禁用 */
-      refreshInterval: 30000,
-      ...config,
-    }
-  );
-}
-
 export function useRunState(
   id: string | null | undefined,
   config?: SWRConfiguration<RunStateView>
@@ -108,9 +87,6 @@ export const revalidate = {
   },
   project(id: string) {
     return mutate(KEYS.project(id));
-  },
-  projectState(id: string) {
-    return mutate(KEYS.projectState(id));
   },
   runState(id: string) {
     return mutate(KEYS.runState(id));

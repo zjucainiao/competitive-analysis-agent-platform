@@ -39,7 +39,8 @@ import {
   pauseRun,
   stopRun,
 } from "@/lib/api/client";
-import { revalidate, useProjectState } from "@/lib/api/hooks";
+import { revalidate, useProject, useRunState } from "@/lib/api/hooks";
+import { runViewToProjectState } from "@/lib/api/run-view-to-state";
 import { apiStateToDagData, aggregateEvidences } from "@/lib/api/adapters";
 import { apiEvidenceToMock } from "@/lib/evidence-context";
 
@@ -84,10 +85,18 @@ export function CmdTrigger() {
     return m[1];
   }, [pathname]);
 
-  /* ⌘K「跳节点 / 搜证据」数据源：真实工作台读当前项目真实 state（与
-   * client-workspace 共享 SWR 缓存，不额外打请求）；demo / 非 workspace
-   * （workspaceProjectId 为 null → hook 不 fetch）回退预置示例，避免真实项目里漏 demo 数据。 */
-  const { data: wsState } = useProjectState(workspaceProjectId);
+  /* ⌘K「跳节点 / 搜证据」数据源：真实工作台读当前项目 /run-state + project，前端投影
+   * 成旧 state 形状（与 client-workspace 共享 SWR 缓存，不额外打请求）；demo / 非
+   * workspace（workspaceProjectId 为 null → hook 不 fetch）回退预置示例。 */
+  const { data: wsProject } = useProject(workspaceProjectId);
+  const { data: wsRunState } = useRunState(workspaceProjectId);
+  const wsState = useMemo(
+    () =>
+      workspaceProjectId && wsProject && wsRunState
+        ? runViewToProjectState(wsRunState, wsProject)
+        : null,
+    [workspaceProjectId, wsProject, wsRunState]
+  );
   const jumpNodes = useMemo(
     () =>
       workspaceProjectId && wsState
@@ -112,7 +121,7 @@ export function CmdTrigger() {
     try {
       await op(workspaceProjectId);
       await Promise.all([
-        revalidate.projectState(workspaceProjectId),
+        revalidate.runState(workspaceProjectId),
         revalidate.project(workspaceProjectId),
       ]);
     } catch (e) {
@@ -260,7 +269,7 @@ export function CmdTrigger() {
                           description: `final = ${res.accepted_report_node_id} · ${res.skipped_node_ids.length} 节点 skip · edit_rate ${(res.edit_rate * 100).toFixed(0)}%`,
                         });
                         await Promise.all([
-                          revalidate.projectState(workspaceProjectId),
+                          revalidate.runState(workspaceProjectId),
                           revalidate.project(workspaceProjectId),
                         ]);
                       } catch (e) {
