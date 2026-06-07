@@ -42,7 +42,15 @@ legacy 不删 · flag 可切回 · 每阶段验证通过才 commit · native 转
 | B RunStateView schema/assembler/端点 | ✅ 完成并 review | e52aa7a |
 | C 翻默认 native + 真实 LLM 验证 | ✅ 完成 | b1d8277 |
 | 投影桥补边(DAG 布局) | ✅ 完成 | 94b3f0f |
-| **D 前端迁移 RunStateView** | **⏸ 推迟到有人值守时做**(理由见下) | — |
+| **D 前端迁移 RunStateView** | ✅ **完成**(有人值守,工作流视图重做时一并做) | 8333047 / 54ddb9e |
+
+> Stage D 实际做法(2026-06-07 有人值守):没有逐个重写 Trace/详情栏等组件(风险高),而是把后端
+> `projection.run_state_to_dagplan` 的「RunState→DAGPlan」投影**整体平移成前端适配器**
+> `runViewToProjectState`,从单一 `/run-state`(RunStateView)重建出与旧 `/state` 一模一样的
+> ProjectStateResponse —— 所有现有组件零改动吃新数据源。对拍真实项目确认 node_ids/edges/outputs
+> 键逐一相同。随后删后端 `/state` 路由 + `ProjectStateResponse` schema;`projection.py` 保留为
+> orchestrator 内部 metrics 机制(不再对前端暴露)。详见
+> [工作流步进器重做 design](2026-06-07-workflow-stepper-redesign-design.md)。
 
 **实测验证(native 默认)**:
 - 全新项目 real-LLM 跑通 collect→extract→analyst→reporter→qa,metrics 落库,导出报告干净。
