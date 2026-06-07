@@ -106,6 +106,11 @@ class RunStateView(BaseModel):
     stages: list[RunStageView] = Field(default_factory=list)
     history: list[dict[str, Any]] = Field(default_factory=list)
     verdicts: list[dict[str, Any]] = Field(default_factory=list)
+    # outputs：按投影节点 ID（run_ref，如 collect.Notion / reporter / reporter_v2）键的
+    # AgentOutput dump。详情面板用 outputs[run_ref] 取 self_critique / draft / verdict /
+    # evidences 等深内容（instances/revisions 只带 metric，不够）。键法与 projection out_map
+    # 一致，前端 findLatestReporter / aggregateEvidences 可复用。
+    outputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     qa_round: int = 0
     aborted: bool = False
     abort_reason: Optional[str] = None

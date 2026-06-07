@@ -68,7 +68,8 @@ def _overall_status(history: list[dict], *, aborted: bool) -> str:
     规则（保守、健壮）：
     - aborted=True → "aborted"
     - 否则：若存在某「终端 failed」节点且其后再无该逻辑节点的成功记录 → "failed"
-    - 否则：若 history 里出现过 qa 节点（说明流水线跑到末端）→ "done"
+    - 否则：若**最新一轮 qa** 是 success/partial（终判通过）→ "done"
+      （最新 qa 仍是 needs_rework 说明还在返工 → "running"，避免误判成 done）
     - 否则 → "running"
     """
     if aborted:
@@ -82,8 +83,13 @@ def _overall_status(history: list[dict], *, aborted: bool) -> str:
     if any(s == "failed" for s in last_status_by_key.values()):
         return "failed"
 
-    has_qa = any(run.get("node") == "qa" for run in history)
-    return "done" if has_qa else "running"
+    # 最新一轮 qa 通过才算 done；needs_rework 的最新 qa = 返工进行中 → running
+    qa_runs = [r for r in history if r.get("node") == "qa"]
+    if qa_runs:
+        latest_qa = max(qa_runs, key=lambda r: r.get("round", 1))
+        if latest_qa.get("status", "") in {"success", "partial"}:
+            return "done"
+    return "running"
 
 
 def run_state_to_view(
@@ -140,12 +146,31 @@ def run_state_to_view(
         stages=stages,
         history=history,
         verdicts=[_as_dict(v) for v in raw_verdicts],
+        outputs=_outputs_by_run_ref(history, outputs_by_ref),
         qa_round=int(state.get("qa_round", 0) or 0),
         aborted=aborted,
         abort_reason=abort_reason,
         metrics=metrics,
         computed_at=datetime.now(timezone.utc).isoformat(),
     )
+
+
+def _outputs_by_run_ref(history: list[dict], outputs_by_ref: dict) -> dict[str, dict]:
+    """把 ``{output_ref: output}`` 重键为 ``{run_ref: output}``（投影节点 ID）。
+
+    与 ``projection.run_state_to_dagplan`` 的 out_map 同一键法：遍历 history，
+    run_ref = ``_node_id(node, product, round)``，取该 run 的 ``output_ref`` 在
+    ``outputs_by_ref`` 里的 output。同一 run_ref 只取首条（重复 Send/barrier 去重）。
+    """
+    out_map: dict[str, dict] = {}
+    for run in history:
+        run_ref = _node_id(run.get("node"), run.get("product"), run.get("round", 1))
+        if run_ref in out_map:
+            continue
+        ref = run.get("output_ref")
+        if ref and ref in outputs_by_ref:
+            out_map[run_ref] = outputs_by_ref[ref]
+    return out_map
 
 
 def _build_instances(

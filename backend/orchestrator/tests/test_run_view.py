@@ -212,6 +212,37 @@ def test_aborted_status(two_product_project):
     assert view.abort_reason == "max_rounds reached"
 
 
+def test_outputs_keyed_by_run_ref(rework_state, two_product_project):
+    """outputs 字段按 run_ref（投影节点 ID）键，详情面板靠它取深内容。
+
+    - 每产品 / 每轮次都应有 run_ref 入口；
+    - 返工 reporter_v2 也应在 outputs 里（与 reporter 映射到同一 output_ref="reporter"
+      的产物，native 引擎只保留最新一份）；
+    - 键与 instances/revisions.run_ref 对得上，前端 outputs[run_ref] 可命中。
+    """
+    view = run_state_to_view(rework_state, project=two_product_project)
+    keys = set(view.outputs)
+    assert {
+        "collect.Notion",
+        "collect.Asana",
+        "extract.Notion",
+        "extract.Asana",
+        "analyst",
+        "reporter",
+        "reporter_v2",
+        "qa",
+    } <= keys
+    # reporter 与 reporter_v2 都指向 output_ref="reporter" 的产物
+    assert view.outputs["reporter_v2"] == rework_state["outputs"]["reporter"]
+    # instances/revisions 的 run_ref 都能在 outputs 里命中
+    reporter = _stage(view, "reporter")
+    for rev in reporter.revisions:
+        assert rev.run_ref in view.outputs
+    collect = _stage(view, "collect")
+    for inst in collect.instances:
+        assert inst.run_ref in view.outputs
+
+
 def test_failed_status_when_terminal_node_failed(two_product_project):
     state = RunState(
         project_id=two_product_project.project_id,
