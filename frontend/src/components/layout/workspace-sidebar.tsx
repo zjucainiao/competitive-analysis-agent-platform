@@ -9,7 +9,6 @@ import {
   ClockIcon,
   LibraryIcon,
   GaugeIcon,
-  SettingsIcon,
   ArrowLeftIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -20,7 +19,7 @@ import { cn } from "@/lib/utils";
  *
  * fixed 在 TopBar（h-16）下方：top-16 left-0 bottom-0。
  * 品牌不在这里（已移到全宽 TopBar 左侧）。
- * 6 项 tab + 顶部「返回」+ 底部「设置」。
+ * 顶部「返回」+ 各视图 tab。
  */
 
 const ITEMS: Array<{ tab: string; label: string; icon: LucideIcon }> = [
@@ -89,16 +88,6 @@ export function WorkspaceSidebar() {
           );
         })}
       </nav>
-
-      {/* settings */}
-      <button
-        type="button"
-        aria-label="设置"
-        className="mx-2 mt-1 flex flex-col items-center gap-0.5 rounded-lg py-2.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
-      >
-        <SettingsIcon className="h-5 w-5" />
-        <span className="text-[10px]">设置</span>
-      </button>
     </aside>
   );
 }

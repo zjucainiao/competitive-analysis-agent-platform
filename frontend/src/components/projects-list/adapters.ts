@@ -21,18 +21,18 @@ function statusTone(s: Project["status"]): {
 } {
   switch (s) {
     case "running":
-      return { tone: "running", label: "running", pulse: true };
+      return { tone: "running", label: "进行中", pulse: true };
     case "reviewing":
-      return { tone: "rework", label: "reviewing" };
+      return { tone: "rework", label: "审核中" };
     case "done":
-      return { tone: "success", label: "done" };
+      return { tone: "success", label: "已完成" };
     case "failed":
-      return { tone: "error", label: "failed" };
+      return { tone: "error", label: "失败" };
     case "planning":
-      return { tone: "running", label: "planning", pulse: true };
+      return { tone: "running", label: "准备中", pulse: true };
     case "draft":
     default:
-      return { tone: "neutral", label: "draft" };
+      return { tone: "neutral", label: "草稿" };
   }
 }
 

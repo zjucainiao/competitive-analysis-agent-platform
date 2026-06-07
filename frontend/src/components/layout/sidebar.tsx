@@ -8,7 +8,6 @@ import {
   FolderIcon,
   SparklesIcon,
   GaugeIcon,
-  SettingsIcon,
   BookOpenIcon,
   GridIcon,
   CircleDollarSignIcon,
@@ -29,7 +28,6 @@ import { cn } from "@/lib/utils";
  *  - 项目分组：我的项目 / 新建分析
  *  - 竞品分析分组：概况 / 功能 / 定价 / 评价 / SWOT / 差异化 / 定位 / 数据来源
  *  - 平台分组：全局指标
- *  - 底部：设置
  *
  * 「竞品分析」分组里的章节项一直显示（即使没进 workspace）。
  * 点击时：
@@ -195,19 +193,6 @@ export function Sidebar(_props: { projectName?: string } = {}) {
           searchParams={searchParams}
         />
       </nav>
-
-      {/* footer */}
-      <div className="border-t border-sidebar-border px-2 py-3">
-        <NavRow
-          item={{
-            href: "#",
-            icon: SettingsIcon,
-            label: "设置与帮助",
-          }}
-          activePath={pathname}
-          searchParams={searchParams}
-        />
-      </div>
     </aside>
   );
 }

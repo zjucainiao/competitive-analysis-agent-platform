@@ -95,6 +95,8 @@ export function TraceRow({
         type="button"
         onClick={() => expandable && setOpen((v) => !v)}
         disabled={!expandable}
+        aria-expanded={expandable ? open : undefined}
+        aria-label={open ? "折叠调用详情" : "展开调用详情"}
         className={cn(
           "flex w-full items-center gap-3 px-4 py-2.5 text-left",
           expandable && "hover:bg-bg-hover"
@@ -172,20 +174,19 @@ export function TraceRow({
       {span.status === "rework" ? (
         <div className="ml-[88px] flex items-center gap-2 pb-2 text-[11px]">
           <MoveRightIcon className="h-3 w-3 text-rework-base" />
-          <span className="text-rework-base font-medium">
-            routing → reporter
-          </span>
-          <span className="text-text-muted">
-            (must_address: p_sw_01, p_pr_02)
-          </span>
+          <span className="text-rework-base font-medium">质检打回待修复</span>
         </div>
       ) : null}
       {span.isFeedbackTarget ? (
         <div className="ml-[88px] flex items-center gap-2 pb-2 text-[11px]">
           <span className="rounded-pill bg-rework-bg px-1.5 py-0.5 font-medium text-rework-base">
-            feedback rerun
+            反馈重跑
           </span>
-          <span className="text-text-muted">parent = {span.parentNodeId}</span>
+          <span className="text-text-muted">
+            {span.parentNodeId
+              ? `从 ${span.parentNodeId} 的质检反馈重跑`
+              : "质检打回待修复"}
+          </span>
         </div>
       ) : null}
 

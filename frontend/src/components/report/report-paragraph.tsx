@@ -256,7 +256,7 @@ function QaIssueLine({
         className={cn("h-3 w-3 mt-0.5 shrink-0", severityClass)}
       />
       <span className={cn("font-medium", severityClass)}>
-        QA · {issue.dimension}
+        质检 · {qaDimensionLabel(issue.dimension)}
       </span>
       <span className="text-text-muted shrink-0">·</span>
       <span className="text-text-secondary">{issue.note}</span>
@@ -267,7 +267,7 @@ function QaIssueLine({
 function UserEditedBadge() {
   return (
     <span className="ml-2 inline-flex items-center rounded-pill border border-accent-border bg-accent-bg px-1.5 py-0.5 align-middle text-[10px] font-medium text-accent-base">
-      user-edited · v2
+      已编辑 · v2
     </span>
   );
 }
@@ -294,6 +294,21 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
 
 function sourceTypeLabel(sourceType: string): string {
   return SOURCE_TYPE_LABELS[sourceType] ?? "公开来源";
+}
+
+/** QA 维度枚举 → 中文（不在 UI 暴露 fact_consistency 等裸枚举值） */
+const QA_DIMENSION_LABELS: Record<string, string> = {
+  fact_consistency: "事实一致性",
+  evidence_completeness: "证据完整性",
+  schema_completeness: "字段完整性",
+  logic_consistency: "逻辑一致性",
+  freshness: "时新性",
+  expression: "表达质量",
+  coverage_density: "覆盖密度",
+};
+
+function qaDimensionLabel(dimension: string): string {
+  return QA_DIMENSION_LABELS[dimension] ?? dimension;
 }
 
 function EvidenceChip({
@@ -343,13 +358,13 @@ function V2Preview({
     <div className="mt-3 rounded-md border border-running-border bg-running-bg/40 p-3">
       <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-running-base">
         <span className="block h-1.5 w-1.5 rounded-pill bg-running-base animate-pulse-soft" />
-        <span>v2 preview · reporter_v2 will replace this with…</span>
+        <span>v2 预览 · 修订版将替换为以下内容…</span>
       </div>
       <p className="mt-2 text-sm leading-relaxed text-text-primary">
         {v2.text}
       </p>
       <p className="mt-2 text-[11px] text-text-muted">
-        reason · {v2.reason}
+        原因 · {v2.reason}
       </p>
       <details className="mt-2 text-[11px]">
         <summary className="cursor-pointer text-text-muted hover:text-text-secondary">

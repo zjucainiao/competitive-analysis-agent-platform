@@ -100,11 +100,11 @@ export function TraceLayout({ apiState }: TraceLayoutProps = {}) {
           <InfoIcon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
           <p className="leading-relaxed text-text-secondary">
             <span className="font-medium text-running-base">
-              API mode · {llmCalls.length} LLM calls · every 15s refresh
+              实时模式 · 已记录 {llmCalls.length} 次模型调用 · 每 15 秒自动刷新
             </span>{" "}
-            · 每个 span 含 status / 时长 / token / cost / confidence；
-            点击 rework / running 行展开能看到真实
-            prompt_preview · response_preview · phase · finish_reason
+            · 每条记录含状态 / 耗时 / Token / 成本 / 置信度；
+            点击返工或运行中的行展开，可查看真实的
+            提示词摘要 · 模型回复 · 执行阶段 · 完成原因
             （来源 <code className="font-mono">GET /api/projects/&#123;id&#125;/llm-calls</code>）。
           </p>
         </div>
@@ -245,7 +245,7 @@ function apiCallToFull(c: LLMCallRecord): FullLLMCall {
     model: c.model,
     temperature: 0,
     maxTokens: 0,
-    systemPrompt: c.prompt_preview || `(${c.phase} · preview unavailable)`,
+    systemPrompt: c.prompt_preview || "[提示词快照暂不可用]",
     messages: [],
     responseJson: c.response_preview || "",
     tokensIn: c.tokens_input,

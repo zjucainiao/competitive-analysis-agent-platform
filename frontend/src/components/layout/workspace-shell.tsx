@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { WorkspaceSidebar } from "./workspace-sidebar";
 import { WorkspaceTopBar } from "./workspace-top-bar";
 import { OnboardingHint } from "./onboarding-hint";
@@ -58,19 +58,16 @@ export function WorkspaceShell({
   detailsRail?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  // rail 开关：SSR 安全；客户端 mount 后读 localStorage / 视口宽度。
-  // 初始 null 让首次渲染走 SSR 默认（开），mount 后立刻同步真实值，无闪烁影响。
-  const [railOpen, setRailOpen] = useState<boolean>(true);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+  // rail 开关：SSR 安全；惰性初始化时读 localStorage / 视口宽度。
+  // 服务端（无 window）返回默认开；客户端首次渲染即取真实值。
+  const [railOpen, setRailOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
     const stored = window.localStorage.getItem(RAIL_OPEN_KEY);
     if (stored !== null) {
-      setRailOpen(stored === "true");
-    } else {
-      setRailOpen(window.innerWidth >= 1024);
+      return stored === "true";
     }
-  }, []);
+    return window.innerWidth >= 1024;
+  });
 
   const toggleRail = () => {
     setRailOpen((prev) => {

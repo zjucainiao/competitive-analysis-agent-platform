@@ -380,7 +380,7 @@ function ReportHeader({
             title="复制 Markdown 到剪贴板"
           >
             <CopyIcon className="h-3 w-3" />
-            <span>Copy MD</span>
+            <span>复制 Markdown</span>
           </Button>
           <Button
             size="sm"
@@ -389,7 +389,7 @@ function ReportHeader({
             title="下载 .md 文件"
           >
             <DownloadIcon className="h-3 w-3" />
-            <span>Export Markdown</span>
+            <span>导出 Markdown</span>
           </Button>
         </div>
       </div>

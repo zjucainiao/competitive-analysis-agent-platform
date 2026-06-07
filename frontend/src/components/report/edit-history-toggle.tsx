@@ -39,8 +39,8 @@ export function EditHistoryToggle({
           label="v2 · preview"
           sub={
             v2NodeRunning
-              ? `reporter_v2 running · ${pendingDiffCount} diffs`
-              : `${pendingDiffCount} diffs`
+              ? `修订生成中 · ${pendingDiffCount} 项`
+              : `${pendingDiffCount} 项`
           }
           highlight
         />
@@ -50,10 +50,11 @@ export function EditHistoryToggle({
         {userEditCount > 0 ? (
           <span className="inline-flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 rounded-pill bg-accent-base" />
+            <span>用户编辑</span>
             <span className="font-mono tabular-nums" data-num>
               {userEditCount}
             </span>
-            <span>user edit{userEditCount > 1 ? "s" : ""}</span>
+            <span>项</span>
           </span>
         ) : null}
         <span className="text-[10px] uppercase tracking-wider">

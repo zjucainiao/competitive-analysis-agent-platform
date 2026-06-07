@@ -162,10 +162,10 @@ function EmptyState() {
         <div className="h-6 w-6 rounded-full bg-accent-bg" />
       </div>
       <p className="mt-3 text-sm font-medium text-text-secondary">
-        选个节点查看详情
+        选择节点查看详情
       </p>
       <p className="mt-1 text-[11px] text-text-muted">
-        点击左侧 DAG 中任一节点
+        点击左侧工作流中任一节点
       </p>
     </div>
   );

@@ -8,10 +8,10 @@ export type TabKey = "dag" | "report" | "trace" | "evidence" | "metrics";
 
 export const TABS: Array<{ key: TabKey; label: string }> = [
   { key: "dag", label: "工作流" },
-  { key: "report", label: "Report" },
-  { key: "trace", label: "Trace" },
-  { key: "evidence", label: "Evidence" },
-  { key: "metrics", label: "Metrics" },
+  { key: "report", label: "报告" },
+  { key: "trace", label: "决策回放" },
+  { key: "evidence", label: "证据库" },
+  { key: "metrics", label: "指标" },
 ];
 
 export const DEFAULT_TAB: TabKey = "dag";

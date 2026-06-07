@@ -21,7 +21,7 @@ export function ReportToc({
   return (
     <aside className="sticky top-[136px] self-start">
       <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-text-muted">
-        Sections
+        章节
       </div>
       <nav className="flex flex-col gap-0.5" aria-label="report table of contents">
         {sections.map((s) => {

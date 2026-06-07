@@ -43,7 +43,7 @@ export function EvidenceDrawer({
     <aside className="sticky top-[136px] self-start">
       <div className="mb-3 flex items-center justify-between">
         <div className="text-[10px] font-medium uppercase tracking-wider text-text-muted">
-          Evidence
+          证据
         </div>
         {pinnedId ? (
           <button
@@ -68,6 +68,41 @@ export function EvidenceDrawer({
       )}
     </aside>
   );
+}
+
+/** evidence.status 枚举 → 中文（badge 里给读者看，不暴露机器枚举值） */
+const STATUS_LABELS: Record<string, string> = {
+  verified: "已验证",
+  disputed: "有异议",
+  stale: "已过期",
+};
+
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status;
+}
+
+/** evidence.sourceType → 简短人类可读标签（不暴露机器枚举值） */
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  homepage: "官网",
+  features: "功能页",
+  features_page: "功能页",
+  pricing: "定价页",
+  pricing_page: "定价页",
+  help_docs: "帮助文档",
+  docs: "帮助文档",
+  changelog: "更新日志",
+  customer_cases: "案例",
+  cases: "案例",
+  blog: "博客",
+  user_review: "用户评价",
+  user_reviews: "用户评价",
+  review: "用户评价",
+  reviews: "用户评价",
+  app_market: "应用市场",
+};
+
+function sourceTypeLabel(sourceType: string): string {
+  return SOURCE_TYPE_LABELS[sourceType] ?? "公开来源";
 }
 
 function EmptyState() {
@@ -134,13 +169,13 @@ function EvidenceCard({
               ) : (
                 <AlertTriangleIcon className="h-2.5 w-2.5" />
               )}
-              <span>{displayStatus}</span>
+              <span>{statusLabel(displayStatus)}</span>
             </span>
             <span
               className="font-mono text-[10px] text-text-muted tabular-nums"
               data-num
             >
-              authority {evidence.authority}
+              可信度 {evidence.authority}
             </span>
           </div>
         </div>
@@ -181,10 +216,10 @@ function EvidenceCard({
           {evidence.sourceLabel}
         </a>
         <span>·</span>
-        <span>{evidence.sourceType}</span>
+        <span>{sourceTypeLabel(evidence.sourceType)}</span>
       </div>
       <div className="mt-1 text-[10px] text-text-muted">
-        collected {evidence.collectedAt}
+        采集于 {evidence.collectedAt}
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-border-subtle pt-3">
@@ -196,7 +231,7 @@ function EvidenceCard({
           className="gap-1.5"
         >
           <AlertTriangleIcon className="h-3 w-3" />
-          <span>{isDisputed ? "Undispute" : "Mark inaccurate"}</span>
+          <span>{isDisputed ? "取消异议" : "标记有异议"}</span>
         </Button>
         <Button
           type="button"
@@ -206,7 +241,7 @@ function EvidenceCard({
           className="gap-1.5"
         >
           <CopyIcon className="h-3 w-3" />
-          <span>Copy</span>
+          <span>复制</span>
         </Button>
         <Button
           type="button"
@@ -216,7 +251,7 @@ function EvidenceCard({
           className="gap-1.5"
         >
           <StarIcon className="h-3 w-3" />
-          <span>Star</span>
+          <span>收藏</span>
         </Button>
       </div>
 

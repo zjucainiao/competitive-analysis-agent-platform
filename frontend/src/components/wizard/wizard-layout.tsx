@@ -259,13 +259,13 @@ export function WizardLayout() {
 
       <footer className="flex items-center justify-between gap-3">
         <Button variant="ghost" onClick={() => router.push("/projects")}>
-          Cancel
+          取消
         </Button>
         <div className="flex items-center gap-1.5">
           {step > 1 ? (
             <Button variant="outline" onClick={back} className="gap-1.5">
               <ArrowLeftIcon className="h-3.5 w-3.5" />
-              <span>Back</span>
+              <span>上一步</span>
             </Button>
           ) : null}
           {step < STEPS.length ? (
@@ -278,7 +278,7 @@ export function WizardLayout() {
               }
               className="gap-1.5"
             >
-              <span>Continue</span>
+              <span>下一步</span>
               <ArrowRightIcon className="h-3.5 w-3.5" />
             </Button>
           ) : (
@@ -292,7 +292,7 @@ export function WizardLayout() {
               ) : (
                 <SparklesIcon className="h-3.5 w-3.5" />
               )}
-              <span>{submitting ? "Creating…" : "Create & dispatch"}</span>
+              <span>{submitting ? "创建中…" : "创建并启动"}</span>
             </Button>
           )}
         </div>
@@ -451,7 +451,7 @@ function Step1Target({
       <section>
         <div className="text-sm font-medium text-text-primary">分析模式</div>
         <p className="mt-0.5 text-[11px] text-text-muted">
-          决定 DAG 形态：是否需要竞品 / Reporter 用对比基调还是调研基调
+          决定分析流程：是否需要竞品、报告用对比基调还是调研基调
         </p>
         <ul className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
           {ANALYSIS_MODES.map((m) => {
@@ -491,7 +491,8 @@ function Step1Target({
       {/* ── 目标产品 ── */}
       <section>
         <label htmlFor={inputId} className="block text-sm font-medium text-text-primary">
-          目标产品 (Target)
+          目标产品
+          <span className="ml-1 text-error-base">*</span>
         </label>
         <p className="mt-0.5 text-xs text-text-muted">
           被分析的主视角产品，所有指标 / claim 以此为锚
@@ -531,16 +532,17 @@ function Step1Target({
             </span>
           </div>
           <p className="mt-1.5 text-[11px] leading-relaxed text-text-muted">
-            不需要竞品。Collector / Extractor 只跑目标产品一路；Analyst 全部 6 个维度
+            不需要竞品。系统只针对目标产品采集与抽取信息；全部 6 个维度
             都能选 ——「功能 / 定价 / SWOT / 差异化」走「单产品视角」分支（功能能力速览 /
-            定价档位画像 / 自我 SW 评估 / 差异化定位）；Reporter 用调研基调模板，
+            定价档位画像 / 自我 SW 评估 / 差异化定位）；报告采用调研基调模板，
             不会出现「X vs Y」对比段落。
           </p>
         </section>
       ) : (
         <section>
           <label className="block text-sm font-medium text-text-primary">
-            竞品 (Competitors)
+            竞品
+            <span className="ml-1 text-error-base">*</span>
             <span className="ml-2 text-[11px] font-normal text-text-muted">
               1 – 6 个 · 已选 {competitors.length}
             </span>
@@ -640,7 +642,7 @@ function Step1Target({
                 <Input
                   type="text"
                   placeholder={
-                    competitors.length === 0 ? "+ 添加竞品名" : "+ another"
+                    competitors.length === 0 ? "+ 添加竞品名" : "+ 继续添加"
                   }
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
@@ -753,8 +755,8 @@ function Step3Dimensions({
       <div>
         <p className="text-sm text-text-secondary">
           {isSingle
-            ? "单产品调研模式下，所有维度都可选。Analyst 会用「单产品视角」处理：functions 变成功能能力速览、pricing 变成定价档位画像、SWOT 只评 Strengths/Weaknesses、differentiation 描述自我差异化定位 —— 不会写「X vs Y」段落。"
-            : "选择 Analyst 要输出的对比维度（6 选 N，至少 1）。每个维度对应一组独立 prompt + comparison_matrix。"}
+            ? "单产品调研模式下，所有维度都可选。系统会用「单产品视角」处理：功能变成功能能力速览、定价变成定价档位画像、SWOT 只评优势/劣势、差异化描述自我差异化定位 —— 不会写「X vs Y」段落。"
+            : "选择要输出的对比维度（6 选 N，至少 1）。每个维度都会单独生成一份对比矩阵。"}
         </p>
       </div>
       <ul className="grid grid-cols-1 gap-2 md:grid-cols-2">

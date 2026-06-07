@@ -44,9 +44,10 @@ export function MetricsLayout({
   apiProject?: Project;
 }) {
   /* edit_rate 从 localStorage 实时读 intervention 计数（mock 模式） */
-  const [interventionCount, setInterventionCount] = useState(0);
+  const [interventionCount, setInterventionCount] = useState(() =>
+    getInterventionCount()
+  );
   useEffect(() => {
-    setInterventionCount(getInterventionCount());
     const listener = () => setInterventionCount(getInterventionCount());
     window.addEventListener("atlas:intervention", listener);
     return () => window.removeEventListener("atlas:intervention", listener);
@@ -486,7 +487,7 @@ function VsHumanBaseline() {
     <section className="rounded-lg border border-accent-border bg-accent-bg/30 p-5">
       <header className="mb-1">
         <div className="text-[10px] font-medium uppercase tracking-wider text-accent-base">
-          vs human baseline
+          相比人工基线
         </div>
         <h2 className="mt-0.5 text-base font-semibold text-text-primary">
           可量化的业务价值
@@ -543,7 +544,7 @@ function BaselineBar({
     <div className="flex items-center gap-2">
       {side === "manual" ? (
         <span className="text-[10px] uppercase tracking-wider text-text-muted shrink-0 w-12">
-          manual
+          人工
         </span>
       ) : null}
       <div className="relative h-3 flex-1 overflow-hidden rounded-sm bg-bg-sunken">
@@ -563,7 +564,7 @@ function BaselineBar({
       </div>
       {side === "platform" ? (
         <span className="text-[10px] uppercase tracking-wider text-accent-base shrink-0 w-12 text-right">
-          platform
+          平台
         </span>
       ) : null}
       <span className="shrink-0 text-[11px] text-text-secondary">{label}</span>

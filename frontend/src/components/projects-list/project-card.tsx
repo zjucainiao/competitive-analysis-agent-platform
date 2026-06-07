@@ -167,7 +167,7 @@ export function ProjectCard({
               label="Duplicate"
               onClick={() => {
                 toast.info(`${project.name} · 已复制为草稿`, {
-                  description: "v1 仅 toast · 后端 duplicate endpoint 待补",
+                  description: "该功能暂未开放",
                 });
                 emitIntervention("duplicate", project.id);
               }}

@@ -51,10 +51,9 @@ export function DiffSheet({
             </SheetDescription>
           </SheetHeader>
           <div className="p-10 text-center text-sm text-text-muted">
-            QA 尚未打回任何 Agent（全部通过，或 reporter 返工未触发）。
+            本次运行暂无返工轮次。
             <br />
-            一旦出现 <code className="font-mono">*_v2</code> 节点，这里会用真实
-            prompt_preview 展示 QA FEEDBACK 注入对比。
+            若质检触发修复，将在此显示修订前后的提示词对比。
           </div>
         </SheetContent>
       </Sheet>
