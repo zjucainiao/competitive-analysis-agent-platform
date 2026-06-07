@@ -1,6 +1,9 @@
-"""临时迁移脚手架：RunState → DAGPlan 形状，供旧 /state + 前端在 Phase 2 前消费。
+"""RunState → DAGPlan 形状投影。
 
-Phase 3 删除本文件，同步删除 tests/test_native_projection.py。
+Stage D 后**已不再对前端暴露**(旧 `/state` 路由已删；前端改为单一数据源
+`/run-state`，自行投影出 DAGPlan，见前端 run-view-to-state.ts)。本模块现为
+**orchestrator 内部机制**：`run_state_to_dagplan` 供 metrics 计算
+(compute_project_metrics 需要 DAGPlan)，`_node_id` 供 run_view 复用键法。
 
 contract：
 - 接受 ``RunState.model_dump()`` 产出的 ``state: dict``。

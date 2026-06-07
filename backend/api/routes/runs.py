@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict
 from ulid import ULID
 
 from backend.api.deps import get_orchestrator, get_owned_project, get_storage
-from backend.api.schemas import ProjectStateResponse, RunStartedResponse
+from backend.api.schemas import RunStartedResponse
 from backend.orchestrator import Orchestrator
 from backend.orchestrator.run_state import RunState
 from backend.orchestrator.run_view import run_state_to_view
@@ -241,27 +241,13 @@ async def get_run_snapshot(
     return snapshot.model_dump(mode="json")
 
 
-@router.get(
-    "/projects/{project_id}/state",
-    response_model=ProjectStateResponse,
-)
-async def get_state(
-    project_id: str,
-    storage: Storage = Depends(get_storage),
-    project: Project = Depends(get_owned_project),
-) -> ProjectStateResponse:
-    plan = await storage.state_store.get_dag_plan(project_id)
-    outputs = await storage.state_store.list_node_outputs(project_id)
-    verdicts = await storage.state_store.list_qa_verdicts(project_id)
-    return ProjectStateResponse(
-        project=project,
-        plan=plan,
-        outputs=outputs,
-        verdicts=verdicts,
-    )
+# 注：旧 `GET /projects/{id}/state`(DAGPlan 形状)已随 Stage D 删除 —— 前端改为单一
+# 数据源 `/run-state`(RunStateView),自行投影出所需的 DAGPlan(见前端
+# run-view-to-state.ts)。RunState→DAGPlan 的投影逻辑仍在 orchestrator 内部用于
+# metrics 计算(projection.run_state_to_dagplan),不再对外暴露。
 
 
-# ---------- RunStateView 端点（Phase 2 Stage B，前端 Stage D 迁移目标） ----------
+# ---------- RunStateView 端点（原生引擎前端视图 · 工作流步进器数据源） ----------
 
 
 # legacy plan node_id → 逻辑 node 的反推（best-effort）。native 投影 node_id 形如

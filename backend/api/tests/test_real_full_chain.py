@@ -5,7 +5,7 @@
       → POST /api/projects/{id}/run
         → Orchestrator.run() 调度 5 个真 Agent + LangGraph 状态机
           → DeepSeek API + Tavily/Serper 真采集
-      → 轮询 GET /api/projects/{id}/state 直到所有节点终态
+      → 轮询 GET /api/projects/{id}/run-state 直到整体终态(done/failed/aborted)
 
 显式 opt-in：必须 ``RUN_REAL_LLM_TESTS=1`` 且 ``DEEPSEEK_API_KEY`` 或
 ``OPENAI_API_KEY`` 至少有一个非空，否则整文件 skip。
@@ -88,49 +88,41 @@ def test_real_full_chain_end_to_end(client: TestClient) -> None:
     last_state: dict | None = None
     last_log_time = 0.0
     while time.time() < deadline:
-        sr = client.get(f"/api/projects/{pid}/state")
+        sr = client.get(f"/api/projects/{pid}/run-state")
         assert sr.status_code == 200
         last_state = sr.json()
-        plan = last_state.get("plan")
+        status = last_state.get("status")
         verdicts = last_state.get("verdicts") or []
-        if plan and plan["nodes"]:
-            statuses = {n["status"] for n in plan["nodes"]}
-            # 1. 自然终态：所有节点都 success/failed/skipped
-            if statuses.issubset({"success", "failed", "skipped"}):
-                break
-            # 2. 早退快路径：最新 QA verdict 已 pass，反馈环不会再触发，可以等 end
-            #    但 end 节点跑得极快（控制节点），所以可以多等一小步让 plan 终态
-            if verdicts and verdicts[-1].get("overall_status") == "pass":
-                # 给 end 节点 30s 走完
-                pass
+        # 整体终态：done / failed / aborted
+        if status in {"done", "failed", "aborted"}:
+            break
         # 每 30 秒输出一次进度，方便观察长跑卡在哪
         now = time.time()
         if now - last_log_time > 30.0:
             last_log_time = now
-            node_summary = (
-                [(n["node_id"], n["status"]) for n in (plan or {}).get("nodes", [])]
-                if plan else []
-            )
+            done_outputs = list((last_state.get("outputs") or {}).keys())
             print(
                 f"[t+{int(now - (deadline - _TIMEOUT_SECONDS))}s] "
-                f"verdicts={len(verdicts)} nodes={node_summary}",
+                f"status={status} verdicts={len(verdicts)} outputs={done_outputs}",
                 flush=True,
             )
         time.sleep(3.0)
     else:
         pytest.fail(
-            f"real chain timeout after {_TIMEOUT_SECONDS}s; nodes:\n"
-            f"{[(n['node_id'], n['status']) for n in (last_state or {}).get('plan', {}).get('nodes', [])]}"
+            f"real chain timeout after {_TIMEOUT_SECONDS}s; "
+            f"status={(last_state or {}).get('status')} "
+            f"outputs={list((last_state or {}).get('outputs', {}).keys())}"
         )
 
-    plan = last_state["plan"]
     outputs = last_state["outputs"]
     verdicts = last_state["verdicts"]
-    by_id = {n["node_id"]: n for n in plan["nodes"]}
 
-    # 1. 5 个 Agent 类至少有一次完整 output
-    for nid in ["collect.notion", "extract.notion", "analyst", "reporter", "qa"]:
-        assert nid in outputs, f"agent {nid} produced no output (real chain failed at {nid})"
+    # 1. 5 个 Agent 类阶段至少各有一次完整 output(原生 run_ref 命名,大小写/产品后缀无关)
+    for stage in ["collect", "extract", "analyst", "reporter", "qa"]:
+        assert any(
+            k == stage or k.startswith(f"{stage}.") or k.startswith(f"{stage}_v")
+            for k in outputs
+        ), f"stage {stage} produced no output (real chain failed at {stage})"
 
     # 2. Analyst 真出了 claim
     analyst_out = outputs["analyst"]
@@ -172,8 +164,8 @@ def test_real_full_chain_end_to_end(client: TestClient) -> None:
 
     # 5. 早期节点（非 _v 派生）不允许 failed
     early_failed = [
-        nid for nid, n in by_id.items()
-        if n["status"] == "failed" and "_v" not in nid
+        k for k, o in outputs.items()
+        if o.get("status") == "failed" and "_v" not in k
     ]
     assert not early_failed, f"early nodes failed: {early_failed}"
 

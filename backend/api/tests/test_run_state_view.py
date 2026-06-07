@@ -181,19 +181,3 @@ def test_run_state_view_requires_auth(native_client: TestClient) -> None:
         native_client.get(f"/api/projects/{pid}/run-state", headers=other).status_code
         == 403
     )
-
-
-def test_legacy_state_endpoint_unchanged(native_client: TestClient) -> None:
-    """/state 仍返回 DAGPlan 形状（project + plan + outputs + verdicts），未被改动。"""
-    headers = _register(native_client, "frank@example.com")
-    pid = _create_project(native_client, headers)
-    _run_to_completion(native_client, pid, headers)
-
-    r = native_client.get(f"/api/projects/{pid}/state", headers=headers)
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert set(body.keys()) == {"project", "plan", "outputs", "verdicts"}
-    assert body["plan"] is not None
-    # native 投影 plan 带真实产品名节点
-    node_ids = {n["node_id"] for n in body["plan"]["nodes"]}
-    assert "collect.Notion" in node_ids

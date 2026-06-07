@@ -9,16 +9,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.schemas import (
-    AgentOutputBase,
     AnalysisDimension,
     AnalysisMode,
     CollectConstraints,
-    DAGPlan,
     Project,
-    QAVerdict,
 )
 
 
@@ -72,23 +69,6 @@ class RunStartedResponse(BaseModel):
     started_at: datetime
 
 
-class ProjectStateResponse(BaseModel):
-    """GET /api/projects/{id}/state 响应。
-
-    ``outputs`` 是多态 AgentOutput 字典（CollectorOutput / ExtractorOutput / ...
-    都继承自 AgentOutputBase）。用 ``SerializeAsAny`` 让 Pydantic 用实际子类的
-    序列化器，否则下行 JSON 只会保留基类字段，丢掉 ``result`` / ``draft`` /
-    ``profile`` / ``raw_sources`` / ``verdict`` 等业务字段。
-    """
-
-    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
-
-    project: Project
-    plan: DAGPlan | None
-    outputs: dict[str, SerializeAsAny[AgentOutputBase]] = Field(default_factory=dict)
-    verdicts: list[QAVerdict] = Field(default_factory=list)
-
-
 class ProjectListResponse(BaseModel):
     """GET /api/projects 响应。"""
 
@@ -100,6 +80,5 @@ class ProjectListResponse(BaseModel):
 __all__ = [
     "ProjectCreateRequest",
     "ProjectListResponse",
-    "ProjectStateResponse",
     "RunStartedResponse",
 ]

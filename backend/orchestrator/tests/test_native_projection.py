@@ -2,7 +2,8 @@
 
 contract: run_state_to_dagplan 接受 RunState.model_dump() 产出的 dict
 （history 里的元素是 dict，不是 NodeRun 对象）。
-Phase 3 删除本文件时同步删除 projection.py。
+Stage D 后 projection 不再对前端暴露，但仍是 orchestrator metrics 的内部依赖，
+故本测试保留。
 """
 from __future__ import annotations
 
