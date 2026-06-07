@@ -12,9 +12,7 @@ import {
   BuildingIcon,
   ShoppingCartIcon,
   GraduationCapIcon,
-  WandIcon,
   ServerCogIcon,
-  PlugZapIcon,
   Loader2Icon,
   UserSearchIcon,
   UsersIcon,
@@ -84,33 +82,6 @@ const DIMENSIONS = [
   { id: "swot", label: "SWOT", hint: "围绕目标产品视角" },
   { id: "differentiation_opportunities", label: "差异化机会", hint: "可切入的差异化点" },
   { id: "positioning", label: "市场定位", hint: "定位 / 目标用户重叠" },
-];
-
-const MODES = [
-  {
-    id: "mock",
-    label: "Mock",
-    icon: WandIcon,
-    note: "全链路用 fixture · 演示 / 单测",
-    badge: "0 cost",
-    badgeTone: "neutral" as const,
-  },
-  {
-    id: "hybrid",
-    label: "Hybrid",
-    icon: PlugZapIcon,
-    note: "真实采集 + Mock 兜底 · demo 推荐",
-    badge: "low cost",
-    badgeTone: "success" as const,
-  },
-  {
-    id: "real",
-    label: "Real",
-    icon: ServerCogIcon,
-    note: "全真 LLM + 真采集 · 生产 / 客户场景",
-    badge: "burns key",
-    badgeTone: "warning" as const,
-  },
 ];
 
 const STEPS = [
@@ -343,11 +314,8 @@ function Header({ step }: { step: number }) {
         <span>{STEPS[step - 1].label}</span>
       </h1>
       <p className="mt-1 text-sm text-text-secondary">
-        提交后会调用{" "}
-        <code className="font-mono text-text-primary">POST /api/projects</code> 创建项目，
-        再调{" "}
-        <code className="font-mono text-text-primary">POST /api/projects/&#123;id&#125;/run</code>{" "}
-        启动 Orchestrator · 跳转到新项目的 workspace，DAG 通过 WebSocket 实时推流。
+        填好后会创建项目并启动分析，自动跳转到新项目的工作台 ——
+        多个 Agent 的执行进度会实时显示在任务流转图上。
       </p>
     </header>
   );
@@ -917,8 +885,7 @@ function Step4Mode({
           </ReviewItem>
         </dl>
         <p className="mt-3 text-[11px] text-text-muted">
-          → 点 「Create & dispatch」会模拟 POST /api/projects + Orchestrator.plan() →
-          跳转到第一个 run 的 workspace
+          → 点「Create &amp; dispatch」创建项目并启动分析，跳转到工作台看实时进度
         </p>
       </section>
     </div>

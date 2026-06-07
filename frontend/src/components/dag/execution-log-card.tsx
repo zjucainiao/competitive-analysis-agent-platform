@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo } from "react";
-import Link from "next/link";
 import { CircleIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type {
@@ -15,8 +14,9 @@ import type {
  * 事件列成时间线条目。参考 AgentResearch 风格。
  *
  * 数据源：
- *  - API 模式：从 state.plan.nodes + state.outputs 排序派生条目
- *  - Mock 模式（无 state）：硬编码示例
+ *  - API 模式（传入 state，含 null）：从 state.plan.nodes + state.outputs 排序派生条目；
+ *    真实项目还没跑出 plan 时显示「暂无活动」空态，不回退示例
+ *  - Demo 模式（state 未传入 / undefined）：硬编码示例
  *
  * 每条条目：彩色 dot（按 tone） + agent 名 + 状态描述 + 相对时间。
  */
@@ -53,7 +53,10 @@ export function ExecutionLogCard({
   maxRows?: number;
 }) {
   const entries = useMemo<LogEntry[]>(() => {
-    if (!state || !state.plan) return MOCK_ENTRIES.slice(0, maxRows);
+    // demo 路径不传 state（undefined）→ 示例条目；
+    // 真实路径始终传 state（即便还没 plan）→ 实推导，空则走「暂无活动」空态
+    if (state === undefined) return MOCK_ENTRIES.slice(0, maxRows);
+    if (!state || !state.plan) return [];
     return deriveEntriesFromState(state, maxRows);
   }, [state, maxRows]);
 

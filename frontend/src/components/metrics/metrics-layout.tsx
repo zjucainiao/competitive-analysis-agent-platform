@@ -580,17 +580,16 @@ function ScoringFooter({ hasApi }: { hasApi: boolean }) {
       <p className="leading-relaxed">
         {hasApi ? (
           <>
-            5 个核心指标的当前值来自 <code className="font-mono">project.metrics</code>{" "}
-            （后端 Orchestrator 实时计算）；趋势 sparkline / per-agent / cost
-            breakdown 等是预置的视觉素材，等后端 metrics 历史 endpoint 接入后填真。
-            vs human baseline 数字基于咨询行业平均，答辩前可定标到客户具体场景。
+            5 个核心指标的当前值来自本次运行的真实统计；趋势、per-agent、cost
+            breakdown 等暂为预置视觉，后续接入指标历史后填真。
+            对照基线数字为行业平均估算，可按实际场景再校准。
           </>
         ) : (
           <>
-            demo 路径展示的是预置 mock 指标 + 用户实际 intervention 计数。
-            打开真实项目（POST /api/projects 创建后）后，accuracy / coverage / edit_rate
-            / cost / duration 五项会从 <code className="font-mono">project.metrics</code>{" "}
-            自动覆盖；vs human baseline 数字基于咨询行业平均，可在答辩前定标。
+            demo 路径展示的是预置示例指标 + 你的实际干预计数。
+            打开真实项目后，accuracy / coverage / edit_rate / cost / duration 五项会从
+            <code className="font-mono">project.metrics</code> 自动覆盖；
+            对照基线数字为行业平均估算，可按实际场景再校准。
           </>
         )}
       </p>

@@ -32,7 +32,7 @@ interface NodeDetailSheetProps {
  * 产品化补强（修复"viewer 不是 product"）：
  *   1. rework 节点顶部强提示：「QA 需要你的决定」横幅 + Override 主按钮
  *   2. footer 始终有 status-aware action group（Edit prompt / Rerun / Skip / Note）
- *   3. footer 上方提示「→ 在 Trace 查看完整对话」深链占位
+ *   3. footer 上方文字提示：切到 Trace tab 看同一 span 的完整 LLM call / prompt
  */
 export function NodeDetailSheet({
   open,
