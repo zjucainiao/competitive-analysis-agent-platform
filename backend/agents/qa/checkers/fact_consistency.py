@@ -8,7 +8,12 @@
    - < 0.80 → major issue
 2. 对 ``is_quantitative=True`` 段落做数字字面匹配（±5% 容差），
    未找到 → UNVERIFIED_QUANTITY issue。
-3. LLM 不可用 / 失败时降级为纯量化检查。
+3. LLM 不可用 / 漏判时，有证据段落记为「未核验」（不再 fail-open 乐观计满分）：
+   从评分分母剔除 + 维度标 degraded（pass_=False）+ 补发非阻塞 minor issue 暴露，
+   避免「没核验」被伪装成「已通过 PASS」。
+
+阻塞（B）：contradicted / 量化字面失配是**确定性硬伤**，issue 标 ``hard_block=True``，
+即便本维度非 core 也经 ``aggregate_verdict`` 一票阻塞返工一轮（复发降级后自动解除）。
 
 routing：
 - contradicted / 量化未核对 → reporter
@@ -128,6 +133,10 @@ class FactConsistencyChecker(BaseChecker):
 
     OVERALL_PASS_THRESHOLD = 0.95
     MINOR_THRESHOLD = 0.80
+    # 完全无法核验（如本地无 LLM、所有有证据段落都未拿到 entailment 判定）时的中性
+    # 「未知」分：明确低于通过阈值（靠 pass_=False + degraded issue 暴露），但不取 0.0
+    # （0.0 读作「全部冲突」会误导）。degraded 维度非阻塞，不卡口（避免重蹈 freshness）。
+    UNVERIFIED_SCORE = 0.7
 
     def run(self, ctx: CheckerContext) -> CheckerResult:
         issues: list[QAIssue] = []
@@ -169,6 +178,7 @@ class FactConsistencyChecker(BaseChecker):
 
         # ---- 逐段聚合 ----
         contradicted_claims: dict[str, int] = {}
+        unverified = 0  # 有 evidence 但没拿到 LLM 判定的段落（LLM 不可用 / 漏判）
         for pid, (s_idx, p_idx, para, evs) in para_index.items():
             total += 1
             location = f"report.sections[{s_idx}].paragraphs[{p_idx}]"
@@ -203,6 +213,8 @@ class FactConsistencyChecker(BaseChecker):
                         required_inputs={
                             "paragraph_id": pid,
                             "evidence_ids": para.evidence_ids,
+                            # B：与证据冲突是确定性硬伤 → 一票阻塞（即便本维度非 core）
+                            "hard_block": True,
                         },
                     )
                 )
@@ -210,8 +222,10 @@ class FactConsistencyChecker(BaseChecker):
                 # 中立 = LLM 觉得 evidence 既不支持也不反驳，视为弱支撑（不开 issue 但不计入 entailed）
                 pass
             elif label is None and evs:
-                # LLM 不可用，且段落有 evidence —— 暂视为 entailed，但用较低权重表示不确定
-                entailed += 1  # 乐观计入；issue 由量化路径 / 其他维度兜底
+                # 没拿到 LLM 判定（LLM 不可用 / 该段漏判）。**不再**乐观计 entailed
+                # （fail-open bug：会把「没核验」伪装成「已通过」报满分 PASS）。改记为
+                # 「未核验」：既不算通过也不算失败，从评分分母剔除，并把维度标 degraded。
+                unverified += 1
 
             # 量化字面匹配
             if para.is_quantitative and evs:
@@ -235,6 +249,8 @@ class FactConsistencyChecker(BaseChecker):
                                 required_inputs={
                                     "paragraph_id": pid,
                                     "quantity": q.model_dump(),
+                                    # B：数字字面对不上是确定性硬伤 → 一票阻塞
+                                    "hard_block": True,
                                 },
                             )
                         )
@@ -261,19 +277,56 @@ class FactConsistencyChecker(BaseChecker):
                     )
                 )
 
+        # 评分只在「核验得了的段落」上算：未核验段落从分母剔除（既不算通过也不算失败）。
+        assessable = total - unverified
         if total == 0:
             score = 1.0
+        elif assessable <= 0:
+            # 完全没核验成（如本地无 LLM）→ 不报满分，给中性未知分，靠 degraded 暴露。
+            score = self.UNVERIFIED_SCORE
         else:
-            score = entailed / total
+            score = entailed / assessable
         if any(i.severity == "critical" for i in issues):
             score = min(score, 0.55)
-        pass_ = score >= self.OVERALL_PASS_THRESHOLD and not any(
-            i.severity in ("major", "critical") for i in issues
+
+        # A：degraded —— 有段落没被真正核验 → 维度未完整校验。补发一条**非阻塞** minor
+        # issue 显式暴露「未核验」，并令 pass_=False，杜绝「LLM 不可用 → fail-open 报通过」。
+        degraded = unverified > 0
+        if degraded:
+            issues.append(
+                QAIssue(
+                    issue_id="iss_fc_unverified",
+                    dimension=self.dimension,
+                    severity="minor",  # 非阻塞：基础设施降级不卡口（避免重蹈 freshness 覆辙）
+                    location=f"report.dimension[{self.dimension.value}]",
+                    problem=(
+                        f"{unverified}/{total} 个有证据的段落未经 LLM 事实核验"
+                        "（LLM 不可用或漏判），该维度未完整校验，"
+                        "当前结果不代表已通过事实校验。"
+                    ),
+                    suggested_fix="确保 QA 阶段 entailment LLM 可用以完成事实核验。",
+                    target_agent="reporter",
+                    required_inputs={
+                        "unverified": unverified,
+                        "total": total,
+                        "degraded": True,
+                    },
+                )
+            )
+
+        pass_ = (
+            score >= self.OVERALL_PASS_THRESHOLD
+            and not degraded
+            and not any(i.severity in ("major", "critical") for i in issues)
         )
         notes = (
             f"entailed {entailed}/{total}；contradicted 段落 "
             f"{len(contradicted_paragraphs)}。"
-            + (" (LLM 未启用，量化兜底)" if ctx.llm is None else "")
+            + (
+                f" {unverified} 段未核验(LLM 不可用/漏判)，维度降级未通过。"
+                if degraded
+                else ""
+            )
         )
         return CheckerResult(
             dimension=self.dimension,

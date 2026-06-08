@@ -334,10 +334,9 @@ def _build_qa_feedback_payload(
         issues=related_issues,
         instructions=routing.reason,
         must_address=must_address,
+        revision=qa_round,  # 纳入模型(不再 model_dump 后裸加),整个 payload 受 schema 约束
     )
-    payload = feedback.model_dump(mode="json")
-    payload["revision"] = qa_round
-    return payload
+    return feedback.model_dump(mode="json")
 
 
 __all__ = [

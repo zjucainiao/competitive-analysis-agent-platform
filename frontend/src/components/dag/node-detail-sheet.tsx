@@ -50,7 +50,7 @@ export function NodeDetailSheet({
           <DetailBody nodeId={nodeId} data={data} />
         ) : (
           <div className="p-6 text-sm text-text-muted">
-            点击 DAG 节点查看详情
+            点击工作流节点查看详情
           </div>
         )}
       </SheetContent>
@@ -110,7 +110,7 @@ function DetailBody({ nodeId, data }: { nodeId: string; data: DagNodeData }) {
         <Metrics data={data} />
 
         {data.selfCritique ? (
-          <Section title="Self-critique">
+          <Section title="自我评价">
             <p className="text-sm text-text-secondary leading-relaxed">
               {data.selfCritique}
             </p>
@@ -118,19 +118,19 @@ function DetailBody({ nodeId, data }: { nodeId: string; data: DagNodeData }) {
         ) : null}
 
         {data.inputs.length > 0 ? (
-          <Section title={`Inputs (${data.inputs.length})`}>
+          <Section title={`输入（${data.inputs.length}）`}>
             <KVList items={data.inputs} />
           </Section>
         ) : null}
 
         {data.outputs.length > 0 ? (
-          <Section title={`Outputs (${data.outputs.length})`}>
+          <Section title={`输出（${data.outputs.length}）`}>
             <KVList items={data.outputs} />
           </Section>
         ) : null}
 
         {data.llmCalls.length > 0 ? (
-          <Section title={`LLM calls (${data.llmCalls.length})`}>
+          <Section title={`模型调用（${data.llmCalls.length}）`}>
             <ul className="divide-y divide-border-subtle">
               {data.llmCalls.map((c, i) => (
                 <li key={i} className="flex items-center gap-3 py-2">
@@ -181,11 +181,11 @@ function ReworkBanner({ actions }: { actions: ActionDef[] }) {
         </div>
         <div className="flex-1">
           <div className="text-xs font-medium uppercase tracking-wider text-rework-base">
-            QA needs your decision
+            质检需要你的决定
           </div>
           <p className="mt-1 text-sm text-text-secondary leading-snug">
-            质检发现 2 处问题。可以等 reporter_v2 自动重跑，
-            也可以现在 override v1 终结这一轮。
+            质检发现 2 处问题。可以等系统自动重写报告，
+            也可以现在采用当前版本终结这一轮。
           </p>
           <Button
             type="button"
@@ -218,7 +218,7 @@ function ErrorBanner({
         </div>
         <div className="flex-1">
           <div className="text-xs font-medium uppercase tracking-wider text-error-base">
-            Node failed
+            节点执行失败
           </div>
           {message ? (
             <p className="mt-1 font-mono text-[11px] text-error-base/90 leading-snug break-words">
@@ -226,8 +226,8 @@ function ErrorBanner({
             </p>
           ) : null}
           <p className="mt-1 text-sm text-text-secondary leading-snug">
-            该节点执行失败，下游节点暂停。可以重试，或跳过让下游用 partial
-            数据继续。
+            该节点执行失败，下游节点暂停。可以重试，或跳过让下游用
+            已有的部分数据继续。
           </p>
           {retry ? (
             <Button
@@ -253,7 +253,7 @@ function SheetFooterActions({ actions }: { actions: ActionDef[] }) {
   return (
     <div className="sticky bottom-0 border-t border-border-subtle bg-bg-overlay px-5 py-3">
       <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-text-muted">
-        Actions
+        操作
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {actions.map((a) => {
@@ -283,7 +283,7 @@ function SheetFooterActions({ actions }: { actions: ActionDef[] }) {
         })}
       </div>
       <div className="mt-2 text-[11px] text-text-muted">
-        想看完整 LLM call / prompt？切到 Trace tab，行内可展开同一 span
+        想看完整模型调用 / 提示词？切到「执行轨迹」标签页，行内可展开同一条调用
       </div>
     </div>
   );
@@ -324,14 +324,14 @@ function KVList({ items }: { items: Array<{ key: string; value: string }> }) {
 function Metrics({ data }: { data: DagNodeData }) {
   return (
     <dl className="grid grid-cols-4 gap-x-3 gap-y-3 rounded-md border border-border-subtle bg-bg-sunken px-3 py-3">
-      <Metric label="Duration" value={formatDuration(data.durationMs)} />
-      <Metric label="Tokens" value={formatTokens(data.tokens)} />
+      <Metric label="时长" value={formatDuration(data.durationMs)} />
+      <Metric label="Token" value={formatTokens(data.tokens)} />
       <Metric
-        label="Cost"
+        label="成本"
         value={data.costUsd != null ? `$${data.costUsd.toFixed(3)}` : "—"}
       />
       <Metric
-        label="Confidence"
+        label="置信度"
         value={
           data.confidence != null && data.confidence > 0
             ? data.confidence.toFixed(2)
@@ -383,12 +383,12 @@ function Metric({
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  success: "success",
-  running: "running",
-  rework: "needs rework",
-  warning: "warning",
-  error: "failed",
-  neutral: "pending",
+  success: "已完成",
+  running: "运行中",
+  rework: "需返工",
+  warning: "警告",
+  error: "失败",
+  neutral: "等待中",
 };
 
 function statusToRun(s: DagNodeData["status"]): RunStatus {

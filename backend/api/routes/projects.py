@@ -58,6 +58,24 @@ async def create_project(
                 ),
             )
 
+    # P2-VERSIONCONFLICT 防御：产品名不得以 ``_v<数字>`` 结尾——会与版本化 output key
+    # (``collect.{product}_v2`` 等)的轮次后缀冲突，导致返工轮解析错位（拿不到 round1）。
+    import re as _re
+
+    _bad_names = [
+        n
+        for n in [req.target_product, *competitors]
+        if _re.search(r"_v\d+$", (n or "").strip())
+    ]
+    if _bad_names:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"产品名不能以 '_v<数字>' 结尾(与内部版本化键冲突): {_bad_names}；"
+                "请改用其他写法。"
+            ),
+        )
+
     project = Project(
         project_id=f"proj_{ULID()}",
         project_name=req.project_name,

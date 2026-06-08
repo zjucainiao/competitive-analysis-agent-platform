@@ -43,6 +43,12 @@
       "score": 0.95,
       "pass": true,
       "notes": "表达规范，无禁用词。"
+    },
+    "identity_consistency": {
+      "dimension": "identity_consistency",
+      "score": 1.0,
+      "pass": true,
+      "notes": "被引用证据均确属目标产品。"
     }
   },
   "issues": [],

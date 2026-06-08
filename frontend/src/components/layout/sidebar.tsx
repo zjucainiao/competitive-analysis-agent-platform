@@ -64,7 +64,7 @@ export const ANALYSIS_SECTIONS: Array<{
   { id: "sec_sources", slug: "sources", label: "数据来源", icon: FileSearchIcon },
 ];
 
-export function Sidebar(_props: { projectName?: string } = {}) {
+export function Sidebar() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 

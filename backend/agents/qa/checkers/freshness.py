@@ -8,11 +8,16 @@
   ``SENSITIVE_MAX_DAYS``
 - 普通字段超过 ``GENERAL_MAX_DAYS`` 提示一下
 
-每条引用的"新鲜度贡献"分档：
+评分只针对**带日期**的证据（留兜底，不强求时效性）：
 - 有 source_published_at 且在窗口内 → 1.0
 - 有 source_published_at 但 stale → 0.0（并开 issue）
-- 无 source_published_at（仅有采集时间）→ ``NEUTRAL_NO_DATE_SCORE``
-  （默认 0.7，含义："不知道老不老，无法满分"）
+- 无 source_published_at → **不计入评分**（无日期 ≠ 过期，既不加分也不扣分）
+
+设计取舍（2026-06-08）：Collector 目前不抽取发布日期，绝大多数证据都「无日期」。
+旧实现把无日期按中性 0.7 计 → 阈值 0.85 → freshness **每一轮都不及格**，纯噪音，
+还把判级永久顶在「待修复」。改为「无日期不参与评分、全无日期则默认通过」：
+freshness 不再 gating，但**真带了日期且过期**（如 2021 年的定价页）仍会报警——
+保留这条有价值的兜底。
 
 routing：
 - 敏感字段 stale → collector（重新采集该 dimension）
@@ -37,9 +42,6 @@ class FreshnessChecker(BaseChecker):
     SENSITIVE_MAX_DAYS = 90
     GENERAL_MAX_DAYS = 365
     OVERALL_PASS_THRESHOLD = 0.85
-    # 无 source_published_at 时单条 evidence 的"中性"分；
-    # 让全无日期的报告维持在 0.7 左右，而不是误报 1.0。
-    NEUTRAL_NO_DATE_SCORE = 0.7
 
     def run(self, ctx: CheckerContext) -> CheckerResult:
         issues: list[QAIssue] = []
@@ -66,9 +68,9 @@ class FreshnessChecker(BaseChecker):
                         continue
                     published = _published_at(ev)
                     if published is None:
+                        # 无日期 ≠ 过期：不计入评分(既不加分也不扣分)，仅记数供 notes。
                         undated_count += 1
                         undated_ids.append(eid)
-                        contributions.append(self.NEUTRAL_NO_DATE_SCORE)
                         continue
                     age_days = _days_between(published, now)
                     dated_count += 1
@@ -128,11 +130,12 @@ class FreshnessChecker(BaseChecker):
                         )
                     )
 
-        total_refs = dated_count + undated_count
-        if total_refs == 0:
+        # 只对**带日期**的证据评分：无日期既不拉低也不抬高(留兜底——只有确实带
+        # 日期且过期才报警)。全无日期 → 默认通过(score=1.0)，freshness 不再 gating。
+        if dated_count == 0:
             score = 1.0
         else:
-            score = sum(contributions) / total_refs
+            score = sum(contributions) / dated_count
         if sensitive_violations >= 3:
             score = min(score, 0.6)
         pass_ = (
@@ -196,7 +199,7 @@ def _build_notes(
         bits.append(f"最大年龄 {max_age_days} 天")
     if undated_count:
         bits.append(
-            "无日期项按中性 0.7 计分（待 Collector 落 source_published_at 后回升）"
+            f"{undated_count} 项无日期（不计入评分，仅带日期且过期才报警）"
         )
     if stale_issues:
         bits.append(f"过期 {stale_issues} 处")

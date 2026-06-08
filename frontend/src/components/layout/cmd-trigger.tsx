@@ -14,7 +14,6 @@ import {
   CheckCheckIcon,
   DownloadIcon,
   ShareIcon,
-  PaletteIcon,
   WorkflowIcon,
   FolderIcon,
 } from "lucide-react";
@@ -56,6 +55,7 @@ import { apiEvidenceToMock } from "@/lib/evidence-context";
  */
 export function CmdTrigger() {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -115,7 +115,7 @@ export function CmdTrigger() {
   /** Workspace action 真实调用 + 失败 toast + 拉新 state */
   const runApi = (label: string, op: (pid: string) => Promise<unknown>) => async () => {
     if (!workspaceProjectId) {
-      toast.info(`${label} · demo 模式不发请求`);
+      toast.info(`${label} · 演示模式不发请求`);
       return;
     }
     try {
@@ -168,28 +168,50 @@ export function CmdTrigger() {
       <CommandDialog
         open={open}
         onOpenChange={setOpen}
-        title="Command Palette"
+        title="命令面板"
         description="跳转 · 操作 · 跳节点"
       >
-        <CommandInput placeholder="搜索命令、节点、产品名…" autoFocus />
+        <CommandInput
+          placeholder="搜索命令、节点，或输入产品名开始分析…"
+          autoFocus
+          value={query}
+          onValueChange={setQuery}
+        />
         <CommandList>
-          <CommandEmpty>没有匹配的命令</CommandEmpty>
+          <CommandEmpty>没有匹配项 · 按回车可分析「{query.trim()}」</CommandEmpty>
 
-          <CommandGroup heading="Navigate">
+          {query.trim() ? (
+            <CommandGroup heading="开始分析">
+              <CommandItem
+                value={query}
+                onSelect={runCmd(() =>
+                  router.push(
+                    `/projects/new?target=${encodeURIComponent(query.trim())}`
+                  )
+                )}
+              >
+                <SparklesIcon />
+                <span>分析「{query.trim()}」</span>
+                <CommandShortcut>新建</CommandShortcut>
+              </CommandItem>
+            </CommandGroup>
+          ) : null}
+
+          <CommandGroup heading="导航">
             <CommandItem
-              keywords={["dag", "graph", "flow"]}
+              keywords={["dag", "graph", "flow", "工作流"]}
               onSelect={runCmd(() => goToTab("dag"))}
             >
               <WorkflowIcon />
               <span>工作流</span>
-              <CommandShortcut>tab</CommandShortcut>
+              <CommandShortcut>标签</CommandShortcut>
             </CommandItem>
             <CommandItem
               keywords={["report"]}
               onSelect={runCmd(() => goToTab("report"))}
             >
               <FileTextIcon />
-              <span>Report · 报告查看</span>
+              <span>报告</span>
               <CommandShortcut>tab</CommandShortcut>
             </CommandItem>
             <CommandItem
@@ -197,7 +219,7 @@ export function CmdTrigger() {
               onSelect={runCmd(() => goToTab("trace"))}
             >
               <ClockIcon />
-              <span>Trace · 决策回放</span>
+              <span>决策回放</span>
               <CommandShortcut>tab</CommandShortcut>
             </CommandItem>
             <CommandItem
@@ -205,7 +227,7 @@ export function CmdTrigger() {
               onSelect={runCmd(() => goToTab("evidence"))}
             >
               <LibraryIcon />
-              <span>Evidence · 证据库</span>
+              <span>证据库</span>
               <CommandShortcut>tab</CommandShortcut>
             </CommandItem>
             <CommandItem
@@ -213,7 +235,7 @@ export function CmdTrigger() {
               onSelect={runCmd(() => goToTab("metrics"))}
             >
               <GaugeIcon />
-              <span>Metrics · 项目指标</span>
+              <span>项目指标</span>
               <CommandShortcut>tab</CommandShortcut>
             </CommandItem>
             <CommandSeparator />
@@ -222,7 +244,7 @@ export function CmdTrigger() {
               onSelect={runCmd(() => router.push("/projects"))}
             >
               <FolderIcon />
-              <span>Projects · 项目列表</span>
+              <span>项目列表</span>
               <CommandShortcut>route</CommandShortcut>
             </CommandItem>
             <CommandItem
@@ -230,34 +252,26 @@ export function CmdTrigger() {
               onSelect={runCmd(() => router.push("/metrics"))}
             >
               <LayoutDashboardIcon />
-              <span>Global Metrics</span>
-              <CommandShortcut>route</CommandShortcut>
-            </CommandItem>
-            <CommandItem
-              keywords={["design", "system", "tokens"]}
-              onSelect={runCmd(() => router.push("/design-system"))}
-            >
-              <PaletteIcon />
-              <span>Design system · token 参考页</span>
+              <span>全局指标</span>
               <CommandShortcut>route</CommandShortcut>
             </CommandItem>
           </CommandGroup>
 
           {inWorkspace ? (
             <>
-              <CommandGroup heading="Workspace actions">
+              <CommandGroup heading="运行操作">
                 <CommandItem
                   keywords={["pause", "stop run"]}
                   onSelect={runCmd(async () => {
-                    await runApi("Pause", pauseRun)();
+                    await runApi("暂停", pauseRun)();
                     if (workspaceProjectId) {
-                      toast.info("Run 已暂停");
+                      toast.info("运行已暂停");
                     }
                     emitIntervention("pause", "run");
                   })}
                 >
                   <PauseIcon />
-                  <span>Pause this run</span>
+                  <span>暂停运行</span>
                 </CommandItem>
                 <CommandItem
                   keywords={["override", "accept v1", "qa override"]}
@@ -265,8 +279,8 @@ export function CmdTrigger() {
                     if (workspaceProjectId) {
                       try {
                         const res = await overrideQA(workspaceProjectId);
-                        toast.success("已 override · 接受为终稿", {
-                          description: `final = ${res.accepted_report_node_id} · ${res.skipped_node_ids.length} 节点 skip · edit_rate ${(res.edit_rate * 100).toFixed(0)}%`,
+                        toast.success("已采纳 · 作为终稿", {
+                          description: `终稿已定 · ${res.skipped_node_ids.length} 个节点跳过 · 人工修订率 ${(res.edit_rate * 100).toFixed(0)}%`,
                         });
                         await Promise.all([
                           revalidate.runState(workspaceProjectId),
@@ -274,34 +288,34 @@ export function CmdTrigger() {
                         ]);
                       } catch (e) {
                         const msg = e instanceof ApiError ? `${e.status} · ${e.message}` : String(e);
-                        toast.error("Override 失败", { description: msg });
+                        toast.error("采纳失败", { description: msg });
                         return;
                       }
                     } else {
-                      toast.success("已 override · v1 接受为终稿", {
-                        description: "QA blocking=false · 计入人工修正率",
+                      toast.success("已采纳 · 当前稿作为终稿", {
+                        description: "结束质检 · 计入人工修订率",
                       });
                     }
                     emitIntervention("override", "qa");
                   })}
                 >
                   <CheckCheckIcon />
-                  <span>Override · accept v1</span>
-                  <CommandShortcut>QA</CommandShortcut>
+                  <span>采纳当前稿 · 结束质检</span>
+                  <CommandShortcut>质检</CommandShortcut>
                 </CommandItem>
                 <CommandItem
                   keywords={["stop", "hard stop", "kill run"]}
                   onSelect={runCmd(async () => {
-                    await runApi("Stop", stopRun)();
+                    await runApi("强制停止", stopRun)();
                     if (workspaceProjectId) {
-                      toast.warning("Run 已强停 · 全部 pending 节点 skip");
+                      toast.warning("运行已强制停止 · 剩余节点跳过");
                     }
                     emitIntervention("stop", "run");
                   })}
                 >
                   <PauseIcon />
-                  <span>Stop run</span>
-                  <CommandShortcut>destructive</CommandShortcut>
+                  <span>强制停止</span>
+                  <CommandShortcut>危险</CommandShortcut>
                 </CommandItem>
                 <CommandItem
                   keywords={["export", "download", "pdf"]}
@@ -313,7 +327,7 @@ export function CmdTrigger() {
                   })}
                 >
                   <DownloadIcon />
-                  <span>Export report</span>
+                  <span>导出报告</span>
                 </CommandItem>
                 <CommandItem
                   keywords={["share", "link"]}
@@ -325,20 +339,20 @@ export function CmdTrigger() {
                   })}
                 >
                   <ShareIcon />
-                  <span>Copy share link</span>
+                  <span>复制分享链接</span>
                 </CommandItem>
                 <CommandItem
                   keywords={["new", "create", "analysis"]}
                   onSelect={runCmd(() => router.push("/projects/new"))}
                 >
                   <SparklesIcon />
-                  <span>New analysis</span>
-                  <CommandShortcut>create</CommandShortcut>
+                  <span>新建分析</span>
+                  <CommandShortcut>新建</CommandShortcut>
                 </CommandItem>
               </CommandGroup>
 
               {jumpNodes.length > 0 ? (
-                <CommandGroup heading="Jump to node">
+                <CommandGroup heading="跳转到节点">
                   {jumpNodes.map((n) => (
                     <CommandItem
                       key={n.id}
@@ -369,7 +383,7 @@ export function CmdTrigger() {
               ) : null}
 
               {searchEvidences.length > 0 ? (
-                <CommandGroup heading="Search evidence">
+                <CommandGroup heading="搜索证据">
                   {searchEvidences
                     .slice(0, 8)
                     .map((ev) => (
@@ -387,7 +401,7 @@ export function CmdTrigger() {
                         );
                         sp.set("tab", "evidence");
                         router.push(`${pathname}?${sp.toString()}`);
-                        toast.info(`跳转到 Evidence · ${ev.id}`, {
+                        toast.info(`跳转到证据库 · ${ev.id}`, {
                           description: `${ev.product} · ${ev.sourceType}`,
                         });
                       })}

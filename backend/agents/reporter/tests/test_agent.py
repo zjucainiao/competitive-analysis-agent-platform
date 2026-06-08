@@ -117,6 +117,136 @@ def test_mock_standard_v1_full_pipeline() -> None:
     assert out.trace_id == "trace-demo"
 
 
+def test_targeted_rework_preserves_unaffected_sections() -> None:
+    """B1：返工(prior_draft + qa_feedback)只重写被 QA 命中 location 的 section，
+    其余 section 原样复用 → 反馈有抓手、未命中内容零改动。"""
+    agent = Reporter(mock=True)
+    inp = load_demo_input(template_id="standard_v1")
+    out1 = agent.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id)
+    draft_v1 = out1.draft
+    assert len(draft_v1.sections) >= 3
+
+    # 给每个 section 首段打 sentinel —— 复用的会保留、被重写的会消失
+    prior = draft_v1.model_copy(deep=True)
+    sent = "〔SENTINEL〕"
+    for s in prior.sections:
+        if s.paragraphs:
+            s.paragraphs[0].text = s.paragraphs[0].text + sent
+
+    affected_idx = 1  # features 章节
+    affected_sid = prior.sections[affected_idx].section_id
+    feedback = {
+        "must_address": ["iss_t"],
+        "issues": [
+            {
+                "issue_id": "iss_t",
+                "dimension": "evidence_completeness",
+                "severity": "major",
+                "location": f"report.sections[{affected_idx}].paragraphs[0]",
+                "problem": "x",
+                "suggested_fix": "y",
+            }
+        ],
+        "revision": 1,
+    }
+    inp2 = load_demo_input(template_id="standard_v1").model_copy(
+        update={"qa_feedback": feedback, "prior_draft": prior}
+    )
+    out2 = agent.invoke(inp2, trace_id=inp2.trace_id, span_id=inp2.span_id)
+    draft_v2 = out2.draft
+
+    assert draft_v2.version == 2
+    v2_by_id = {s.section_id: s for s in draft_v2.sections}
+    # 命中 section 被重写 → sentinel 消失
+    assert sent not in v2_by_id[affected_sid].paragraphs[0].text
+    # 其余 section 原样复用 → 首段文本逐字保留 sentinel
+    reused = 0
+    for sid, sec in v2_by_id.items():
+        if sid == affected_sid or not sec.paragraphs:
+            continue
+        prior_sec = next(s for s in prior.sections if s.section_id == sid)
+        assert sec.paragraphs[0].text == prior_sec.paragraphs[0].text
+        assert sent in sec.paragraphs[0].text
+        reused += 1
+    assert reused >= 2, "应至少复用 2 个未命中 section"
+
+
+def test_targeted_rework_ignores_unlocatable_dimension_issue() -> None:
+    """混入维度级(不可定位)issue(如 A1 给 fact 补发的 report.dimension[...])时，
+    仍按可定位 issue 定向重写，不被拖成全篇重生成。"""
+    agent = Reporter(mock=True)
+    inp = load_demo_input(template_id="standard_v1")
+    draft_v1 = agent.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id).draft
+    prior = draft_v1.model_copy(deep=True)
+    sent = "〔KEEP〕"
+    for s in prior.sections:
+        if s.paragraphs:
+            s.paragraphs[0].text = s.paragraphs[0].text + sent
+
+    affected_idx = 1
+    affected_sid = prior.sections[affected_idx].section_id
+    feedback = {
+        "must_address": ["iss_loc", "iss_dim"],
+        "issues": [
+            {
+                "issue_id": "iss_loc",
+                "dimension": "evidence_completeness",
+                "severity": "major",
+                "location": f"report.sections[{affected_idx}].paragraphs[0]",
+                "problem": "x",
+                "suggested_fix": "y",
+            },
+            {  # 维度级、不可定位 —— 应被跳过，而不是触发全篇重生成
+                "issue_id": "iss_dim",
+                "dimension": "fact_consistency",
+                "severity": "major",
+                "location": "report.dimension[fact_consistency]",
+                "problem": "x",
+                "suggested_fix": "y",
+            },
+        ],
+        "revision": 1,
+    }
+    inp2 = load_demo_input(template_id="standard_v1").model_copy(
+        update={"qa_feedback": feedback, "prior_draft": prior}
+    )
+    draft_v2 = agent.invoke(inp2, trace_id=inp2.trace_id, span_id=inp2.span_id).draft
+    v2_by_id = {s.section_id: s for s in draft_v2.sections}
+    assert sent not in v2_by_id[affected_sid].paragraphs[0].text  # 命中 → 重写
+    reused = sum(
+        1
+        for sid, sec in v2_by_id.items()
+        if sid != affected_sid and sec.paragraphs and sent in sec.paragraphs[0].text
+    )
+    assert reused >= 2, "维度级 issue 不应把定向改稿拖成全篇重生成"
+
+
+def test_no_prior_draft_is_full_regeneration() -> None:
+    """B1 兜底：无 prior_draft → 行为与现状一致（全篇生成，不受 qa_feedback 影响章节选择）。"""
+    agent = Reporter(mock=True)
+    feedback = {
+        "must_address": ["iss_t"],
+        "issues": [
+            {
+                "issue_id": "iss_t",
+                "dimension": "evidence_completeness",
+                "severity": "major",
+                "location": "report.sections[1].paragraphs[0]",
+                "problem": "x",
+                "suggested_fix": "y",
+            }
+        ],
+        "revision": 1,
+    }
+    inp = load_demo_input(template_id="standard_v1").model_copy(
+        update={"qa_feedback": feedback}  # 注意：无 prior_draft
+    )
+    out = agent.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id)
+    # 仍产出完整 5 章节（全篇生成），version 随 revision = 2
+    assert len(out.draft.sections) == 5
+    assert out.draft.version == 2
+
+
 # ---------- 2. investor_v1（含 positioning 缺失） ----------
 
 

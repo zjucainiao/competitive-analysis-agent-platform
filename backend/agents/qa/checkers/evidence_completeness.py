@@ -5,16 +5,20 @@
 - 每个 AnalysisClaim 的 ``evidence_ids`` 至少 1 条
 - 关键章节（功能对比 / 定价对比 / SWOT）的段落 evidence 覆盖率 ≥ 0.90
 
+- 量化（高风险）段落若其引用证据**全部低权威**（source_authority < 阈值）→ 非阻塞提示
+
 routing：
 - 段落缺引用 → reporter
 - claim 缺引用 → analyst
 - 整个产品×维度的 evidence 全空 → collector
+- 量化结论仅由低权威来源支撑 → collector（非阻塞，补高权威来源）
 """
 
 from __future__ import annotations
 
 from typing import ClassVar
 
+from backend.agents._authority import ANALYSIS_TO_COLLECT, authority_for
 from backend.schemas import AnalysisDimension, QADimension, QAIssue
 
 from ._base import BaseChecker, CheckerContext, CheckerResult
@@ -25,12 +29,22 @@ KEY_DIMENSIONS = {
     AnalysisDimension.SWOT,
 }
 
+# 「关键量化维度」：定价/功能的量化结论缺高权威源 → major（权重判级）；其余量化 → minor。
+KEY_QUANT_DIMENSIONS = {
+    AnalysisDimension.FEATURE_COMPARISON,
+    AnalysisDimension.PRICING_COMPARISON,
+}
+
 
 class EvidenceCompletenessChecker(BaseChecker):
     dimension: ClassVar[QADimension] = QADimension.EVIDENCE_COMPLETENESS
 
     KEY_COVERAGE_THRESHOLD = 0.90
     OVERALL_PASS_THRESHOLD = 0.90
+    # 低权威阈值（消费 source_authority）：< 此值视为弱来源。相对语义下官方页查定价
+    # =0.95、评论站查口碑=0.92 都不算弱；只有「其他第三方(0.5-0.6) / 评论站越界查定价
+    # (0.6)」这类才落入弱来源。
+    LOW_AUTHORITY_THRESHOLD = 0.7
 
     def run(self, ctx: CheckerContext) -> CheckerResult:
         issues: list[QAIssue] = []
@@ -163,7 +177,14 @@ class EvidenceCompletenessChecker(BaseChecker):
                     )
                 )
 
-        # ---- 评分 ----
+        # 5. 高风险量化结论的来源权威度（**消费** source_authority，相对语义 + 跨维度校正）。
+        # 对每个量化段落按其**主题维度**重算引用证据的权威度（评论证据用到 pricing 段落不再
+        # 按采集时的 0.92，而按 authority_for("review", PRICING)=0.6）；source_class/维度任一
+        # 未知则**保守回退**到证据存的 source_authority（不校正）。多来源类型互证则豁免。
+        # 仅做**检测**，issue 在评分后再 append——不让权威信号翻转本维度（引用覆盖率）的 pass_。
+        weak_key, weak_other = self._weak_authority_quant(ctx)
+
+        # ---- 评分（仅基于引用覆盖率 issue；权威 issue 不参与本维度判级）----
         if total_factual == 0:
             paragraph_score = 1.0
         else:
@@ -187,6 +208,50 @@ class EvidenceCompletenessChecker(BaseChecker):
             i.severity in ("major", "critical") for i in issues
         )
 
+        # 权威 issue 在 pass_ 之后 append：进全局判级（major 计权重、可与其它 issue 累计触发
+        # 阻塞）但**不**翻转本维度 pass_、不经 core 路径强制阻塞。对抗评审一致结论：硬门槛在
+        # 真实数据验证触发率前过激，故此处以**权重判级**落地（关键章节弱源=major，其余=minor），
+        # 暂不升 hard_block（升级只需把 major 的 required_inputs 加 hard_block=True，见 routing）。
+        if weak_key:
+            issues.append(
+                QAIssue(
+                    issue_id="iss_ec_low_authority_key",
+                    dimension=self.dimension,
+                    severity="major",
+                    location="report.dimension[evidence_completeness]",
+                    problem=(
+                        f"{len(weak_key)} 处定价/功能的量化结论仅由弱来源支撑"
+                        f"（按主题维度重算权威度 < {self.LOW_AUTHORITY_THRESHOLD}），"
+                        "关键数字缺高权威佐证。"
+                    ),
+                    suggested_fix="Collector 为这些定价/功能量化结论补采官方页等高权威来源。",
+                    target_agent="collector",
+                    required_inputs={
+                        "paragraph_ids": weak_key,
+                        "authority_threshold": self.LOW_AUTHORITY_THRESHOLD,
+                    },
+                )
+            )
+        if weak_other:
+            issues.append(
+                QAIssue(
+                    issue_id="iss_ec_low_authority",
+                    dimension=self.dimension,
+                    severity="minor",
+                    location="report.dimension[evidence_completeness]",
+                    problem=(
+                        f"{len(weak_other)} 处量化结论仅由低权威来源支撑，"
+                        "关键数字可信度不足。"
+                    ),
+                    suggested_fix="Collector 为这些量化结论补采更高权威来源。",
+                    target_agent="collector",
+                    required_inputs={
+                        "paragraph_ids": weak_other,
+                        "authority_threshold": self.LOW_AUTHORITY_THRESHOLD,
+                    },
+                )
+            )
+
         notes = (
             f"事实段落 {cited_factual}/{total_factual} 有引用；"
             f"claim {claims_with_ev}/{total_claims} 有 evidence。"
@@ -198,6 +263,56 @@ class EvidenceCompletenessChecker(BaseChecker):
             notes=notes,
             issues=issues,
         )
+
+    def _weak_authority_quant(
+        self, ctx: CheckerContext
+    ) -> tuple[list[str], list[str]]:
+        """检测「量化结论仅由弱来源支撑」的段落（相对语义 + 跨维度校正）。
+
+        返回 ``(weak_key, weak_other)``：weak_key=定价/功能关键量化段，weak_other=其余量化段。
+        - 按段落主题维度（``_section_dimension`` → ``ANALYSIS_TO_COLLECT``）重算每条引用证据的
+          corrected-authority = ``authority_for(source_class, collect_dim)``；``source_class`` /
+          维度任一未知 → **保守回退**到 ``evidence.source_authority``（不校正）。
+        - 多来源类型互证（≥2 个不同 ``source_class``）→ 豁免（可信度足够）。
+        - 段落**所有**证据 corrected-authority < 阈值 → 弱源。
+        """
+        weak_key: list[str] = []
+        weak_other: list[str] = []
+        for sec in ctx.draft.sections:
+            topic = _section_dimension(sec.section_id, sec.title)
+            collect_dim = ANALYSIS_TO_COLLECT.get(topic) if topic else None
+            for para in sec.paragraphs:
+                if (
+                    not para.is_quantitative
+                    or para.is_soft_conclusion
+                    or not para.evidence_ids
+                ):
+                    continue
+                evs = [
+                    ctx.evidence_db[e]
+                    for e in para.evidence_ids
+                    if e in ctx.evidence_db
+                ]
+                if not evs:
+                    continue
+                classes = {
+                    e.source_class for e in evs if e.source_class is not None
+                }
+                if len(classes) >= 2:
+                    continue  # 多来源类型互证 → 豁免
+                corrected = [
+                    authority_for(e.source_class, collect_dim)
+                    if (e.source_class is not None and collect_dim is not None)
+                    else e.source_authority
+                    for e in evs
+                ]
+                if max(corrected) >= self.LOW_AUTHORITY_THRESHOLD:
+                    continue  # 至少一条够权威
+                if topic in KEY_QUANT_DIMENSIONS and collect_dim is not None:
+                    weak_key.append(para.paragraph_id)
+                else:
+                    weak_other.append(para.paragraph_id)
+        return weak_key, weak_other
 
 
 def _section_dimension(section_id: str, title: str) -> AnalysisDimension | None:

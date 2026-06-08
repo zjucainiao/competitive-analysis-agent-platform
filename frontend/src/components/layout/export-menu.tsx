@@ -17,7 +17,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Button } from "@/components/ui/button";
 import { useWorkspaceApi } from "@/lib/workspace-api-context";
 import { exportProjectUrl, API_BASE } from "@/lib/api/client";
 import type { ExportFormat } from "@/lib/api/types";

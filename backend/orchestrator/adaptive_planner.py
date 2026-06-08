@@ -296,10 +296,15 @@ class AdaptivePlanner:
             )
 
         # analyst / reporter / qa / end —— 标准串行
+        # 超时按各节点真实工作量给足余量（Doubao 结构化输出在管线高并发下会变慢）：
+        # - analyst：6 维度并行 ~20s，freeform 兜底单次可达 55s → 240s 留足
+        # - reporter：分章并行生成 + 逐段 entailment 自检，隔离实测 100-142s，
+        #   管线高并发下可能翻倍 → 600s（与 extract 一致）；原 300s 太紧会超时返工失败
+        # - qa：7 维度检查 → 180s
         for spec_id, agent, deps, timeout_ms, retries in (
-            ("analyst", "analyst", ["join_extract"], 120000, 2),
-            ("reporter", "reporter", ["analyst"], 300000, 2),
-            ("qa", "qa", ["reporter"], 60000, 2),
+            ("analyst", "analyst", ["join_extract"], 240000, 2),
+            ("reporter", "reporter", ["analyst"], 600000, 2),
+            ("qa", "qa", ["reporter"], 180000, 2),
         ):
             nodes.append(
                 DAGNode(

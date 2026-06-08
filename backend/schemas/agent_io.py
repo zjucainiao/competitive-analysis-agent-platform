@@ -66,3 +66,9 @@ class AgentOutputBase(BaseModel):
 
     # 错误累积
     errors: list[AgentError] = Field(default_factory=list)
+
+    # 输入快照（可观测）：本次 invoke 收到的输入的**紧凑摘要**（计数 + 关键名，已脱敏）。
+    # 由 BaseAgent.invoke 出口统一填充（见 observability.io_snapshot.summarize_agent_input），
+    # 随 outputs 流到前端，让 node detail 的「输入」区与「输出」区对称可观测。
+    # 默认空 dict → 旧数据/未填充场景安全（extra="forbid" 只拒未知字段，不拒缺省字段）。
+    input_snapshot: dict = Field(default_factory=dict)

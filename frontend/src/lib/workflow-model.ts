@@ -10,6 +10,7 @@ import type {
   RunStageView,
   StageInstance,
   StageRevision,
+  QAVerdict,
 } from "@/lib/api/types";
 
 export type StepStatus =
@@ -26,6 +27,7 @@ export interface StepVM {
   isProductStage: boolean;
   status: StepStatus;
   durationMs: number | null;
+  confidence: number | null; // 阶段平均置信度（0–1），用于平静标注「成色」而非警告
   productCount: number; // 产品阶段：实例数
   maxRound: number; // 全局阶段：最大轮次（>1 → ↻ vN 角标）
   instances: StageInstance[];
@@ -49,10 +51,84 @@ const STAGE_LABEL: Record<string, string> = {
 
 const PRODUCT_STAGES = new Set(["collect", "extract"]);
 
-/** AgentStatus → 步进器状态。pending 表示该阶段还没有终态记录（未跑 / 进行中）。 */
+/** QA routing 的 ``target_agent`` → 阶段 id（与后端 routing._AGENT_TO_ENTRY 同义）。 */
+const AGENT_TO_STAGE: Record<string, string> = {
+  collector: "collect",
+  extractor: "extract",
+  analyst: "analyst",
+  reporter: "reporter",
+};
+
+/** 上游→下游优先序（与后端 routing._AGENT_ORDER 一致）：多条 routing 取**最上游**单一
+ * 目标——最上游重跑必带动其下游一起重走。 */
+const REWORK_AGENT_ORDER = ["collector", "extractor", "analyst", "reporter"];
+
+/** 触发「当前返工轮」的最上游目标阶段 id（取最后一条 **blocking** verdict 的 routing）。
+ *  无 verdict / 非阻塞 / 无 routing → null（非返工，或无法定位起点）。 */
+function reworkTargetStage(verdicts: QAVerdict[]): string | null {
+  if (verdicts.length === 0) return null;
+  const last = verdicts[verdicts.length - 1];
+  if (!last?.blocking) return null;
+  const targets = new Set<string>((last.routing ?? []).map((r) => r.target_agent));
+  const chosen = REWORK_AGENT_ORDER.find((a) => targets.has(a));
+  return chosen ? AGENT_TO_STAGE[chosen] : null;
+}
+
+/** running 叠加 + 返工「重新走一遍」帧（就地改写 steps 状态）。
+ *
+ * - **首轮**（currentRound≤1）：按流水线顺序点亮第一个 pending 阶段为 running。
+ * - **返工轮**（currentRound≥2，QA 已打回正在回灌）：从 rework 目标阶段起，把
+ *   「目标 → 质检」这段**本轮尚未重跑**的阶段重置——最上游未追平者标 running、其后标
+ *   pending，让用户实时看到管线**退回该阶段重走一遍**（而不是停在上一轮的全绿）。
+ *   目标**上游**的阶段（本轮不重跑，产物复用）保持原状态；本轮**已跑完**的阶段保留其
+ *   本轮终态（success/error）。
+ *
+ * 关键依据：原生图所有节点 ``round = qa_round + 1``，故运行中的返工轮号即
+ * ``qa_round + 1``；``StepVM.maxRound`` < 该轮号 ⇒ 本阶段本轮还没重跑。 */
+function applyRunningFrontier(steps: StepVM[], view: RunStateView): void {
+  if (view.status !== "running") return;
+  const currentRound = (view.qa_round ?? 0) + 1;
+
+  // 首轮：维持原「第一个 pending → running」语义（零回归）。
+  if (currentRound <= 1) {
+    const idx = steps.findIndex((s) => s.status === "pending");
+    if (idx >= 0) steps[idx].status = "running";
+    return;
+  }
+
+  // 返工轮：定位重走起点（最后一条 blocking verdict 的最上游 routing 目标）。
+  const target = reworkTargetStage(view.verdicts);
+  const startIdx = target
+    ? steps.findIndex((s) => s.stage === target)
+    : // 兜底：routing 无法解析时，退化为「第一个未追平本轮的阶段」当起点。
+      steps.findIndex((s) => s.maxRound < currentRound);
+  if (startIdx < 0) {
+    const idx = steps.findIndex((s) => s.status === "pending");
+    if (idx >= 0) steps[idx].status = "running";
+    return;
+  }
+
+  let runningPlaced = false;
+  for (let i = startIdx; i < steps.length; i++) {
+    if (steps[i].maxRound >= currentRound) continue; // 本轮已跑完 → 保留终态
+    if (!runningPlaced) {
+      steps[i].status = "running";
+      runningPlaced = true;
+    } else {
+      steps[i].status = "pending";
+    }
+  }
+}
+
+/** AgentStatus → 步进器状态。pending 表示该阶段还没有终态记录（未跑 / 进行中）。
+ *
+ * 注意：``needs_rework`` 是 **Agent 对自己产出的自评**（置信度偏低 / 多源字段冲突
+ * 等），属信息性提示，**并不触发 LangGraph 回环**——节点照常算完成、产出原样传下游。
+ * 真正的 QA 返工由「轮次 > 1」(``↻ vN`` 角标) 表达。故这里把自评的 ``needs_rework``
+ * 视作 **已完成**（success），不再渲染成橙色感叹号警告；自评的「成色」改由置信度标注
+ * 体现（见步进器 / 产品行的「置信」标签）。 */
 function mapStatus(s: string): StepStatus {
-  if (s === "success" || s === "partial") return "success";
-  if (s === "needs_rework") return "rework";
+  if (s === "success" || s === "partial" || s === "needs_rework") return "success";
   if (s === "failed") return "error";
   return "pending";
 }
@@ -78,6 +154,15 @@ function stageDurationMs(records: Timed[]): number | null {
   }
   const sum = records.reduce((acc, r) => acc + (r.duration_ms ?? 0), 0);
   return sum > 0 ? sum : null;
+}
+
+/** 阶段平均置信度：取所有记录非空 confidence 的均值（无则 null）。 */
+function stageConfidence(records: { confidence: number | null }[]): number | null {
+  const cs = records
+    .map((r) => r.confidence)
+    .filter((c): c is number => typeof c === "number");
+  if (cs.length === 0) return null;
+  return cs.reduce((a, b) => a + b, 0) / cs.length;
 }
 
 /** 单阶段状态聚合：
@@ -122,6 +207,7 @@ export function runViewToStepper(view: RunStateView): StepperVM {
       isProductStage,
       status: deriveStageStatus(st, productTotal, view.status),
       durationMs: stageDurationMs(records),
+      confidence: stageConfidence(isProductStage ? st.instances : st.revisions),
       productCount: st.instances.length,
       maxRound,
       instances: st.instances,
@@ -129,11 +215,9 @@ export function runViewToStepper(view: RunStateView): StepperVM {
     };
   });
 
-  // running 叠加：整条 run 在跑时，按流水线顺序第一个 pending 的阶段就是当前活跃阶段。
-  if (view.status === "running") {
-    const idx = steps.findIndex((s) => s.status === "pending");
-    if (idx >= 0) steps[idx].status = "running";
-  }
+  // running 叠加：首轮点亮第一个 pending；返工轮则把管线「退回 rework 目标重走一遍」
+  // （见 applyRunningFrontier）——修复返工时全阶段停在上一轮全绿、毫无实时返工观感。
+  applyRunningFrontier(steps, view);
 
   // 默认选中：running 阶段；否则最后一个有活动的阶段（done 的 run 落在质检，直接看终判）。
   let activeIndex = steps.findIndex((s) => s.status === "running");
@@ -164,6 +248,12 @@ export function formatDuration(ms: number | null): string {
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
+/** 格式化置信度为百分比（0–1 → "69%"）；null 返回 null（前端不渲染）。 */
+export function formatConfidence(c: number | null): string | null {
+  if (c == null || Number.isNaN(c)) return null;
+  return `${Math.round(c * 100)}%`;
 }
 
 /** 格式化 token 总量（≥1000 用 k）。 */

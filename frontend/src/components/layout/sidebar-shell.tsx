@@ -28,7 +28,6 @@ export function SidebarShell({
   topBarLeft,
   topBarRight,
   topTabs,
-  projectName,
   hero,
   overviewRail,
 }: {
@@ -50,7 +49,7 @@ export function SidebarShell({
 
   return (
     <div className="min-h-screen">
-      <Sidebar projectName={projectName} />
+      <Sidebar />
       {overviewRail}
       <div className={`${mainOffset} flex min-h-screen flex-col`}>
         <TopBar left={topBarLeft} right={topBarRight} />

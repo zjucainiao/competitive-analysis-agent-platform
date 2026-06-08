@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -149,9 +150,64 @@ async def patch_evidence(
         reason=req.reason or "evidence marked disputed by user",
         affected_paragraph_ids=affected_paragraph_ids,
     )
-    await storage.state_store.save_qa_verdict(project_id, verdict)
 
-    # 3. 调 FeedbackRouter 派生 reporter_v{n+1}
+    running_tasks: dict[str, asyncio.Task] = request.app.state.running_tasks
+    busy = (existing := running_tasks.get(project_id)) is not None and not existing.done()
+    latest_project = await storage.state_store.get_project(project_id)
+    run_project = latest_project or project
+
+    if os.getenv("ORCH_ENGINE", "native") == "native":
+        # P1-AUTOREWORK：native 走「定向返工」——只重跑 reporter(+qa)，复用 checkpoint 里
+        # 既有 collect/extract/analyst，而不是经 FeedbackRouter 派生 plan、被 native 忽略后
+        # 从头重跑整个项目。
+        from backend.orchestrator.routing import _build_qa_feedback_by_node
+
+        run_id = run_project.runs[-1].run_id if run_project.runs else None
+        await storage.state_store.save_qa_verdict(project_id, verdict, run_id=run_id)
+        fb = _build_qa_feedback_by_node(
+            verdict, chosen="reporter", rework=[], qa_round=1
+        )
+        triggered = False
+        if not busy and fb:
+
+            async def _rework_bg() -> None:
+                try:
+                    async for _ in orch.rework_native(
+                        run_project, qa_feedback_by_node=fb
+                    ):
+                        pass
+                    await storage.state_store.update_project_status(
+                        project_id, ProjectStatus.DONE
+                    )
+                except Exception:  # noqa: BLE001
+                    _log.exception(
+                        "evidence-auto-rework(native) failed project=%s", project_id
+                    )
+                    await storage.state_store.update_project_status(
+                        project_id, ProjectStatus.FAILED
+                    )
+
+            await storage.state_store.update_project_status(
+                project_id, ProjectStatus.RUNNING
+            )
+            task = asyncio.create_task(
+                _rework_bg(), name=f"evidence-rework-{project_id}-{ULID()}"
+            )
+            running_tasks[project_id] = task
+            triggered = True
+
+        return EvidenceDisputeResponse(
+            evidence_id=evidence_id,
+            disputed=req.disputed,
+            located_in_node=target_node_id,
+            manual_edits=new_metrics.manual_edits,
+            auto_rework_triggered=triggered,
+            rework_verdict_id=verdict.verdict_id,
+            affected_paragraph_ids=affected_paragraph_ids,
+        )
+
+    # ---- legacy 引擎：FeedbackRouter 派生 reporter_v{n+1} + 起 run ----
+    await storage.state_store.save_qa_verdict(project_id, verdict)
     plan = await storage.state_store.get_dag_plan(project_id)
     if plan is None:
         raise HTTPException(
@@ -175,13 +231,8 @@ async def patch_evidence(
     new_plan = _apply_feedback_outcome(plan, outcome)
     await storage.state_store.save_dag_plan(new_plan)
 
-    # 4. 自动起 run 任务（若当前没在跑）
-    running_tasks: dict[str, asyncio.Task] = request.app.state.running_tasks
     triggered = False
-    existing = running_tasks.get(project_id)
-    if existing is None or existing.done():
-        latest_project = await storage.state_store.get_project(project_id)
-        run_project = latest_project or project
+    if not busy:
 
         async def _resume_in_bg() -> None:
             try:

@@ -170,8 +170,8 @@ export function EvidenceLayout({
       selected.forEach((id) => next.add(id));
       return next;
     });
-    toast.warning(`已批量标记 ${selected.size} 条 evidence 为 disputed`, {
-      description: "引用这些 evidence 的段落会触发 QA 重审",
+    toast.warning(`已批量将 ${selected.size} 条证据标记为有异议`, {
+      description: "引用这些证据的段落会触发质量复审",
     });
     emitIntervention("bulk-dispute", `count_${selected.size}`);
     setSelected(new Set());
@@ -184,7 +184,7 @@ export function EvidenceLayout({
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       navigator.clipboard.writeText(JSON.stringify(data, null, 2));
     }
-    toast.success(`已复制 ${selected.size} 条 evidence (JSON)`);
+    toast.success(`已复制 ${selected.size} 条证据（JSON）`);
     emitIntervention("bulk-export-evidence", `count_${selected.size}`);
   };
 
@@ -210,7 +210,7 @@ export function EvidenceLayout({
         <header className="flex flex-wrap items-end justify-between gap-3 border-b border-border-subtle pb-3">
           <div>
             <div className="text-xs font-medium uppercase tracking-wider text-text-muted">
-              Evidence library
+              证据库
             </div>
             <h1 className="mt-1 text-lg font-semibold text-text-primary">
               <span className="font-mono tabular-nums" data-num>
@@ -251,17 +251,17 @@ export function EvidenceLayout({
             <div className="ml-auto flex items-center gap-1.5">
               <Button size="sm" variant="outline" onClick={handleBulkMarkDisputed} className="gap-1.5">
                 <AlertTriangleIcon className="h-3 w-3" />
-                <span>Mark inaccurate</span>
+                <span>标记有误</span>
               </Button>
               <Button size="sm" variant="ghost" onClick={handleBulkExport}>
-                Copy as JSON
+                复制为 JSON
               </Button>
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={() => setSelected(new Set())}
               >
-                Cancel
+                取消
               </Button>
             </div>
           </div>
@@ -305,8 +305,8 @@ function EmptyState({ hasQuery }: { hasQuery: boolean }) {
       </div>
       <p className="mt-3 text-sm text-text-secondary">
         {hasQuery
-          ? "没有匹配当前筛选 / 搜索条件的 evidence。"
-          : "evidence 库为空。等 Collector / Extractor 节点完成后会自动填充。"}
+          ? "没有匹配当前筛选 / 搜索条件的证据。"
+          : "证据库为空，采集与抽取完成后会自动填充。"}
       </p>
     </div>
   );

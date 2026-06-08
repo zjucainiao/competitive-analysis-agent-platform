@@ -2,8 +2,15 @@
 
 import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { FileJsonIcon, ListTreeIcon, ScrollTextIcon, XIcon } from "lucide-react";
+import {
+  CoinsIcon,
+  FileJsonIcon,
+  ListTreeIcon,
+  ScrollTextIcon,
+  XIcon,
+} from "lucide-react";
 import { projectLLMCalls } from "@/lib/api/client";
+import { phaseOf } from "@/lib/agent-phases";
 import { cn } from "@/lib/utils";
 import { StatusPill } from "./status-pill";
 import type { DagNodeData } from "@/lib/dag-mock";
@@ -174,7 +181,6 @@ function EmptyState() {
 /* ── overview ────────────────────────────────────────────────────────── */
 
 function OverviewTab({
-  nodeId,
   data,
   node,
   output,
@@ -199,8 +205,8 @@ function OverviewTab({
             pulse={data.status === "running"}
           />
         </div>
-        <div className="mt-1 font-mono text-[11px] text-text-muted">
-          {nodeId} · {data.agent}
+        <div className="mt-1 text-[11px] text-text-muted">
+          {phaseOf(data.agent).label}
         </div>
       </div>
 
@@ -236,7 +242,7 @@ function OverviewTab({
             tone="accent"
           />
           <Tile
-            label="LLM 调用"
+            label="模型调用"
             value={String(llmCallCount)}
             tone="default"
           />
@@ -292,7 +298,7 @@ function InputsTab({
   }
   return (
     <div className="space-y-4 p-4">
-      <IconSection icon={ListTreeIcon} title="本次 Agent 入参">
+      <IconSection icon={ListTreeIcon} title="本次输入参数">
         <KVList items={items} />
       </IconSection>
 
@@ -304,8 +310,8 @@ function InputsTab({
                 key={ref}
                 className="rounded-md border border-border-subtle bg-bg-overlay/60 px-3 py-2"
               >
-                <div className="font-mono text-[11px] text-text-primary">
-                  {ref}
+                <div className="text-[11px] text-text-primary">
+                  {phaseOf(state?.plan?.nodes.find((n) => n.node_id === ref)?.agent_name).label}
                 </div>
                 <p className="mt-1 text-xs leading-relaxed text-text-muted">
                   {summarizeUpstream(ref, state?.outputs[ref])}
@@ -314,18 +320,6 @@ function InputsTab({
             ))}
           </div>
         </IconSection>
-      ) : null}
-
-      {node ? (
-        <JsonBlock
-          title="node metadata"
-          value={{
-            node_type: node.node_type,
-            agent_name: node.agent_name,
-            input_refs: node.input_refs,
-            metadata: node.metadata,
-          }}
-        />
       ) : null}
     </div>
   );
@@ -354,7 +348,7 @@ function OutputsTab({
       ) : null}
 
       {output ? (
-        <JsonBlock title="完整 Agent output" value={output} />
+        <JsonBlock title="完整产出数据" value={output} />
       ) : null}
     </div>
   );
@@ -401,16 +395,15 @@ function LogsTab({
         <IconSection icon={ScrollTextIcon} title="运行日志">
           <KVList
             items={[
-              { key: "trace_id", value: output.trace_id || "—" },
-              { key: "span_id", value: output.span_id || "—" },
-              { key: "agent_version", value: output.agent_version || "—" },
-              { key: "status", value: output.status },
+              { key: "追踪 ID", value: output.trace_id || "—" },
+              { key: "调用版本", value: output.agent_version || "—" },
+              { key: "状态", value: outputStatusLabel(output.status) },
               {
-                key: "tokens",
-                value: `${output.tokens_input.toLocaleString()} in / ${output.tokens_output.toLocaleString()} out`,
+                key: "Token",
+                value: `输入 ${output.tokens_input.toLocaleString()} / 输出 ${output.tokens_output.toLocaleString()}`,
               },
               {
-                key: "duration",
+                key: "耗时",
                 value: formatDuration(output.duration_ms),
               },
             ]}
@@ -419,7 +412,11 @@ function LogsTab({
       ) : null}
 
       {visibleCalls.length > 0 ? (
-        <IconSection icon={FileJsonIcon} title={`LLM calls (${visibleCalls.length})`}>
+        <PhaseTokenSummary calls={visibleCalls} />
+      ) : null}
+
+      {visibleCalls.length > 0 ? (
+        <IconSection icon={FileJsonIcon} title={`模型调用（${visibleCalls.length}）`}>
           <div className="space-y-3">
             {visibleCalls.map((c, i) => (
               <div
@@ -431,24 +428,24 @@ function LogsTab({
                     <span className="truncate font-mono text-xs text-text-primary">
                       {c.model}
                     </span>
-                    <span className="rounded-sm bg-bg-sunken px-1.5 py-0.5 font-mono text-[10px] text-text-muted">
-                      {c.phase}
+                    <span className="rounded-sm bg-bg-sunken px-1.5 py-0.5 text-[10px] text-text-muted">
+                      {phaseLabel(c.phase)}
                     </span>
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px] text-text-muted tabular-nums">
                     <span>{c.duration_s.toFixed(1)}s</span>
-                    <span>{c.tokens_input.toLocaleString()} in</span>
-                    <span>{c.tokens_output.toLocaleString()} out</span>
+                    <span>输入 {c.tokens_input.toLocaleString()}</span>
+                    <span>输出 {c.tokens_output.toLocaleString()}</span>
                     {c.finish_reason ? <span>{c.finish_reason}</span> : null}
                   </div>
                 </div>
                 {c.prompt_preview || c.response_preview ? (
                   <div className="space-y-2 px-3 py-2">
                     {c.prompt_preview ? (
-                      <PreviewBlock label="prompt" text={c.prompt_preview} />
+                      <PreviewBlock label="提示词" text={c.prompt_preview} />
                     ) : null}
                     {c.response_preview ? (
-                      <PreviewBlock label="response" text={c.response_preview} />
+                      <PreviewBlock label="模型回复" text={c.response_preview} />
                     ) : null}
                   </div>
                 ) : null}
@@ -484,7 +481,7 @@ function EvidenceTab({
       {out ? (
         <div>
           <div className="text-[10px] font-medium uppercase tracking-wider text-text-muted">
-            产出 evidence
+            产出证据
           </div>
           <div className="mt-0.5 text-sm text-text-primary">{out.value}</div>
         </div>
@@ -512,7 +509,7 @@ function EvidenceTab({
         </div>
       ) : null}
       <p className="text-xs text-text-muted leading-relaxed">
-        查看完整 evidence 列表 + 引用反查 → 切到「证据库」tab。
+        查看完整证据列表 + 引用反查 → 切到「证据库」标签页。
       </p>
     </div>
   );
@@ -651,6 +648,110 @@ function statusLabel(status: DagNodeData["status"]): string {
   );
 }
 
+/** Agent 产出状态枚举 → 中文（success/partial/needs_rework/failed）。 */
+function outputStatusLabel(status: string): string {
+  return (
+    {
+      success: "已完成",
+      partial: "部分完成",
+      needs_rework: "需返工",
+      failed: "失败",
+      running: "运行中",
+      pending: "等待中",
+    }[status] ?? "—"
+  );
+}
+
+/** QA 终判枚举 → 中文。 */
+function qaStatusLabel(status: string): string {
+  return (
+    {
+      pass: "通过",
+      needs_revision: "需修订",
+      reject: "驳回",
+    }[status] ?? status
+  );
+}
+
+/** 模型调用阶段标记 → 中文（缺省回退原值，仅为诊断标签）。 */
+/** 按调用类型（phase）汇总 token 用量 —— 让“每种 API 调用花了多少 token”一眼可见。 */
+function PhaseTokenSummary({ calls }: { calls: LLMCallRecord[] }) {
+  const byPhase = new Map<
+    string,
+    { count: number; tin: number; tout: number }
+  >();
+  for (const c of calls) {
+    const agg = byPhase.get(c.phase) ?? { count: 0, tin: 0, tout: 0 };
+    agg.count += 1;
+    agg.tin += c.tokens_input ?? 0;
+    agg.tout += c.tokens_output ?? 0;
+    byPhase.set(c.phase, agg);
+  }
+  const rows = [...byPhase.entries()].sort(
+    (a, b) => b[1].tin + b[1].tout - (a[1].tin + a[1].tout)
+  );
+  const totIn = rows.reduce((s, [, v]) => s + v.tin, 0);
+  const totOut = rows.reduce((s, [, v]) => s + v.tout, 0);
+
+  return (
+    <IconSection icon={CoinsIcon} title="Token 用量（按调用类型）">
+      <div className="overflow-hidden rounded-md border border-border-subtle">
+        <table className="w-full text-[11px] tabular-nums">
+          <thead>
+            <tr className="border-b border-border-subtle bg-bg-sunken/50 text-text-muted">
+              <th className="px-2.5 py-1.5 text-left font-medium">类型</th>
+              <th className="px-2 py-1.5 text-right font-medium">次数</th>
+              <th className="px-2 py-1.5 text-right font-medium">输入</th>
+              <th className="px-2.5 py-1.5 text-right font-medium">输出</th>
+            </tr>
+          </thead>
+          <tbody className="font-mono text-text-secondary">
+            {rows.map(([phase, v]) => (
+              <tr key={phase} className="border-b border-border-subtle last:border-0">
+                <td className="px-2.5 py-1.5 font-sans text-text-primary">
+                  {phaseLabel(phase)}
+                </td>
+                <td className="px-2 py-1.5 text-right">{v.count}</td>
+                <td className="px-2 py-1.5 text-right">{v.tin.toLocaleString()}</td>
+                <td className="px-2.5 py-1.5 text-right">{v.tout.toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t border-border-default bg-bg-sunken/30 font-mono font-semibold text-text-primary">
+              <td className="px-2.5 py-1.5 font-sans">合计</td>
+              <td className="px-2 py-1.5 text-right">{calls.length}</td>
+              <td className="px-2 py-1.5 text-right">{totIn.toLocaleString()}</td>
+              <td className="px-2.5 py-1.5 text-right">{totOut.toLocaleString()}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </IconSection>
+  );
+}
+
+function phaseLabel(phase: string): string {
+  return (
+    {
+      summary: "摘要",
+      collect: "采集",
+      extract: "抽取",
+      analyze: "分析",
+      draft: "撰写",
+      critique: "自检",
+      repair: "修复",
+      review: "质检",
+      retry: "重试",
+      // 实际后端 LLM 调用阶段（structured output 实现细节）
+      tool_call: "结构化抽取",
+      freeform_schema: "自由文本兜底",
+      json_mode: "JSON 模式",
+      freeform: "自由文本",
+    }[phase] ?? phase
+  );
+}
+
 function formatDuration(ms: number | null): string {
   if (ms == null) return "—";
   if (ms < 1000) return `${ms}ms`;
@@ -688,29 +789,29 @@ function buildInputItems(
   const project = state.project;
   const metadata = node?.metadata ?? {};
   const items: Array<{ key: string; value: string }> = [
-    { key: "project", value: project.project_name },
-    { key: "target_product", value: project.target_product },
+    { key: "项目", value: project.project_name },
+    { key: "目标产品", value: project.target_product },
     {
-      key: "competitors",
-      value: project.competitors.length > 0 ? project.competitors.join(", ") : "—",
+      key: "竞品",
+      value: project.competitors.length > 0 ? project.competitors.join("、") : "—",
     },
-    { key: "industry", value: project.industry },
-    { key: "analysis_dimensions", value: project.analysis_dimensions.join(", ") },
+    { key: "行业", value: project.industry },
+    { key: "分析维度", value: formatDimensions(project.analysis_dimensions) },
   ];
 
   if (data.agent === "collector") {
     items.push(
-      { key: "product_name", value: String(metadata.product ?? "—") },
-      { key: "official_url", value: String(metadata.official_url ?? "—") },
+      { key: "产品", value: String(metadata.product ?? "—") },
+      { key: "官网地址", value: String(metadata.official_url ?? "—") },
       {
-        key: "collect_dimensions",
+        key: "采集维度",
         value: Array.isArray(metadata.collect_dimensions)
-          ? metadata.collect_dimensions.join(", ")
+          ? metadata.collect_dimensions.map(collectDimensionLabel).join("、")
           : "—",
       },
       {
-        key: "constraints",
-        value: compactObject(project.collect_constraints),
+        key: "采集约束",
+        value: formatCollectConstraints(project.collect_constraints),
       }
     );
   } else if (data.agent === "extractor") {
@@ -720,36 +821,99 @@ function buildInputItems(
         ? (upstream as CollectorOutput).raw_sources
         : [];
     items.push(
-      { key: "product_name", value: String(metadata.product ?? "—") },
+      { key: "产品", value: String(metadata.product ?? "—") },
       {
-        key: "raw_sources",
-        value: `${rawSources.length} docs from ${node?.input_refs[0] ?? "upstream"}`,
+        key: "采集文档",
+        value: `${rawSources.length} 篇（来自上游采集）`,
       },
-      { key: "industry_schema_id", value: `${project.industry}_v${project.industry_schema_version.split(".")[0]}` }
+      { key: "行业数据版本", value: `${project.industry} v${project.industry_schema_version.split(".")[0]}` }
     );
   } else if (data.agent === "analyst") {
     items.push(
-      { key: "profiles", value: `${countExtractorProfiles(state)} competitor profiles` },
-      { key: "dimensions", value: project.analysis_dimensions.join(", ") }
+      { key: "竞品画像", value: `${countExtractorProfiles(state)} 份` },
+      { key: "分析维度", value: formatDimensions(project.analysis_dimensions) }
     );
   } else if (data.agent === "reporter") {
     items.push(
-      { key: "template_id", value: project.report_template_id },
-      { key: "target_audience", value: project.target_audience ?? "—" },
-      { key: "analysis_input", value: summarizeLatestOutput(state, "analyst") }
+      { key: "报告模板", value: project.report_template_id },
+      { key: "目标读者", value: project.target_audience ?? "—" },
+      { key: "分析结论", value: summarizeLatestOutput(state, "analyst") }
     );
   } else if (data.agent === "qa") {
     items.push(
-      { key: "draft", value: summarizeLatestOutput(state, "reporter") },
-      { key: "analysis", value: summarizeLatestOutput(state, "analyst") },
-      { key: "prior_verdicts", value: `${countPriorVerdicts(state, nodeId)} verdicts` }
+      { key: "报告草稿", value: summarizeLatestOutput(state, "reporter") },
+      { key: "分析结论", value: summarizeLatestOutput(state, "analyst") },
+      { key: "历史质检", value: `${countPriorVerdicts(state, nodeId)} 次` }
     );
   }
+  // 追加后端 input_snapshot 里的「返工信号」—— 上面的人读重建按项目元数据 + 上游产出拼，
+  // 拿不到本轮 invoke 实际收到的 QA 反馈 / 改稿基线 / 排除来源，这几项只有真实快照有。
+  items.push(...reworkSignalItems(state?.outputs[nodeId]));
   return items;
 }
 
-function compactObject(value: unknown): string {
-  return safeStringify(value).replace(/\s+/g, " ").trim();
+/** input_snapshot 里「返工信号」键 → 中文标签（重建态拿不到，只有真实快照有）。 */
+const REWORK_SNAPSHOT_LABELS: Record<string, string> = {
+  qa_feedback: "QA 返工反馈",
+  prior_draft: "改稿基线",
+  exclude_urls: "排除来源",
+  upstream: "上游自评",
+};
+
+function reworkSignalItems(
+  output: AnyAgentOutput | undefined
+): Array<{ key: string; value: string }> {
+  const snap = output?.input_snapshot;
+  if (!snap) return [];
+  return Object.entries(REWORK_SNAPSHOT_LABELS)
+    .filter(([key]) => snap[key])
+    .map(([key, label]) => ({ key: label, value: snap[key] }));
+}
+
+/** 分析维度枚举 → 中文（与建项向导用词一致）。 */
+const DIMENSION_LABELS: Record<string, string> = {
+  feature_comparison: "功能对比",
+  pricing_comparison: "定价对比",
+  user_feedback: "用户口碑",
+  swot: "SWOT",
+  differentiation_opportunities: "差异化机会",
+  positioning: "市场定位",
+};
+
+function formatDimensions(dims: string[]): string {
+  if (!dims || dims.length === 0) return "—";
+  return dims.map((d) => DIMENSION_LABELS[d] ?? d).join("、");
+}
+
+/** 采集维度枚举 → 中文（与证据库来源类型用词一致）。 */
+const COLLECT_DIMENSION_LABELS: Record<string, string> = {
+  homepage: "官网",
+  features: "功能",
+  pricing: "定价页",
+  help_docs: "帮助文档",
+  changelog: "更新日志",
+  customer_cases: "客户案例",
+  blog: "博客",
+  user_reviews: "用户评价",
+  app_market: "应用市场",
+};
+
+function collectDimensionLabel(dim: unknown): string {
+  const key = String(dim);
+  return COLLECT_DIMENSION_LABELS[key] ?? key;
+}
+
+/** 采集约束对象 → 中文摘要（避免暴露 max_pages_per_dimension 等原始字段名）。 */
+function formatCollectConstraints(c: ProjectStateResponse["project"]["collect_constraints"]): string {
+  if (!c) return "—";
+  const parts = [
+    `每维度最多 ${c.max_pages_per_dimension} 页`,
+    `超时 ${c.timeout_seconds} 秒`,
+    c.respect_robots_txt ? "遵守 robots 协议" : "忽略 robots 协议",
+    c.allow_paid_content ? "允许付费内容" : "仅公开内容",
+    c.fallback_to_mock ? "失败回退示例数据" : "失败不回退",
+  ];
+  return parts.join(" · ");
 }
 
 function firstUpstreamOutput(
@@ -764,24 +928,24 @@ function summarizeUpstream(
   nodeId: string,
   output: AnyAgentOutput | undefined
 ): string {
-  if (!output) return "尚未产出 output";
+  if (!output) return "尚未产出";
   if ("raw_sources" in output) {
-    return `Collector output · ${(output as CollectorOutput).raw_sources.length} raw sources`;
+    return `采集产物 · ${(output as CollectorOutput).raw_sources.length} 篇采集文档`;
   }
   if ("evidences" in output) {
     const out = output as ExtractorOutput;
-    return `Extractor output · ${out.profile.basic_info.name} · ${out.evidences.length} evidences`;
+    return `结构化产物 · ${out.profile.basic_info.name} · ${out.evidences.length} 条证据`;
   }
   if ("result" in output) {
-    return `Analyst output · ${Object.keys(output.result.dimensions ?? {}).length} dimensions`;
+    return `分析产物 · ${Object.keys(output.result.dimensions ?? {}).length} 个维度`;
   }
   if ("draft" in output) {
-    return `Reporter output · v${output.draft.version} · ${output.draft.sections.length} sections`;
+    return `报告草稿 · v${output.draft.version} · ${output.draft.sections.length} 个章节`;
   }
   if ("verdict" in output) {
-    return `QA output · ${output.verdict.overall_status} · ${output.verdict.issues.length} issues`;
+    return `质检产物 · ${qaStatusLabel(output.verdict.overall_status)} · ${output.verdict.issues.length} 处问题`;
   }
-  return `${nodeId} · ${output.status}`;
+  return outputStatusLabel(output.status);
 }
 
 function countExtractorProfiles(state: ProjectStateResponse): number {

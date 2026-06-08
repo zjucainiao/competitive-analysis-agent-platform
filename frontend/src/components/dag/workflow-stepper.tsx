@@ -5,7 +5,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   CheckIcon,
   LoaderIcon,
-  AlertTriangleIcon,
+  RotateCwIcon,
   OctagonXIcon,
   FileTextIcon,
   ClockIcon,
@@ -18,6 +18,7 @@ import {
   formatDuration,
   formatTokens,
   formatTokenTotal,
+  formatConfidence,
   type StepVM,
   type StepStatus,
 } from "@/lib/workflow-model";
@@ -118,7 +119,8 @@ function StepDot({ status, order }: { status: StepStatus; order: number }) {
   if (status === "success") icon = <CheckIcon className={cls} />;
   else if (status === "running")
     icon = <LoaderIcon className={cn(cls, "animate-spin")} />;
-  else if (status === "rework") icon = <AlertTriangleIcon className={cls} />;
+  // 返工 = 重处理(↻ 旋转)，不是警告(⚠)——避免「系统在自我改进」被误读成报错。
+  else if (status === "rework") icon = <RotateCwIcon className={cls} />;
   else if (status === "error") icon = <OctagonXIcon className={cls} />;
 
   return (
@@ -203,7 +205,7 @@ export function WorkflowStepper({
                         ? "运行中"
                         : formatDuration(s.durationMs)}
                   </span>
-                  {/* 副标签：多产品 / 返工轮次 */}
+                  {/* 副标签：多产品 / 置信度 / 返工轮次 */}
                   <span className="flex h-4 items-center gap-1">
                     {s.isProductStage && s.productCount > 0 ? (
                       <span
@@ -211,6 +213,16 @@ export function WorkflowStepper({
                         className="rounded-pill bg-bg-sunken px-1.5 text-[10px] text-text-muted"
                       >
                         {s.productCount} 产品
+                      </span>
+                    ) : null}
+                    {s.status !== "pending" &&
+                    s.status !== "running" &&
+                    formatConfidence(s.confidence) ? (
+                      <span
+                        title="该阶段平均置信度（Agent 自评成色，仅供参考）"
+                        className="rounded-pill bg-bg-sunken px-1.5 text-[10px] text-text-muted tabular-nums"
+                      >
+                        置信 {formatConfidence(s.confidence)}
                       </span>
                     ) : null}
                     {s.maxRound > 1 ? (
@@ -281,7 +293,7 @@ function StageDetail({
   const actions = headerRunRef
     ? nodeActionsFor({
         nodeId: headerRunRef,
-        label: `${step.label} Agent`,
+        label: step.label,
         agentName: step.agent,
         status: statusToRun(step.status),
         api,
@@ -293,7 +305,7 @@ function StageDetail({
       {/* header */}
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border-subtle pb-3">
         <h2 className="text-base font-semibold text-text-primary">
-          {step.label} Agent
+          {step.label}
         </h2>
         <span className={cn("text-xs font-medium", TEXT_TONE[step.status])}>
           {STATUS_LABEL[step.status]}
@@ -385,6 +397,14 @@ function ProductInstances({
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary">
                 {inst.product}
               </span>
+              {formatConfidence(inst.confidence) ? (
+                <span
+                  title="该产品本阶段的平均置信度（Agent 自评成色）"
+                  className="shrink-0 rounded-pill bg-bg-sunken px-1.5 text-[10px] text-text-muted tabular-nums"
+                >
+                  置信 {formatConfidence(inst.confidence)}
+                </span>
+              ) : null}
               {metric ? (
                 <span className="shrink-0 font-mono text-xs text-text-secondary tabular-nums">
                   {metric}
@@ -428,7 +448,7 @@ function GlobalRevisionDetail({
   if (!out) {
     return (
       <p className="text-sm text-text-muted">
-        该阶段尚未产出 · 等上游 Agent 完成后开始。
+        该阶段尚未产出 · 等上游阶段完成后开始。
       </p>
     );
   }
@@ -447,7 +467,7 @@ function GlobalRevisionDetail({
       {critique ? (
         <div>
           <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-text-muted">
-            self-critique
+            自我评价
           </div>
           <p className="text-sm leading-relaxed text-text-secondary">
             {critique}
@@ -519,8 +539,9 @@ function ActionButton({ action }: { action: ActionDef }) {
 /* ── output summarizers ──────────────────────────────────────────────── */
 
 function mapInstStatus(s: string): StepStatus {
-  if (s === "success" || s === "partial") return "success";
-  if (s === "needs_rework") return "rework";
+  // needs_rework 是 Agent 自评（信息性），不渲染成返工警告 —— 视作已完成，
+  // 成色交由置信度标注体现（与 workflow-model.mapStatus 保持一致）。
+  if (s === "success" || s === "partial" || s === "needs_rework") return "success";
   if (s === "failed") return "error";
   return "pending";
 }

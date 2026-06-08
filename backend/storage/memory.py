@@ -206,6 +206,16 @@ class InMemoryCheckpointer:
 # ---------- StateStore ----------
 
 
+def _latest_run_id(run_ids) -> str | None:
+    """从一组 run_id(可能含 None)里取「最新一次 run」。
+
+    run_id 是 ULID(按时间单调)，故 max 即最新；全为 None(未迁移数据)时返回 None，
+    与 postgres 的 ``max(run_id) ... IS NOT DISTINCT FROM`` 语义一致(P2-RUNSCOPE)。
+    """
+    reals = [r for r in run_ids if r is not None]
+    return max(reals) if reals else None
+
+
 class InMemoryStateStore:
     """实现 `StateStoreProtocol`。"""
 
@@ -215,8 +225,12 @@ class InMemoryStateStore:
         self._projects: dict[str, Project] = {}
         self._project_updated_at: dict[str, datetime] = {}
         self._plans_by_project: dict[str, list[DAGPlan]] = defaultdict(list)
-        self._node_outputs: dict[tuple[str, str], AgentOutputBase] = {}
-        self._qa_verdicts: dict[str, list[tuple[datetime, QAVerdict]]] = defaultdict(list)
+        # (project_id, node_id) -> (run_id, output)；run_id 用于「最新 run」作用域(P2-RUNSCOPE)
+        self._node_outputs: dict[tuple[str, str], tuple[str | None, AgentOutputBase]] = {}
+        # project_id -> [(ts, run_id, verdict)]
+        self._qa_verdicts: dict[
+            str, list[tuple[datetime, str | None, QAVerdict]]
+        ] = defaultdict(list)
         # project_id -> LLM 调用记录（dict）按追加顺序
         self._llm_calls: dict[str, list[dict]] = defaultdict(list)
         # (project_id, run_id) -> RunSnapshot
@@ -317,40 +331,73 @@ class InMemoryStateStore:
     # ---- NodeOutput ----
 
     async def save_node_output(
-        self, project_id: str, node_id: str, output: AgentOutputBase
+        self,
+        project_id: str,
+        node_id: str,
+        output: AgentOutputBase,
+        *,
+        run_id: str | None = None,
     ) -> None:
         async with self._lock:
-            self._node_outputs[(project_id, node_id)] = output
+            self._node_outputs[(project_id, node_id)] = (run_id, output)
 
     async def get_node_output(
-        self, project_id: str, node_id: str
+        self, project_id: str, node_id: str, *, run_id: str | None = None
     ) -> AgentOutputBase | None:
         async with self._lock:
-            return self._node_outputs.get((project_id, node_id))
+            entry = self._node_outputs.get((project_id, node_id))
+            if entry is None:
+                return None
+            rid, out = entry
+            target = (
+                run_id
+                if run_id is not None
+                else _latest_run_id(
+                    r for (p, _n), (r, _o) in self._node_outputs.items()
+                    if p == project_id
+                )
+            )
+            return out if rid == target else None
 
     async def list_node_outputs(
-        self, project_id: str
+        self, project_id: str, *, run_id: str | None = None
     ) -> dict[str, AgentOutputBase]:
         async with self._lock:
-            return {
-                node_id: out
-                for (pid, node_id), out in self._node_outputs.items()
+            entries = [
+                (node_id, rid, out)
+                for (pid, node_id), (rid, out) in self._node_outputs.items()
                 if pid == project_id
-            }
+            ]
+        target = (
+            run_id
+            if run_id is not None
+            else _latest_run_id(rid for _n, rid, _o in entries)
+        )
+        return {node_id: out for node_id, rid, out in entries if rid == target}
 
     # ---- QAVerdict ----
 
     async def save_qa_verdict(
-        self, project_id: str, verdict: QAVerdict
+        self, project_id: str, verdict: QAVerdict, *, run_id: str | None = None
     ) -> None:
         async with self._lock:
-            self._qa_verdicts[project_id].append((datetime.utcnow(), verdict))
+            self._qa_verdicts[project_id].append(
+                (datetime.utcnow(), run_id, verdict)
+            )
 
-    async def list_qa_verdicts(self, project_id: str) -> list[QAVerdict]:
+    async def list_qa_verdicts(
+        self, project_id: str, *, run_id: str | None = None
+    ) -> list[QAVerdict]:
         async with self._lock:
             items = list(self._qa_verdicts.get(project_id, []))
-        items.sort(key=lambda kv: kv[0], reverse=True)
-        return [v for _ts, v in items]
+        target = (
+            run_id
+            if run_id is not None
+            else _latest_run_id(rid for _ts, rid, _v in items)
+        )
+        scoped = [(ts, v) for ts, rid, v in items if rid == target]
+        scoped.sort(key=lambda kv: kv[0], reverse=True)
+        return [v for _ts, v in scoped]
 
     # ---- LLMCallRecord ----
 

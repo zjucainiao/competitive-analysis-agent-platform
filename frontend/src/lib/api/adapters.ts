@@ -160,9 +160,21 @@ function outputToData(
     confidence: out.confidence ?? base.confidence,
     selfCritique: out.self_critique || base.selfCritique,
     llmCalls: base.llmCalls,
-    inputs: base.inputs,
+    inputs: snapshotToEntries(out.input_snapshot, base.inputs),
     outputs: summarizeOutput(out),
   };
+}
+
+/** 后端 input_snapshot（{key: 摘要}）→ node detail 的 KV 列表。
+ *  缺省（旧数据/未填充）时退回 base.inputs（mock 演示态）。 */
+function snapshotToEntries(
+  snap: Record<string, string> | undefined,
+  fallback: DagNodeData["inputs"]
+): DagNodeData["inputs"] {
+  if (!snap) return fallback;
+  const entries = Object.entries(snap);
+  if (entries.length === 0) return fallback;
+  return entries.map(([key, value]) => ({ key, value }));
 }
 
 function summarizeOutput(out: AnyAgentOutput): DagNodeData["outputs"] {
@@ -361,6 +373,27 @@ export function findLatestReporter(
     nodeId: bestNodeId,
     output: outputs[bestNodeId] as ReporterOutput,
   };
+}
+
+/** 发布择优：优先返回「历史最优轮」reporter（与后端 best_round_reporter_key / markdown
+ * 导出同口径），让用户「看到的」就是「发布的」最优轮，而非最后一轮。
+ *
+ * ``bestRound`` 为 1-based 轮次（来自 ``ProjectMetrics.best_round``；0/缺省=无 verdict）。
+ * 第 1 轮落键 ``reporter``，第 r 轮落键 ``reporter_v{r}``。该版本不存在 → 退回最新一版
+ * （``findLatestReporter``），与后端 fallback 行为一致。调用方仅在 run **已结束**时传
+ * bestRound（运行中传 null）：返工途中仍看最新在产版本，跑完才落定最优轮。 */
+export function findBestReporter(
+  outputs: Record<string, AnyAgentOutput>,
+  bestRound: number | null | undefined
+): { nodeId: string; output: ReporterOutput } | null {
+  if (bestRound && bestRound >= 1) {
+    const key = bestRound === 1 ? "reporter" : `reporter_v${bestRound}`;
+    const out = outputs[key];
+    if (out && "draft" in out) {
+      return { nodeId: key, output: out as ReporterOutput };
+    }
+  }
+  return findLatestReporter(outputs);
 }
 
 /** 列出所有 reporter 版本节点（用于 v1↔v2 diff tab） */

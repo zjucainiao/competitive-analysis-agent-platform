@@ -130,6 +130,57 @@ def test_run_state_view_live_after_native_run(native_client: TestClient) -> None
     assert view["qa_round"] >= 1
 
 
+def test_run_state_overlays_node_output_edits(
+    native_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1-NODEOUTPUTS-VS-CHECKPOINT：人工编辑写进 node_outputs 后，/run-state 应反映它，
+
+    而不是一直显示 checkpoint 里的旧内容。用 monkeypatch 让 list_node_outputs 返回一份
+    被编辑过的 reporter(summary 改了)，断言视图 outputs['reporter'] 取到编辑后的内容。
+    """
+    from backend.schemas import ReportDraft, ReporterOutput
+
+    headers = _register(native_client, "dave@example.com")
+    pid = _create_project(native_client, headers)
+    _run_to_completion(native_client, pid, headers)
+
+    edited = ReporterOutput(
+        agent_name="reporter",
+        agent_version="1.0.0",
+        task_id="reporter",
+        trace_id="t",
+        span_id="s",
+        status="success",
+        confidence=0.9,
+        self_critique="",
+        tokens_input=0,
+        tokens_output=0,
+        cost_usd=0.0,
+        duration_ms=0,
+        errors=[],
+        draft=ReportDraft(
+            report_id="rpt_1",
+            version=1,
+            template_id="standard_v1",
+            sections=[],
+            summary="HUMAN_EDITED_SUMMARY",
+            metadata={},
+        ),
+    )
+    store = native_client.app.state.storage.state_store
+
+    async def _fake_list(project_id: str):  # noqa: ANN202
+        return {"reporter": edited}
+
+    monkeypatch.setattr(store, "list_node_outputs", _fake_list)
+
+    r = native_client.get(f"/api/projects/{pid}/run-state", headers=headers)
+    assert r.status_code == 200, r.text
+    view = r.json()
+    # 持久化(编辑后) node_outputs 覆盖 checkpoint 同名 ref → 视图取到编辑内容
+    assert view["outputs"]["reporter"]["draft"]["summary"] == "HUMAN_EDITED_SUMMARY"
+
+
 def test_run_view_historical_has_populated_history(native_client: TestClient) -> None:
     headers = _register(native_client, "bob@example.com")
     pid = _create_project(native_client, headers)

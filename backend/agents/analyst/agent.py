@@ -16,6 +16,8 @@ LLM 路径仍要求 response_format=DimensionAnalysis，并复用 _post_validate
 
 from __future__ import annotations
 
+import contextvars
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -53,6 +55,11 @@ class Analyst(BaseAgent[AnalystInput, AnalystOutput]):
     input_model: ClassVar[type[BaseModel]] = AnalystInput
     output_model: ClassVar[type[BaseModel]] = AnalystOutput
     required_tools: ClassVar[list[str]] = []  # evidence retrieval 可选，v1 不强制
+
+    # 各维度 LLM 分析相互独立 → 并行执行，墙钟从 Σ(各维度) 降到 ~最慢单维度。
+    # 关键：串行 6 个 Doubao 结构化输出（含 freeform 兜底 ~55s/次）会顶破节点
+    # 120s 超时 → 重试从头跑 → 永远完不成。并行后 ~最慢维度即可收敛。
+    MAX_DIMENSION_WORKERS: ClassVar[int] = 6
 
     # confidence 调参
     BASE_CONFIDENCE: ClassVar[float] = 0.9
@@ -141,18 +148,21 @@ class Analyst(BaseAgent[AnalystInput, AnalystOutput]):
                 )
             )
 
-        for dimension in inp.dimensions:
+        # 单维度工作单元：用本地 errors 列表（线程安全），返回 (维度, 结果, dropped, 本地errors)
+        def _run_one(
+            dimension: AnalysisDimension,
+        ) -> tuple[AnalysisDimension, DimensionAnalysis, int, list[AgentError]]:
+            local_errors: list[AgentError] = []
             analysis = self._analyze_one(
                 dimension=dimension,
                 inp=inp,
                 valid_pool=valid_pool,
                 allow_llm=allow_llm,
-                errors=errors,
+                errors=local_errors,
             )
             cleaned, dropped = self._scrub_claims(analysis, valid_pool)
-            total_dropped += dropped
             if dropped:
-                errors.append(
+                local_errors.append(
                     AgentError(
                         code="INSUFFICIENT_EVIDENCE",
                         message=(
@@ -163,7 +173,30 @@ class Analyst(BaseAgent[AnalystInput, AnalystOutput]):
                         retriable=False,
                     )
                 )
+            return dimension, cleaned, dropped, local_errors
+
+        dims = list(inp.dimensions)
+        if not allow_llm or len(dims) <= 1:
+            # mock / 单维度：串行（无并发开销，且确定性）
+            dim_results = [_run_one(d) for d in dims]
+        else:
+            # 每维度 copy_context()：把 LLM trace contextvar（node_id/trace_id）带进
+            # worker 线程，否则并发产生的 LLM call 会丢失 node 归属（同 collector）。
+            contexts = [contextvars.copy_context() for _ in dims]
+            with ThreadPoolExecutor(
+                max_workers=min(len(dims), self.MAX_DIMENSION_WORKERS)
+            ) as pool:
+                futures = [
+                    pool.submit(ctx.run, _run_one, dim)
+                    for dim, ctx in zip(dims, contexts)
+                ]
+                # 按提交顺序取结果 → per_dim / errors 顺序与串行一致（确定性）
+                dim_results = [f.result() for f in futures]
+
+        for dimension, cleaned, dropped, local_errors in dim_results:
             per_dim[dimension] = cleaned
+            total_dropped += dropped
+            errors.extend(local_errors)
 
         result = AnalysisResult(
             target_product=inp.target_product,

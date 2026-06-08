@@ -39,6 +39,13 @@ class CollectorInput(AgentInputBase):
         description="QA 反馈对象的序列化，类型为 QAFeedback；用 dict 避免循环依赖",
     )
 
+    # P4 返工收敛：QA 标 identity mismatch 的源 URL，重采时直接跳过，
+    # 避免又把同一个跑题页面抓回来（由 build_collector_input 从 qa_feedback 提取）。
+    exclude_source_urls: list[str] = Field(
+        default_factory=list,
+        description="本轮重采需排除的源 URL（上一轮被 QA 判为身份不符的页面）",
+    )
+
 
 class CollectorOutput(AgentOutputBase):
     raw_sources: list[RawSourceDoc] = Field(default_factory=list)

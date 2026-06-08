@@ -23,6 +23,7 @@ from backend.api.deps import (
     get_storage,
 )
 from backend.observability.llm_call_log import list_calls
+from backend.orchestrator.metrics import best_round_reporter_key
 from backend.schemas import Project, ProjectStatus, ReporterOutput, User
 from backend.schemas.labels import industry_label
 from backend.schemas.project import ProjectMetricsSnapshot
@@ -262,7 +263,10 @@ async def export_project(
     """
     plan = await storage.state_store.get_dag_plan(project_id)
     outputs = await storage.state_store.list_node_outputs(project_id)
-    verdicts = await storage.state_store.list_qa_verdicts(project_id)
+    # list_qa_verdicts 按 created_at **DESC**(最新在前)返回；而 best_round_reporter_key /
+    # 审计附录 verdicts[-1] 都按「轮次升序」理解 → 这里翻成升序(round1..roundN)再用，
+    # 否则会选错 reporter 版本、附录也会把最旧 verdict 当最新(P1P2-VERDICT-ORDER)。
+    verdicts = list(reversed(await storage.state_store.list_qa_verdicts(project_id)))
 
     if fmt == "json":
         payload = {
@@ -374,17 +378,18 @@ def _render_markdown(
     「方法论与数据可信度」附录（全量 evidence 索引 + QA verdict + 运行指标），
     供数据团队 / 内部复核使用。
     """
-    final_key = "reporter"
-    versioned = sorted(
-        (k for k in outputs if k.startswith("reporter_v")), reverse=True
-    )
-    if versioned:
-        final_key = versioned[0]
+    # 发布择优(A4)：导出维度均分最高那一轮，而非简单的最后一轮（避免返工把质量
+    # 改差却照发）。无 verdict 时 best_round_reporter_key 退回「最高 revision」旧行为。
+    final_key = best_round_reporter_key(outputs, verdicts)
     reporter_out = outputs.get(final_key)
 
-    # evidence_id -> Evidence（汇聚所有 extract.* 节点的产出）
+    # evidence_id -> Evidence（汇聚所有 extract.* 节点的产出）。
+    # 先收敛到每产品最新轮：返工重抽后 extract.X 与 extract.X_v2 并存，否则审计附录
+    # 会把 v1/v2 同一产品的证据重复列出。best_round_reporter_key 仍吃完整 outputs。
+    from backend.orchestrator.run_state import latest_outputs
+
     ev_by_id: dict[str, Any] = {}
-    for nid, out in outputs.items():
+    for nid, out in latest_outputs(outputs).items():
         if not nid.startswith("extract."):
             continue
         for ev in getattr(out, "evidences", None) or []:

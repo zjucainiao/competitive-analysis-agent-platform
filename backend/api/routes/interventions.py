@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -18,6 +19,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.api.deps import get_orchestrator, get_owned_project, get_storage
 from backend.orchestrator import Orchestrator
+from backend.orchestrator.metrics import best_round_reporter_key
+from ulid import ULID
+
 from backend.schemas import (
     DAGNode,
     NodeStatus,
@@ -25,6 +29,7 @@ from backend.schemas import (
     ProjectMetrics,
     ProjectStatus,
     ReporterOutput,
+    RunRef,
 )
 from backend.storage import Storage
 
@@ -63,13 +68,59 @@ async def _cancel_running_task(request: Request, project_id: str) -> bool:
     return False
 
 
-def _latest_reporter_key(outputs: dict[str, Any]) -> str:
-    """outputs 里取 revision 最高的 reporter 节点 id。"""
-    versioned = sorted(
-        (k for k in outputs if k.startswith("reporter_v")),
-        reverse=True,
+def _is_native() -> bool:
+    return os.getenv("ORCH_ENGINE", "native") == "native"
+
+
+async def _start_fresh_native_run(
+    orch: Orchestrator,
+    storage: Storage,
+    request: Request,
+    project: Any,
+    *,
+    seed_state: dict[str, Any] | None = None,
+) -> str:
+    """新建一次 run 身份(RunRef) + 后台从头跑 native，可带 ``seed_state`` 注入定向意图
+    (P1-INTERVENE 的 prompt_override / P1-AUTOREWORK 的 rework 种子)。返回 run_id。
+
+    run_id 贯穿 checkpoint thread / node_outputs 作用域 / 快照主键 / live-read，与
+    start_run 一致(P2-RUNSCOPE)。
+    """
+    await _cancel_running_task(request, project.project_id)
+    new_plan = orch.plan(project)
+    run_id = f"run_{ULID()}"
+    new_run = RunRef(
+        run_id=run_id,
+        plan_id=new_plan.plan_id,
+        started_at=datetime.now(timezone.utc),
+        final_status=None,
     )
-    return versioned[0] if versioned else "reporter"
+    project_with_run = project.model_copy(
+        update={
+            "runs": list(project.runs) + [new_run],
+            "status": ProjectStatus.RUNNING,
+        }
+    )
+    await storage.state_store.save_project(project_with_run)
+
+    async def _bg() -> None:
+        try:
+            async for _ in orch.run(
+                new_plan, project_with_run, run_id=run_id, seed_state=seed_state
+            ):
+                pass
+            await storage.state_store.update_project_status(
+                project.project_id, ProjectStatus.DONE
+            )
+        except Exception:  # noqa: BLE001
+            _log.exception("native rerun failed project=%s", project.project_id)
+            await storage.state_store.update_project_status(
+                project.project_id, ProjectStatus.FAILED
+            )
+
+    task = asyncio.create_task(_bg(), name=f"rerun-{project.project_id}")
+    request.app.state.running_tasks[project.project_id] = task
+    return run_id
 
 
 def _count_paragraphs(reporter_out: ReporterOutput) -> int:
@@ -138,7 +189,9 @@ async def override_qa(
     await storage.state_store.save_dag_plan(plan.model_copy(update={"nodes": new_nodes}))
 
     overridden_verdict_id: str | None = None
-    verdicts = await storage.state_store.list_qa_verdicts(project_id)
+    # list_qa_verdicts 按 created_at DESC(最新在前)返回 → 翻成升序后 [-1] 才是最新一轮，
+    # 否则会把最旧那条 verdict 当作"最新"去 override(P1P2-VERDICT-ORDER)。
+    verdicts = list(reversed(await storage.state_store.list_qa_verdicts(project_id)))
     if verdicts:
         last = verdicts[-1]
         overridden = last.model_copy(update={"blocking": False})
@@ -146,7 +199,10 @@ async def override_qa(
         overridden_verdict_id = last.verdict_id
 
     outputs = await storage.state_store.list_node_outputs(project_id)
-    final_reporter_key = _latest_reporter_key(outputs)
+    # 发布择优：用户接受时落定的是**历史最优轮**报告（与 markdown 导出 meta.py 同口径），
+    # 而非最后一轮——避免「返工反而变差却照发最后一版」。verdicts 已按轮次升序，
+    # 无 verdict / 无改善时 best_round_reporter_key 退回「最高 revision」(旧行为)。
+    final_reporter_key = best_round_reporter_key(outputs, verdicts)
     reporter_out = outputs.get(final_reporter_key)
     total_paragraphs = _count_paragraphs(reporter_out) if isinstance(reporter_out, ReporterOutput) else 0
     new_metrics = _bump_manual_edits(project, total_paragraphs)
@@ -226,14 +282,26 @@ async def retry_node(
     node_id: str,
     request: Request,
     storage: Storage = Depends(get_storage),
+    orch: Orchestrator = Depends(get_orchestrator),
 ) -> NodeActionResponse:
-    """重跑节点：把节点状态置回 PENDING + 重置所有传递下游为 PENDING。
+    """重跑节点。
 
-    需要先停掉 in-flight run task；前端可立刻触发 POST /run 重新启动调度。
+    native(默认)：固定 5 阶段流水线无「单节点重跑」语义，retry 直接**从头重跑**一遍
+    (新 run 身份，节点真正重新执行)，避免只改 native 不消费的 DAGPlan 而按钮空转
+    (P1-INTERVENE)。legacy：保留旧行为(置节点 PENDING + 重置下游，由 executor 续跑)。
     """
     project = await storage.state_store.get_project(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
+
+    if _is_native():
+        await _start_fresh_native_run(orch, storage, request, project)
+        return NodeActionResponse(
+            project_id=project_id,
+            node_id=node_id,
+            new_status=NodeStatus.PENDING,
+            affected_downstream=[],
+        )
 
     await _cancel_running_task(request, project_id)
 
@@ -282,6 +350,17 @@ async def skip_node(
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
 
+    if _is_native():
+        # native 是固定 5 阶段流水线，无「单节点跳过」语义。诚实返回 409 而非静默改
+        # 一份 native 不执行的 DAGPlan、让按钮假装成功(P1-INTERVENE)。
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "native 引擎是固定流水线，不支持单节点 skip；"
+                "如需调整请用 retry 重跑或 edit-prompt 改写提示词。"
+            ),
+        )
+
     plan = await _load_plan_or_404(storage, project_id)
     if not any(n.node_id == node_id for n in plan.nodes):
         raise HTTPException(status_code=404, detail=f"node {node_id!r} not found")
@@ -315,6 +394,16 @@ async def force_start_node(
     project = await storage.state_store.get_project(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
+
+    if _is_native():
+        # 同 skip：native 固定流水线无「强制启动单节点」语义。
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "native 引擎是固定流水线，不支持单节点 force-start；"
+                "如需重跑请用 retry。"
+            ),
+        )
 
     plan = await _load_plan_or_404(storage, project_id)
     target = next((n for n in plan.nodes if n.node_id == node_id), None)
@@ -368,19 +457,41 @@ async def edit_prompt_and_rerun(
     req: EditPromptRequest,
     request: Request,
     storage: Storage = Depends(get_storage),
+    orch: Orchestrator = Depends(get_orchestrator),
 ) -> NodeActionResponse:
     """用户覆盖该节点默认 prompt 后重跑。
 
-    实现：往该节点 metadata 写入 `user_prompt_override`，然后等同 retry。
-    Agent 内部是否真消费此字段取决于各 Agent 实现（v1 由 BaseAgent 在 invoke 时
-    把它 merge 进 qa_feedback 字段透传，Agent prompt 模板里读取 ``{user_prompt_override}``）。
+    native 引擎(默认)：把 override 经 ``seed_state.prompt_override_by_node`` 注入一次
+    **从头重跑**的 RunState —— 对应节点跑到时由 run_agent_node 把它注入 ContextVar →
+    system prompt(P1-INTERVENE：之前只写 DAGPlan.metadata，native 根本不读)。
+    legacy 引擎：保留旧行为(写节点 metadata + 重置下游，由 executor 续跑时读取)。
     """
+    from backend.orchestrator.run_state import split_versioned
+
     project = await storage.state_store.get_project(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
 
-    await _cancel_running_task(request, project_id)
+    if _is_native():
+        # node_id(投影 id，可能带 _v2)→ prompt_override_by_node 的逻辑键(去版本后缀)。
+        # 例：reporter_v2→reporter、collect.Notion_v2→collect.Notion、analyst→analyst。
+        override_key, _ = split_versioned(node_id)
+        await _start_fresh_native_run(
+            orch,
+            storage,
+            request,
+            project,
+            seed_state={"prompt_override_by_node": {override_key: req.prompt_override}},
+        )
+        return NodeActionResponse(
+            project_id=project_id,
+            node_id=node_id,
+            new_status=NodeStatus.PENDING,
+            affected_downstream=[],
+        )
 
+    # ---- legacy 引擎：写节点 metadata + 重置下游（由 executor 续跑读取）----
+    await _cancel_running_task(request, project_id)
     plan = await _load_plan_or_404(storage, project_id)
     target = next((n for n in plan.nodes if n.node_id == node_id), None)
     if target is None:
@@ -547,11 +658,27 @@ async def restart_run(
     cancelled = await _cancel_running_task(request, project_id)
 
     new_plan = orch.plan(project)
-    await storage.state_store.update_project_status(project_id, ProjectStatus.RUNNING)
+    # 新建一次 run 身份(RunRef)：让 run_id 贯穿 checkpoint thread / node_outputs 作用域 /
+    # 快照主键 / 后续 live-read，与 start_run 一致(P2-RUNSCOPE：否则 restart 写一条 thread、
+    # live-read 仍读旧 run 那条)。
+    run_id = f"run_{ULID()}"
+    new_run = RunRef(
+        run_id=run_id,
+        plan_id=new_plan.plan_id,
+        started_at=datetime.now(timezone.utc),
+        final_status=None,
+    )
+    project_with_run = project.model_copy(
+        update={
+            "runs": list(project.runs) + [new_run],
+            "status": ProjectStatus.RUNNING,
+        }
+    )
+    await storage.state_store.save_project(project_with_run)
 
     async def _run_in_bg() -> None:
         try:
-            async for _ in orch.run(new_plan, project):
+            async for _ in orch.run(new_plan, project_with_run, run_id=run_id):
                 pass
             await storage.state_store.update_project_status(project_id, ProjectStatus.DONE)
         except Exception:  # noqa: BLE001

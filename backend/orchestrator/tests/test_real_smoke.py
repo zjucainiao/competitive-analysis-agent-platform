@@ -1,4 +1,4 @@
-"""真实 LLM smoke 测试 —— 验证 ``AgentRegistry.from_env(mode="real")`` 装配
+"""真实 LLM smoke 测试 —— 验证 ``AgentRegistry.from_env()`` 装配
 出的 Agent 可以发起并完成一次真实 LLM 调用。
 
 默认 skip：必须显式设置 ``RUN_REAL_LLM_TESTS=1`` 才跑（避免 CI 烧 token）。
@@ -51,7 +51,7 @@ pytestmark = pytest.mark.skipif(
 @pytest.mark.slow
 def test_real_analyst_invocation_succeeds() -> None:
     """最便宜的端到端验证：用 fixture profile 喂给真实 Analyst，要 LLM 返回合规 JSON。"""
-    registry = AgentRegistry.from_env(mode="real")
+    registry = AgentRegistry.from_env()
     analyst = registry.get("analyst")
     assert analyst.mock is False, "real mode should not return mock agent"
     assert analyst.llm is not None
@@ -76,7 +76,7 @@ def test_real_qa_invocation_succeeds() -> None:
     """QA real 模式：跑一遍 checker pipeline（含 LLM 调用）。"""
     from backend.agents.qa.fixtures import load_demo_input as load_qa_input
 
-    registry = AgentRegistry.from_env(mode="real")
+    registry = AgentRegistry.from_env()
     qa = registry.get("qa")
     assert qa.mock is False
 

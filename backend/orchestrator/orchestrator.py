@@ -35,7 +35,13 @@ import logging
 import os
 from typing import Any, AsyncIterator
 
+from backend.agents._progress import (
+    reset_collect_progress_emitter,
+    set_collect_progress_emitter,
+)
+
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command
 from ulid import ULID
 
 from backend.schemas import (
@@ -61,6 +67,18 @@ from .planner import Planner
 from .state import OrchestratorState
 
 _log = logging.getLogger(__name__)
+
+
+def native_thread_config(project_id: str, run_id: str | None) -> dict:
+    """native 引擎的 LangGraph checkpoint thread 配置。
+
+    P2-RUNSCOPE：每次 run 用独立 thread ``{project_id}::{run_id}``，避免同项目多次
+    运行经 channel reducer 累积进同一 thread（旧轮 outputs/history 污染新 run 的
+    live 视图与指标）。``run_id`` 缺省时退回 ``project_id``（向后兼容：未走 RunRef
+    的直接调用 / 老数据）。读 / 续跑侧须用同一 run_id 复算，才能命中同一条 thread。
+    """
+    thread_id = f"{project_id}::{run_id}" if run_id else project_id
+    return {"configurable": {"thread_id": thread_id}}
 
 _DEFAULT_MAX_PARALLEL = 4
 
@@ -96,19 +114,34 @@ class Orchestrator:
         self,
         plan: DAGPlan,
         project: Project,
+        *,
+        run_id: str | None = None,
+        seed_state: dict[str, Any] | None = None,
     ) -> AsyncIterator[NodeExecutionResult]:
         """执行 DAG，每个节点完成时 yield 一个 ``NodeExecutionResult``。
+
+        ``seed_state``：native 引擎下并入初始 ``RunState`` 的额外字段（P1-INTERVENE 的
+        ``prompt_override_by_node`` / P1-AUTOREWORK 的 ``rework_target`` /
+        ``qa_feedback_by_node`` / 预填 ``outputs`` 等），让从头跑的 run 携带定向意图。
+        legacy 引擎忽略。
 
         持久化语义：
         - DAGPlan 一次 ``save_dag_plan``
         - 每个节点完成后 ``save_node_output`` + ``publish(project:{pid}:nodes, result)``
         - LangGraph 自动 checkpoint state（thread_id=project_id）
 
+        ``run_id``：调用方(API start_run)已为本次 run 生成的标识，用作 RunRef /
+        RunSnapshot 主键 / URL。传入则 native ``RunState.run_id`` 复用它，保证
+        LIVE 视图(读 checkpoint)与 历史/快照/URL 的 run identity 一致(修 P2-a)；
+        不传则 native 自行生成。
+
         引擎选择由 ``ORCH_ENGINE`` 环境变量控制（默认 ``native``，Phase 2 起）：
         ``ORCH_ENGINE=legacy`` 显式回退旧引擎；未设或设为 ``native`` 走原生 LangGraph 图。
         """
         if os.getenv("ORCH_ENGINE", "native") == "native":
-            async for r in self._run_native(plan, project):
+            async for r in self._run_native(
+                plan, project, run_id=run_id, seed_state=seed_state
+            ):
                 yield r
             return
 
@@ -132,6 +165,9 @@ class Orchestrator:
         self,
         plan: DAGPlan,
         project: Project,
+        *,
+        run_id: str | None = None,
+        seed_state: dict[str, Any] | None = None,
     ) -> AsyncIterator[NodeExecutionResult]:
         """原生 LangGraph 引擎执行(``ORCH_ENGINE=native``)。
 
@@ -158,13 +194,24 @@ class Orchestrator:
             project=project,
             checkpointer=to_langgraph_saver(self.storage.checkpointer),
         )
+        # RunState.run_id 总要有值(身份字段)；未传则生成。
+        # 但 checkpoint thread 与 node_outputs 作用域只在**显式传入** run_id 时按它隔离
+        # ——production 的 start_run 必传 run_id 且建了 RunRef，resume 能经
+        # project.runs[-1] 复算同一 thread；测试 / 直接调用不传时退回 thread=project_id
+        # (与 resume 的回退一致，避免 run 写一条 thread、resume 找另一条)。
         init = _RunState(
             project_id=project.project_id,
-            run_id=f"run_{ULID()}",
+            run_id=run_id or f"run_{ULID()}",
             analysis_mode=project.analysis_mode.value,
             products=[project.target_product, *project.competitors],
         ).model_dump()
-        async for res in self._stream_native(graph, init, project):
+        if seed_state:
+            # 并入定向意图(prompt_override_by_node / rework_target / 预填 outputs 等)；
+            # 只认 RunState 已声明的字段，避免脏键进 checkpoint。
+            for k, v in seed_state.items():
+                if k in init:
+                    init[k] = v
+        async for res in self._stream_native(graph, init, project, run_id=run_id):
             yield res
 
     async def _resume_native(
@@ -183,7 +230,54 @@ class Orchestrator:
             project=project,
             checkpointer=to_langgraph_saver(self.storage.checkpointer),
         )
-        async for res in self._stream_native(graph, None, project):
+        # 续跑要落到「当前 run」那条 checkpoint thread（= 最近一次 RunRef 的 run_id）。
+        run_id = project.runs[-1].run_id if project.runs else None
+        async for res in self._stream_native(graph, None, project, run_id=run_id):
+            yield res
+
+    async def rework_native(
+        self,
+        project: Project,
+        *,
+        qa_feedback_by_node: dict[str, dict],
+        rework_target: str = "reporter",
+    ) -> AsyncIterator[NodeExecutionResult]:
+        """对**已完成**的 native run 触发一次定向返工（P1-AUTOREWORK）。
+
+        从「当前 run」的 checkpoint 用 ``Command(goto=<target 入口>)`` 重新进入图，并把
+        ``qa_feedback_by_node`` / 自增的 ``qa_round`` / ``rework_target`` 注入 state——
+        于是只重跑该 target 及其下游（reporter→qa），collect/extract/analyst 复用 checkpoint
+        既有产物，是真正的「定向返工」，而非从 collect 重跑整个项目。
+
+        无 checkpoint（项目从未跑过 native / 无 RunRef）时不产出任何结果（调用方据此
+        判断没触发）。``qa_feedback_by_node`` 的键须用 native 逻辑名（``reporter`` 等），
+        与节点读取约定一致。
+        """
+        from .graph import build_native_graph
+        from .routing import _AGENT_TO_ENTRY
+
+        run_id = project.runs[-1].run_id if project.runs else None
+        graph = build_native_graph(
+            self.registry,
+            project=project,
+            checkpointer=to_langgraph_saver(self.storage.checkpointer),
+        )
+        config = native_thread_config(project.project_id, run_id)
+        snap = await graph.aget_state(config)
+        values = getattr(snap, "values", None) or {}
+        if not values:
+            return  # 无 checkpoint，无法定向返工
+        entry = _AGENT_TO_ENTRY.get(rework_target, "reporter")
+        cmd = Command(
+            goto=entry,
+            update={
+                "qa_feedback_by_node": qa_feedback_by_node,
+                "rework_target": rework_target,
+                "rework_products": [],
+                "qa_round": int(values.get("qa_round", 0) or 0) + 1,
+            },
+        )
+        async for res in self._stream_native(graph, cmd, project, run_id=run_id):
             yield res
 
     async def _stream_native(
@@ -191,6 +285,8 @@ class Orchestrator:
         graph: Any,
         init: dict[str, Any] | None,
         project: Project,
+        *,
+        run_id: str | None = None,
     ) -> AsyncIterator[NodeExecutionResult]:
         """原生图流式执行 + 持久化(首跑/续跑共用)。
 
@@ -207,77 +303,111 @@ class Orchestrator:
         from .projection import _node_id, run_state_to_dagplan
         from .run_state import RunState as _RunState
 
-        config = {"configurable": {"thread_id": project.project_id}}
+        # P2-RUNSCOPE：每次 run 用独立 checkpoint thread(project_id::run_id)，避免
+        # 同项目多次运行经 reducer 累积进同一 thread → 旧轮 outputs/history 污染新 run。
+        config = native_thread_config(project.project_id, run_id)
         channel = f"project:{project.project_id}:nodes"
 
         seen: dict[str, int] = {}  # ref -> id() of last-persisted output object
         seen_failed: set[str] = set()  # 已广播过的失败节点 node_id
         final_state: dict[str, Any] | None = None
-        async for snap in graph.astream(init, config=config, stream_mode="values"):
-            final_state = snap
-            for ref, out in snap["outputs"].items():
-                if out is None:
-                    continue
-                if seen.get(ref) == id(out):  # already persisted THIS exact output object
-                    continue
-                seen[ref] = id(out)
-                # 先落盘后广播：避免 WS 拿到尚未持久化的引用。
-                await self.storage.state_store.save_node_output(
-                    project.project_id, ref, out
-                )
-                res = NodeExecutionResult(
-                    project_id=project.project_id,
-                    node_id=ref,
-                    status=NodeStatus.SUCCESS,
-                    output=out,
-                )
-                # gap 3:顺带把该节点本轮 LLM 调用流水从 ring buffer 落库
-                # (observability 永不阻塞主流程)。
-                try:
-                    await self._persist_node_llm_calls(project.project_id, res)
-                except Exception as exc:  # noqa: BLE001
-                    _log.warning("native _persist_node_llm_calls failed: %s", exc, exc_info=True)
-                await self.storage.event_bus.publish(channel, res)
-                yield res
 
-            # gap 1:广播失败节点。history 里 status=="failed" 的项尚未在 outputs
-            # 出现(output=None),不广播则前端永远卡"运行中"。
-            for run in snap.get("history", []):
-                status = getattr(run, "status", None) or (
-                    run.get("status") if isinstance(run, dict) else None
+        # 采集实时进度：collector 在 worker 线程里逐条产出来源时调
+        # ``emit_collect_progress`` → 经此回调用 run_coroutine_threadsafe 调回主 loop
+        # 广播到同一 channel（用 metadata.kind 区分，复用 NodeExecutionResult 不改 schema）。
+        loop = asyncio.get_running_loop()
+        _bus = self.storage.event_bus
+
+        def _emit_collect_progress(payload: dict[str, Any]) -> None:
+            product = payload.get("product")
+            node_id = f"collect.{product}" if product else "collect"
+            res = NodeExecutionResult(
+                project_id=project.project_id,
+                node_id=node_id,
+                status=NodeStatus.RUNNING,
+                output=None,
+                metadata={"kind": "collect_progress", **payload},
+            )
+            try:
+                fut = asyncio.run_coroutine_threadsafe(
+                    _bus.publish(channel, res), loop
                 )
-                if status != "failed":
-                    continue
-                node = getattr(run, "node", None) or (
-                    run.get("node") if isinstance(run, dict) else None
-                )
-                product = getattr(run, "product", None) if not isinstance(
-                    run, dict
-                ) else run.get("product")
-                round_ = getattr(run, "round", None) if not isinstance(
-                    run, dict
-                ) else run.get("round", 1)
-                if node is None:
-                    continue
-                nid = _node_id(node, product, round_ or 1)
-                if nid in seen_failed:
-                    continue
-                seen_failed.add(nid)
-                fail_res = NodeExecutionResult(
-                    project_id=project.project_id,
-                    node_id=nid,
-                    status=NodeStatus.FAILED,
-                )
-                # plan 此刻可能尚未落库(占位 plan 被跳过),update_node_status
-                # 会 KeyError;包 try/except,纯观测不阻塞。
-                try:
-                    await self.storage.state_store.update_node_status(
-                        project.project_id, nid, NodeStatus.FAILED
+                # 取回异常避免「Future exception was never retrieved」噪音(纯观测)。
+                fut.add_done_callback(lambda f: f.exception())
+            except Exception:  # noqa: BLE001
+                pass
+
+        emit_token = set_collect_progress_emitter(_emit_collect_progress)
+        try:
+            async for snap in graph.astream(
+                init, config=config, stream_mode="values"
+            ):
+                final_state = snap
+                for ref, out in snap["outputs"].items():
+                    if out is None:
+                        continue
+                    if seen.get(ref) == id(out):  # already persisted THIS exact output object
+                        continue
+                    seen[ref] = id(out)
+                    # 先落盘后广播：避免 WS 拿到尚未持久化的引用。run_id 标记产出归属本次 run。
+                    await self.storage.state_store.save_node_output(
+                        project.project_id, ref, out, run_id=run_id
                     )
-                except Exception:  # noqa: BLE001
-                    pass
-                await self.storage.event_bus.publish(channel, fail_res)
-                yield fail_res
+                    res = NodeExecutionResult(
+                        project_id=project.project_id,
+                        node_id=ref,
+                        status=NodeStatus.SUCCESS,
+                        output=out,
+                    )
+                    # gap 3:顺带把该节点本轮 LLM 调用流水从 ring buffer 落库
+                    # (observability 永不阻塞主流程)。
+                    try:
+                        await self._persist_node_llm_calls(project.project_id, res)
+                    except Exception as exc:  # noqa: BLE001
+                        _log.warning("native _persist_node_llm_calls failed: %s", exc, exc_info=True)
+                    await self.storage.event_bus.publish(channel, res)
+                    yield res
+
+                # gap 1:广播失败节点。history 里 status=="failed" 的项尚未在 outputs
+                # 出现(output=None),不广播则前端永远卡"运行中"。
+                for run in snap.get("history", []):
+                    status = getattr(run, "status", None) or (
+                        run.get("status") if isinstance(run, dict) else None
+                    )
+                    if status != "failed":
+                        continue
+                    node = getattr(run, "node", None) or (
+                        run.get("node") if isinstance(run, dict) else None
+                    )
+                    product = getattr(run, "product", None) if not isinstance(
+                        run, dict
+                    ) else run.get("product")
+                    round_ = getattr(run, "round", None) if not isinstance(
+                        run, dict
+                    ) else run.get("round", 1)
+                    if node is None:
+                        continue
+                    nid = _node_id(node, product, round_ or 1)
+                    if nid in seen_failed:
+                        continue
+                    seen_failed.add(nid)
+                    fail_res = NodeExecutionResult(
+                        project_id=project.project_id,
+                        node_id=nid,
+                        status=NodeStatus.FAILED,
+                    )
+                    # plan 此刻可能尚未落库(占位 plan 被跳过),update_node_status
+                    # 会 KeyError;包 try/except,纯观测不阻塞。
+                    try:
+                        await self.storage.state_store.update_node_status(
+                            project.project_id, nid, NodeStatus.FAILED
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+                    await self.storage.event_bus.publish(channel, fail_res)
+                    yield fail_res
+        finally:
+            reset_collect_progress_emitter(emit_token)
 
         # 跑完用投影 plan 覆盖(供旧 /state + 前端 Phase 2 前消费)。
         # astream 快照里 history 是 NodeRun 对象,projection 契约要的是 dict 列表,
@@ -301,7 +431,7 @@ class Orchestrator:
                     verdict = QAVerdict.model_validate(raw)
                 verdict_objs.append(verdict)
                 await self.storage.state_store.save_qa_verdict(
-                    project.project_id, verdict
+                    project.project_id, verdict, run_id=run_id
                 )
 
             # gap 2:终态算 ProjectMetrics 写回 Project.metrics + 追加 metrics_history
@@ -710,4 +840,4 @@ def _apply_feedback_outcome(plan: DAGPlan, outcome: FeedbackOutcome) -> DAGPlan:
     return plan.model_copy(update={"nodes": new_nodes, "edges": new_edges})
 
 
-__all__ = ["Orchestrator"]
+__all__ = ["Orchestrator", "native_thread_config"]

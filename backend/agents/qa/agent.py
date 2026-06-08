@@ -1,7 +1,8 @@
-"""QA Agent — 报告 6 维度质检 + 路由决策。
+"""QA Agent — 报告多维度质检 + 路由决策。
 
 职责：
-- 对 ReportDraft 跑 6 个 checker（fact / evidence / schema / logic / freshness / expression）
+- 对 ReportDraft 跑全部 checker（fact / evidence / schema / coverage / identity /
+  logic / freshness / expression）
 - 聚合 issues → routing → overall_status / blocking
 - 防死循环：prior_verdicts 中反复出现的 issue 自动降级，超阈值强制放行
 - 不修改 draft，只产 QAVerdict
@@ -51,7 +52,9 @@ from .routing import (
     build_routing,
     count_prior_issue_occurrences,
     downgrade_repeated_issues,
+    escalate_by_self_status,
     max_retry_error,
+    synthesize_threshold_issues,
 )
 
 PROMPT_DIR = Path(__file__).parent / "prompts"
@@ -176,14 +179,28 @@ class QA(BaseAgent[QAInput, QAOutput]):
             all_issues.extend(result.issues)
             errors.extend(result.errors)
 
+        # ---- A1：杀静默放行 —— 对低分但无 issue 的维度补发 ----
+        all_issues.extend(
+            synthesize_threshold_issues(dimension_results, all_issues)
+        )
+
+        # ---- ⑤ 把上游 agent 自评(needs_rework)接入判级：加权其名下已有 issue ----
+        all_issues = escalate_by_self_status(all_issues, inp.upstream_statuses)
+
         # ---- 防死循环：降级反复出现的 issue ----
         prior_counts = count_prior_issue_occurrences(inp.prior_verdicts)
         adjusted_issues, downgraded = downgrade_repeated_issues(
             all_issues, prior_counts
         )
 
-        # ---- 整体判定 ----
-        overall = aggregate_verdict(adjusted_issues, len(inp.prior_verdicts))
+        # ---- 整体判定（A1：核心维度不及格 → 强制 blocking 返工）----
+        # 传 prior_verdicts 启用复发护栏:已失败过的核心维度不再强制阻塞,避免空转。
+        overall = aggregate_verdict(
+            adjusted_issues,
+            len(inp.prior_verdicts),
+            dimension_results,
+            prior_verdicts=list(inp.prior_verdicts),
+        )
         if overall.max_retry_reached:
             errors.append(max_retry_error(len(inp.prior_verdicts)))
 
@@ -209,6 +226,7 @@ class QA(BaseAgent[QAInput, QAOutput]):
             errors=errors,
             prior_count=len(inp.prior_verdicts),
             max_retry_reached=overall.max_retry_reached,
+            upstream_statuses=inp.upstream_statuses,
         )
 
         return QAOutput(
@@ -233,7 +251,7 @@ class QA(BaseAgent[QAInput, QAOutput]):
     def _post_validate(self, out: QAOutput, inp: QAInput) -> None:
         verdict = out.verdict
 
-        # 1. dimension_results 必须覆盖所有 6 个维度
+        # 1. dimension_results 必须覆盖所有维度（QADimension 全集）
         missing = [
             d
             for d in QADimension
@@ -309,6 +327,7 @@ def _build_critique(
     errors: list[AgentError],
     prior_count: int,
     max_retry_reached: bool,
+    upstream_statuses: dict[str, str] | None = None,
 ) -> str:
     bits: list[str] = []
     failing = [
@@ -319,6 +338,11 @@ def _build_critique(
             "未通过维度："
             + ", ".join(d.value for d in failing)
         )
+    flagged = sorted(
+        a for a, s in (upstream_statuses or {}).items() if s == "needs_rework"
+    )
+    if flagged:
+        bits.append(f"上游自评 needs_rework：{', '.join(flagged)}（已加权其名下 issue）")
     if verdict.issues:
         weight = sum(SEVERITY_WEIGHTS[i.severity] for i in verdict.issues)
         bits.append(

@@ -4,7 +4,7 @@
 返回 ``CheckerResult``（含 score / pass_ / issues / notes / errors）。
 
 QA Agent 主类负责：
-- 把 6 个 checker 的 CheckerResult 聚合到 QAVerdict
+- 把各 checker 的 CheckerResult 聚合到 QAVerdict
 - 调用 routing 模块把 issues 装配成 QARouting
 - 套用防死循环策略
 - 计算整体 overall_status / blocking / confidence

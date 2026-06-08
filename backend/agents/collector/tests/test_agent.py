@@ -553,3 +553,203 @@ def test_qa_feedback_reaches_reviews_finder_prompt(make_registry) -> None:
     assert "freshness" in user_content
     assert "avoid_evidence_ids" in user_content
     assert "ev_notion_reviews_g2_old" in user_content
+
+
+# ---------- 相对语义：维度×来源类型权威矩阵 + reviews 维度采集豁免 ----------
+
+
+def test_authority_is_relative_to_dimension() -> None:
+    """同一来源换维度，权威度反转：官网查定价=高/查口碑=低；评论站查口碑=高/查定价=低。"""
+    from backend.agents.collector.agent import _heuristic_authority
+
+    off = "https://notion.so/pricing"
+    g2 = "https://www.g2.com/products/notion/reviews"
+    kw = {"product_name": "Notion", "official_url": "https://notion.so"}
+
+    assert _heuristic_authority(url=off, dimension=CollectDimension.PRICING, **kw) == 0.95
+    assert _heuristic_authority(url=off, dimension=CollectDimension.REVIEWS, **kw) == 0.5
+    assert _heuristic_authority(url=g2, dimension=CollectDimension.REVIEWS, **kw) == 0.92
+    assert _heuristic_authority(url=g2, dimension=CollectDimension.PRICING, **kw) == 0.6
+
+
+def test_reviews_llm_path_uses_relative_authority() -> None:
+    """LLM 评论路径的 doc 权威度走相对矩阵（review×reviews=0.92），不再硬编 0.75。"""
+    finding = _ReviewsFinding(
+        overall_rating=4.5,
+        sources=[
+            _ReviewSource(
+                name="G2",
+                url="https://www.g2.com/products/notion/reviews",
+                excerpt="4.5/5",
+            )
+        ],
+    )
+    agent = Collector(mock=True)
+    inp = make_collector_input(product_name="Notion", dimensions=[CollectDimension.REVIEWS])
+    docs = agent._reviews_finding_to_docs(inp=inp, finding=finding)
+    assert docs
+    assert all(d.source_authority == 0.92 for d in docs)
+
+
+def _review_scrape(url: str, *, paywall: bool = False, text: str = "x") -> ScrapeResult:
+    return ScrapeResult(
+        url=url,
+        final_url="",
+        http_status=200,
+        fetched_with="firecrawl",
+        text=text,
+        title="Notion reviews",
+        detected_paywall=paywall,
+    )
+
+
+def test_reviews_host_exempt_from_collection_penalties() -> None:
+    """评论站在 reviews 维度：付费墙/短文本/ambiguous 全豁免——采集不再判其「真实性不够」。"""
+    agent = Collector(mock=True)
+    inp = make_collector_input(product_name="Notion", dimensions=[CollectDimension.REVIEWS])
+    g2 = "https://www.g2.com/products/notion/reviews"
+
+    review_doc = agent._build_raw_source_doc(
+        inp=inp,
+        dimension=CollectDimension.REVIEWS,
+        scrape=_review_scrape(g2, paywall=True, text="short"),
+        fetch_method="firecrawl",
+        identity_status="ambiguous",
+    )
+    conf = agent._compute_confidence([review_doc], [CollectDimension.REVIEWS])
+    assert conf == pytest.approx(agent.BASE_CONFIDENCE)  # 0.95，零惩罚
+
+    # 对照：同样缺陷换到 pricing 维度（评论站非该维度预期源）→ 被扣分
+    pricing_doc = agent._build_raw_source_doc(
+        inp=inp,
+        dimension=CollectDimension.PRICING,
+        scrape=_review_scrape(g2, paywall=True, text="short"),
+        fetch_method="firecrawl",
+        identity_status="ambiguous",
+    )
+    conf_p = agent._compute_confidence([pricing_doc], [CollectDimension.PRICING])
+    assert conf_p < agent.BASE_CONFIDENCE
+
+
+# ---------- A: REVIEWS 只从指定评论站采（allowlist，非黑名单）----------
+
+
+def test_reviews_only_from_specified_review_hosts(make_registry) -> None:
+    """REVIEWS 维度只从 G2/Capterra/TrustRadius 等指定评论站采——通用搜索顶上来的
+    YouTube 视频评测被丢弃（指定 allowlist，修正「在 YouTube 抓评论 + 身份判成 YouTube」）。"""
+    yt = "https://www.youtube.com/watch?v=coda-review"
+    g2 = "https://www.g2.com/products/coda/reviews"
+    search = FakeSearch(
+        fixed={
+            # FakeSearch 按 query 子串匹配；REVIEWS 查询是 "Coda review G2 Capterra"
+            "review": [
+                SearchHit(url=yt, title="Coda review video", provider="t"),
+                SearchHit(url=g2, title="Coda reviews | G2", provider="t"),
+            ]
+        }
+    )
+    firecrawl = FakeScrape(
+        name="scrape.firecrawl",
+        enabled=True,
+        default=ScrapeResult(
+            url=g2,
+            final_url=g2,
+            http_status=200,
+            text="Coda is rated 4.5/5 on G2. Users praise its flexibility. " * 3,
+            title="Coda reviews",
+            fetched_with="scrape.firecrawl",
+        ),
+    )
+    reg = make_registry(search=search, firecrawl=firecrawl)
+    agent = Collector(llm=NullLLM(), tools=reg, tracer=NullTracer(), mock=False)
+    inp = make_collector_input(
+        product_name="Coda",
+        dimensions=[CollectDimension.REVIEWS],
+        fallback_to_mock=False,
+    )
+    out = agent.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id)
+    urls = {str(s.source_url) for s in out.raw_sources}
+    assert not any("youtube.com" in u for u in urls), "YouTube 不该作为评论源被采"
+    assert any(e.code == "NON_REVIEW_SOURCE_SKIPPED" for e in out.errors)
+
+
+# ---------- B: confidence 按可用覆盖 + self_critique 分类 ----------
+
+
+def _doc(
+    agent,
+    inp,
+    dim,
+    *,
+    url: str,
+    text: str = "x" * 400,
+    paywall: bool = False,
+    identity_status: str = "confirmed",
+    detected: str | None = None,
+):
+    sr = ScrapeResult(
+        url=url,
+        final_url=url,
+        http_status=200,
+        fetched_with="firecrawl",
+        text=text,
+        title="t",
+        detected_paywall=paywall,
+    )
+    return agent._build_raw_source_doc(
+        inp=inp,
+        dimension=dim,
+        scrape=sr,
+        fetch_method="firecrawl",
+        identity_status=identity_status,  # type: ignore[arg-type]
+        detected_product_name=detected,
+    )
+
+
+def test_environmental_failure_with_usable_coverage_keeps_confidence() -> None:
+    """某页短文本/失败，但该维度还有可用源 → confidence 不降（按可用覆盖，不按失败页数）。"""
+    agent = Collector(mock=True)
+    inp = make_collector_input(
+        product_name="Notion", dimensions=[CollectDimension.FEATURES]
+    )
+    good = _doc(agent, inp, CollectDimension.FEATURES, url="https://notion.so/features")
+    short = _doc(
+        agent, inp, CollectDimension.FEATURES, url="https://blog.com/n", text="x"
+    )
+    # 维度仍有 1 个可用源 → 不扣分
+    assert agent._compute_confidence(
+        [good, short], [CollectDimension.FEATURES]
+    ) == pytest.approx(agent.BASE_CONFIDENCE)
+    # 但若该维度**只有**短文本（无可用源）→ 实质缺口，扣分
+    assert (
+        agent._compute_confidence([short], [CollectDimension.FEATURES])
+        < agent.BASE_CONFIDENCE
+    )
+
+
+def test_self_critique_separates_actionable_and_environmental() -> None:
+    """self_critique 把「需处理(身份不符)」与「采集受限(正文过短,信息性)」分开。"""
+    agent = Collector(mock=True)
+    inp = make_collector_input(
+        product_name="Coda", dimensions=[CollectDimension.FEATURES]
+    )
+    good = _doc(agent, inp, CollectDimension.FEATURES, url="https://coda.io/features")
+    short = _doc(
+        agent, inp, CollectDimension.FEATURES, url="https://blog.com/c", text="x"
+    )
+    mism = _doc(
+        agent,
+        inp,
+        CollectDimension.FEATURES,
+        url="https://youtube.com/x",
+        identity_status="mismatch",
+        detected="YouTube",
+    )
+    crit = agent._build_self_critique(
+        [good, short, mism], [CollectDimension.FEATURES], []
+    )
+    assert "需处理:" in crit and "采集受限" in crit
+    actionable_part = crit.split("采集受限")[0]
+    assert "身份不符" in actionable_part, "身份不符应在「需处理」段"
+    assert "正文过短" not in actionable_part, "正文过短应在「采集受限」段，不在需处理"
+    assert "正文过短" in crit

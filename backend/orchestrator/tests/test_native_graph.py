@@ -18,6 +18,7 @@ import pytest
 
 from backend.agents.extractor.fixtures import load_mock_profile
 from backend.orchestrator.graph import build_native_graph
+from backend.orchestrator.nodes import make_nodes
 from backend.orchestrator.run_state import RunState
 from backend.schemas import (
     AgentStatus,
@@ -169,15 +170,20 @@ def _pass_verdict(vid: str = "v_pass") -> QAVerdict:
     )
 
 
-def _block_reporter_verdict(vid: str = "v_block") -> QAVerdict:
+def _block_verdict(target: str, vid: str = "v_block") -> QAVerdict:
+    """阻塞 verdict，路由到指定上游 agent。"""
     return QAVerdict(
         verdict_id=vid,
         overall_status=QAStatus.NEEDS_REVISION,
         dimension_results={},
         issues=[],
-        routing=[QARouting(target_agent="reporter", reason="rewrite", payload={})],
+        routing=[QARouting(target_agent=target, reason="rework", payload={})],  # type: ignore[arg-type]
         blocking=True,
     )
+
+
+def _block_reporter_verdict(vid: str = "v_block") -> QAVerdict:
+    return _block_verdict("reporter", vid)
 
 
 class _StubQA:
@@ -310,10 +316,13 @@ async def test_qa_cycle_produces_reporter_v2() -> None:
 
     reporter_runs = [h for h in final["history"] if h.node == "reporter"]
     assert len(reporter_runs) == 2
-    # 第二个 reporter NodeRun round == 2
+    # 第二个 reporter NodeRun round == 2，且 output_ref 版本化为 reporter_v2
     assert reporter_runs[1].round == 2
-    # 最终 reporter draft 是 v2
-    assert final["outputs"]["reporter"].draft.version == 2
+    assert reporter_runs[0].output_ref == "reporter"
+    assert reporter_runs[1].output_ref == "reporter_v2"
+    # 版本化修复(P1-a)：v1 与 v2 各占独立 key，互不覆盖，历史可如实回放
+    assert final["outputs"]["reporter"].draft.version == 1
+    assert final["outputs"]["reporter_v2"].draft.version == 2
     assert final["aborted"] is False
 
 
@@ -328,3 +337,138 @@ async def test_round_cap_aborts() -> None:
 
     assert final["aborted"] is True
     assert "max_rounds" in final["abort_reason"]
+    # P2-MAXROUNDS：_MAX_QA_ROUNDS=3 → 恰好 3 版草稿(reporter / _v2 / _v3)后熔断，
+    # 不再多跑一轮到 reporter_v4(旧 off-by-one)。
+    reporter_runs = [h for h in final["history"] if h.node == "reporter"]
+    assert len(reporter_runs) == 3
+    assert max(h.round for h in reporter_runs) == 3
+    assert "reporter_v4" not in final["outputs"]
+
+
+# ---------- A3: 非 reporter 三条返工支线端到端流转 ----------
+
+
+async def test_qa_cycle_reworks_analyst() -> None:
+    """round1 block→analyst,round2 pass：analyst 跑两次、第二轮 round==2、收敛。"""
+    products = ["Notion"]
+    project = _load_demo_project(products=products)
+    registry = _FakeRegistry(_StubQA([_block_verdict("analyst"), _pass_verdict()]))
+    app = build_native_graph(registry, project=project)
+
+    final = await _run(app, project, products, "cycle_analyst")
+
+    analyst_runs = [h for h in final["history"] if h.node == "analyst"]
+    assert len(analyst_runs) == 2
+    assert max(h.round for h in analyst_runs) == 2
+    # analyst→reporter→qa：reporter 也应重跑一次
+    assert len([h for h in final["history"] if h.node == "reporter"]) == 2
+    assert final["aborted"] is False
+
+
+async def test_qa_cycle_reworks_extractor() -> None:
+    """round1 block→extractor,round2 pass：extract 重跑(经 analyst/reporter 回到 qa)。"""
+    products = ["Notion"]
+    project = _load_demo_project(products=products)
+    registry = _FakeRegistry(_StubQA([_block_verdict("extractor"), _pass_verdict()]))
+    app = build_native_graph(registry, project=project)
+
+    final = await _run(app, project, products, "cycle_extractor")
+
+    extract_runs = [h for h in final["history"] if h.node == "extract"]
+    assert len(extract_runs) == 2  # 单产品 × 2 轮
+    assert max(h.round for h in extract_runs) == 2
+    # 重抽后必经 analyst→reporter→qa 再评一次
+    assert len([h for h in final["history"] if h.node == "analyst"]) == 2
+    assert final["aborted"] is False
+
+
+async def test_qa_cycle_reworks_collector() -> None:
+    """round1 block→collector,round2 pass：collect 重采(整条下游重跑)。"""
+    products = ["Notion"]
+    project = _load_demo_project(products=products)
+    registry = _FakeRegistry(_StubQA([_block_verdict("collector"), _pass_verdict()]))
+    app = build_native_graph(registry, project=project)
+
+    final = await _run(app, project, products, "cycle_collector")
+
+    collect_runs = [h for h in final["history"] if h.node == "collect"]
+    assert len(collect_runs) == 2  # 单产品 × 2 轮
+    assert max(h.round for h in collect_runs) == 2
+    assert len([h for h in final["history"] if h.node == "extract"]) == 2
+    assert final["aborted"] is False
+
+
+# ---------- P1-c: 上游失败时构造输入不崩图，降级为 failed 节点 ----------
+
+
+async def test_extract_one_failsoft_when_collector_output_none() -> None:
+    """collector 失败(collector_output=None) → extract_one 不抛 BuildInputError，
+
+    而是返回一条 failed 抽取 NodeRun(无 outputs)，让图继续优雅收尾。
+    """
+    project = _load_demo_project(products=["Notion"])
+    nodes = make_nodes(_FakeRegistry(_StubQA([_pass_verdict()])), project=project)
+    out = await nodes["extract_one"](
+        {"product": "Notion", "collector_output": None, "round": 1}
+    )
+    assert out["outputs"] == {}
+    assert len(out["history"]) == 1
+    run = out["history"][0]
+    assert run.node == "extract" and run.status == "failed"
+    assert run.output_ref is None
+
+
+def test_collect_dispatch_forwards_prompt_override() -> None:
+    """P1-INTERVENE：collect_dispatch 把 prompt_override_by_node 注入 Send payload。"""
+    project = _load_demo_project(products=["Notion"])
+    nodes = make_nodes(_FakeRegistry(_StubQA([_pass_verdict()])), project=project)
+    state = RunState(
+        project_id=project.project_id,
+        run_id="r",
+        analysis_mode="competitive_compare",
+        products=["Notion"],
+        prompt_override_by_node={"collect.Notion": "MY_OVERRIDE"},
+    )
+    cmd = nodes["collect_dispatch"](state)
+    payloads = [s.arg for s in cmd.goto]
+    assert payloads and payloads[0]["prompt_override"] == "MY_OVERRIDE"
+
+
+async def test_collect_one_passes_prompt_override_to_agent(
+    monkeypatch: Any,
+) -> None:
+    """P1-INTERVENE：Send-target collect_one 把 payload 的 prompt_override 传给 run_agent_node。"""
+    import backend.orchestrator.nodes as nodes_mod
+
+    project = _load_demo_project(products=["Notion"])
+    captured: dict[str, Any] = {}
+    real = nodes_mod.run_agent_node
+
+    async def _spy(registry, agent_name, inp, **kw):  # noqa: ANN001, ANN202
+        captured["override"] = kw.get("user_prompt_override")
+        return await real(registry, agent_name, inp, **kw)
+
+    monkeypatch.setattr(nodes_mod, "run_agent_node", _spy)
+    nodes = make_nodes(_FakeRegistry(_StubQA([_pass_verdict()])), project=project)
+    await nodes["collect_one"](
+        {"product": "Notion", "round": 1, "qa_feedback": None, "prompt_override": "OV"}
+    )
+    assert captured["override"] == "OV"
+
+
+async def test_analyst_failsoft_when_no_profiles() -> None:
+    """所有 extractor 失败(无 profiles) → analyst 不抛 BuildInputError，降级 failed。"""
+    project = _load_demo_project(products=["Notion"])
+    nodes = make_nodes(_FakeRegistry(_StubQA([_pass_verdict()])), project=project)
+    state = RunState(
+        project_id=project.project_id,
+        run_id="run_failsoft",
+        analysis_mode="competitive_compare",
+        products=["Notion"],
+    )  # outputs 为空 → profiles_from_outputs 返回 {} → build_analyst_input 抛
+    out = await nodes["analyst"](state)
+    assert out["outputs"] == {}
+    assert len(out["history"]) == 1
+    run = out["history"][0]
+    assert run.node == "analyst" and run.status == "failed"
+    assert run.output_ref is None

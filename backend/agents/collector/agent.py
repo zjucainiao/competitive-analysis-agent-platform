@@ -32,6 +32,8 @@ from backend.agents._base import (
     ToolRegistryProtocol,
     TracerProtocol,
 )
+from backend.agents._authority import authority_for
+from backend.agents._progress import emit_collect_progress
 from backend.schemas import (
     AgentError,
     AgentStatus,
@@ -40,6 +42,7 @@ from backend.schemas import (
     CollectorOutput,
     RawSourceDoc,
 )
+from backend.schemas.evidence import IdentityStatus
 
 from .fixtures import get_mock_sources
 from .tools import (
@@ -137,6 +140,17 @@ class _PageSummary(BaseModel):
     language: str = "en"
 
 
+class _IdentityCheck(BaseModel):
+    """LLM 对「页面是否在讲目标产品」的判定（identity_validator.md 的 response_format）。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    is_target_product: bool
+    detected_product_name: str | None = None
+    confidence: float = Field(ge=0, le=1)
+    reason: str = ""
+
+
 class _ReviewSource(BaseModel):
     """LLM 报告的单个评论站点来源。"""
 
@@ -181,6 +195,78 @@ def _is_official(url: str, product_name: str, official_url: str | None) -> bool:
     # 模糊匹配：产品名出现在 host 内
     needle = product_name.lower().replace(" ", "")
     return bool(needle) and needle in host.replace(".", "")
+
+
+# ---------- 产品身份校验（启发式 gate） ----------
+
+# 常见公共后缀，取域名主标签时跳过（无需引 tldextract 这种重依赖）。
+_COMMON_TLDS = frozenset(
+    {"com", "cn", "net", "org", "io", "co", "ai", "app", "dev", "so", "me", "xyz"}
+)
+# 启发式「确属目标产品」所需的正文别名命中次数下限。
+_IDENTITY_MIN_BODY_HITS = 2
+
+
+def _domain_label(host: str) -> str:
+    """取域名的可注册主标签：www.dingtalk.com / dingtalk.com → 'dingtalk'。
+
+    简化实现：去掉 www. 前缀，从右往左跳过公共后缀，返回第一个非后缀段。
+    """
+    host = (host or "").lower().strip().lstrip(".")
+    if host.startswith("www."):
+        host = host[4:]
+    parts = [p for p in host.split(".") if p]
+    if not parts:
+        return ""
+    # 从右往左找第一个不是公共后缀的段
+    for p in reversed(parts):
+        if p not in _COMMON_TLDS:
+            return p
+    return parts[0]
+
+
+def _identity_aliases(product_name: str, official_url: str | None) -> set[str]:
+    """构造目标产品的别名集合（全小写），用于在 title/正文里命中匹配。
+
+    来源：产品名本身（含去空格变体）+ official_url 的域名主标签
+    （如 dingtalk.com → 'dingtalk'，覆盖中文名搜不到英文页的情况）。
+    过滤掉过短（<2）的噪声别名。
+    """
+    aliases: set[str] = set()
+    pn = (product_name or "").strip().lower()
+    if pn:
+        aliases.add(pn)
+        aliases.add(pn.replace(" ", ""))
+    if official_url:
+        label = _domain_label(_host_of(official_url))
+        if label:
+            aliases.add(label)
+    return {a for a in aliases if len(a) >= 2}
+
+
+def _assess_identity_heuristic(
+    *,
+    text: str,
+    title: str | None,
+    url: str,
+    product_name: str,
+    official_url: str | None,
+) -> tuple[IdentityStatus, float, str | None, bool]:
+    """启发式身份 gate。返回 ``(status, identity_confidence, detected_name, decided)``。
+
+    - 官方域名，或「标题命中别名 且 正文别名命中 ≥ 阈值」→ confirmed（高置信），decided=True，跳过 LLM。
+    - 其余一律判为「需进一步裁定」：返回 ambiguous + decided=False，交给 LLM。
+      （保守：启发式自己**不产** mismatch —— 别名集可能不全/跨语言，硬判错产品风险高。）
+    """
+    aliases = _identity_aliases(product_name, official_url)
+    title_l = (title or "").lower()
+    text_l = (text or "")[:4000].lower()
+    official = _is_official(url, product_name, official_url)
+    title_hit = any(a in title_l for a in aliases)
+    body_hits = sum(text_l.count(a) for a in aliases)
+    if official or (title_hit and body_hits >= _IDENTITY_MIN_BODY_HITS):
+        return "confirmed", 0.9, product_name, True
+    return "ambiguous", 0.4, None, False
 
 
 def _heuristic_rank(
@@ -231,15 +317,33 @@ def _heuristic_classify(url: str, title: str | None) -> tuple[CollectDimension |
     return None, 0.0
 
 
-def _heuristic_authority(
-    *, url: str, product_name: str, official_url: str | None
-) -> float:
-    if _is_official(url, product_name, official_url):
-        return 0.95
+def _is_review_host(url: str) -> bool:
+    """URL 是否属已知评论聚合站（G2 / Capterra / TrustRadius …）。"""
     host = _host_of(url)
-    if any(rh in host for rh in _REVIEW_HOSTS):
-        return 0.75
-    return 0.6
+    return any(rh in host for rh in _REVIEW_HOSTS)
+
+
+def _source_class(url: str, product_name: str, official_url: str | None) -> str:
+    """来源类型粗分类：official（官方页）/ review（评论聚合站）/ other（其他第三方）。"""
+    if _is_official(url, product_name, official_url):
+        return "official"
+    if _is_review_host(url):
+        return "review"
+    return "other"
+
+
+def _heuristic_authority(
+    *,
+    url: str,
+    product_name: str,
+    official_url: str | None,
+    dimension: CollectDimension,
+) -> float:
+    """来源权威度（**相对维度**，矩阵见 backend.agents._authority）：同一来源换个维度，
+    权威度可能反转——官网在 pricing=0.95、在 user_reviews=0.5；评论站在 user_reviews=0.92。"""
+    return authority_for(
+        _source_class(url, product_name, official_url), dimension
+    )
 
 
 def _short_text(text: str) -> bool:
@@ -346,6 +450,14 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
     PENALTY_PAYWALL: ClassVar[float] = 0.05
     PENALTY_SHORT_TEXT: ClassVar[float] = 0.05
     PENALTY_HIGH_ROBOTS_BLOCK_RATIO: ClassVar[float] = 0.10
+    # 抓到别的产品（mismatch）扣重一些；提到但存疑（ambiguous）轻扣。
+    # 足量 mismatch 会把 confidence 压到 SELF_CRITIQUE_THRESHOLD 以下 → 自评 NEEDS_REWORK。
+    PENALTY_IDENTITY_MISMATCH: ClassVar[float] = 0.15
+    PENALTY_IDENTITY_AMBIGUOUS: ClassVar[float] = 0.05
+    # 身份校验 LLM 裁定的**每产品调用上限**：第三方噪音多的产品(如 Figma)会有大量
+    # 模糊源，逐条上 LLM 会把单产品 LLM 调用数推高、撞节点超时。封顶后超出的模糊源
+    # 退回启发式（仍标 ambiguous、仍被 QA 浮出），只是不再 LLM 逐条裁定。
+    MAX_IDENTITY_LLM_CALLS: ClassVar[int] = 8
     ROBOTS_BLOCK_RATIO_THRESHOLD: ClassVar[float] = 0.30
     # 维度并行采集的最大并发线程数（防止对同一站点过猛 + 控制 LLM 并发）
     MAX_DIMENSION_WORKERS: ClassVar[int] = 5
@@ -370,6 +482,8 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
         self._cost_usd_acc: float = 0.0
         # 维度并行采集时多线程会并发累加，用锁保护 read-modify-write。
         self._usage_lock = threading.Lock()
+        # 身份校验 LLM 的每产品预算（并行维度共享，扣减走 _usage_lock）。
+        self._identity_llm_left: int = self.MAX_IDENTITY_LLM_CALLS
 
     def _record_llm_usage(self, resp: Any) -> None:
         """累计单次 LLM 调用的 token 与成本。
@@ -578,6 +692,18 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             llm_docs, llm_errors = self._collect_reviews_via_llm(inp=inp)
             errors.extend(llm_errors)
             if llm_docs:
+                for doc in llm_docs:
+                    emit_collect_progress(
+                        {
+                            "product": inp.product_name,
+                            "dimension": dimension.value,
+                            "url": str(doc.source_url),
+                            "title": doc.title,
+                            "identity_status": doc.identity_status,
+                            "detected_product_name": doc.detected_product_name,
+                            "source_authority": doc.source_authority,
+                        }
+                    )
                 return llm_docs, errors
             # LLM 路径未拿到结果，落到下面的"搜索 + scrape"通用路径（host seed 兜底）
 
@@ -596,6 +722,26 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             seeded = seeded + _seed_review_hosts(inp.product_name)
         # 合并去重：搜索结果优先（已带 snippet），official_url 兜底补充
         candidates = _dedupe_hits(searched + seeded)
+        # REVIEWS 维度：**指定**只从评论站（_REVIEW_HOSTS）采集——通用搜索常把 YouTube /
+        # 博客顶上来，抓到的是平台框架文本（既没用、又被身份校验判成「别的产品」如 'YouTube'）。
+        # 用 allowlist 指定可信来源，而非黑名单逐个挡。过滤后为空则照常 NO_RELEVANT_RESULTS
+        # （_seed_review_hosts 总会注入 G2/Capterra，正常产品不会被清空）。
+        if dimension is CollectDimension.REVIEWS:
+            review_only = [c for c in candidates if _is_review_host(c.url)]
+            dropped = len(candidates) - len(review_only)
+            if dropped > 0:
+                errors.append(
+                    AgentError(
+                        code="NON_REVIEW_SOURCE_SKIPPED",
+                        message=(
+                            f"reviews: dropped {dropped} non-review-site candidate(s) "
+                            "(only G2/Capterra/TrustRadius… are used for reviews)"
+                        ),
+                        severity="warn",
+                        retriable=False,
+                    )
+                )
+            candidates = review_only
         if not candidates:
             errors.append(
                 AgentError(
@@ -634,10 +780,23 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
         # 例如 notion.so/ → notion.com/。在 fetch 完成后用 ScrapeResult.final_url 判重。
         fetched_finals: set[str] = set()
         budget = max(inp.constraints.max_pages_per_dimension, 1)
+        # P4 返工收敛：QA 标 identity mismatch 的源 URL 经 qa_feedback 注入到
+        # inp.exclude_source_urls；重采时直接跳过，避免又把同一个跑题页面抓回来。
+        exclude = {u.rstrip("/") for u in (inp.exclude_source_urls or []) if u}
         for hit, _score in ranked:
             if len(kept_sources) >= budget:
                 break
             url = hit.url
+            if exclude and url.rstrip("/") in exclude:
+                errors.append(
+                    AgentError(
+                        code="NO_RELEVANT_RESULTS",
+                        message=f"skip QA-flagged mismatch url {url}",
+                        severity="warn",
+                        retriable=False,
+                    )
+                )
+                continue
             host = _host_of(url)
             if inp.constraints.respect_robots_txt and robots is not None:
                 try:
@@ -677,6 +836,9 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             final_url_normalized = scrape_result.final_url.rstrip("/")
             if final_url_normalized in fetched_finals:
                 continue
+            # redirect 后才落到被 QA 标记的 mismatch URL → 同样跳过（P4）
+            if exclude and final_url_normalized in exclude:
+                continue
             fetched_finals.add(final_url_normalized)
             if scrape_result.detected_paywall and not inp.constraints.allow_paid_content:
                 errors.append(
@@ -706,12 +868,43 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
                     )
                 )
                 continue
+            # 身份校验：这页内容真的是目标产品吗（防抓到别的产品的评价/功能）
+            detected_name, identity_conf, identity_status = self._assess_identity(
+                inp=inp, scrape=scrape_result
+            )
+            # 相对语义：评论聚合站页面在 user_reviews 维度是**正典源**——G2 上的
+            # 「{product} reviews」天然就是讲该产品；启发式因「非官方域名」把它停在
+            # ambiguous 是范畴错误。这里视作 confirmed（仅升级 ambiguous，不动 LLM
+            # 实判的 mismatch=确属别的产品）。
+            if (
+                dimension is CollectDimension.REVIEWS
+                and identity_status == "ambiguous"
+                and _is_review_host(url)
+            ):
+                identity_status = "confirmed"
+                detected_name = detected_name or inp.product_name
+                identity_conf = max(identity_conf or 0.0, 0.8)
+            if identity_status == "mismatch":
+                errors.append(
+                    AgentError(
+                        code="NO_RELEVANT_RESULTS",
+                        message=(
+                            f"identity mismatch at {url}: content looks like "
+                            f"{detected_name!r}, not {inp.product_name!r}"
+                        ),
+                        severity="warn",
+                        retriable=False,
+                    )
+                )
             try:
                 doc = self._build_raw_source_doc(
                     inp=inp,
                     dimension=dimension,
                     scrape=scrape_result,
                     fetch_method=used,
+                    detected_product_name=detected_name,
+                    identity_confidence=identity_conf,
+                    identity_status=identity_status,
                 )
             except ValidationError as e:
                 errors.append(
@@ -724,6 +917,19 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
                 )
                 continue
             kept_sources.append(doc)
+            # 实时进度：每抓+校验完一条来源就推一条事件（含身份判定），
+            # 让前端「边采边看」、身份 mismatch 当场可见。无 emitter 时 no-op。
+            emit_collect_progress(
+                {
+                    "product": inp.product_name,
+                    "dimension": dimension.value,
+                    "url": str(doc.source_url),
+                    "title": doc.title,
+                    "identity_status": doc.identity_status,
+                    "detected_product_name": doc.detected_product_name,
+                    "source_authority": doc.source_authority,
+                }
+            )
         return kept_sources, errors
 
     # ----- 搜索 -----
@@ -871,6 +1077,90 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
                 except ValueError:
                     return None, cls.confidence
         return _heuristic_classify(url, title)
+
+    # ----- 产品身份校验（混合：启发式 gate + 模糊时 LLM 裁定） -----
+
+    IDENTITY_LLM_CONFIRM_MIN: ClassVar[float] = 0.6
+
+    def _take_identity_llm_budget(self) -> bool:
+        """领一次身份校验 LLM 预算（线程安全）。耗尽返回 False → 退回启发式。"""
+        with self._usage_lock:
+            if self._identity_llm_left <= 0:
+                return False
+            self._identity_llm_left -= 1
+            return True
+
+    def _assess_identity(
+        self, *, inp: CollectorInput, scrape: ScrapeResult
+    ) -> tuple[str | None, float | None, IdentityStatus]:
+        """判断抓到的页面是否真属于 ``inp.product_name``。
+
+        返回 ``(detected_product_name, identity_confidence, identity_status)``，
+        直接灌进 RawSourceDoc 的三个身份字段。
+
+        混合策略：
+        1. 启发式 gate 先过滤——官方域名 / 标题+正文强命中 → 直接 confirmed，不烧 LLM。
+        2. 仅当启发式无法确证（第三方站 / 对比页 / 跨语言别名漏命中）才调一次 LLM 裁定。
+        3. 无 LLM 或 LLM 失败 → 保守地停在 ambiguous（绝不靠启发式硬判 mismatch）。
+        """
+        url = scrape.final_url or scrape.url
+        status, conf, detected, decided = _assess_identity_heuristic(
+            text=scrape.text,
+            title=scrape.title,
+            url=url,
+            product_name=inp.product_name,
+            official_url=inp.official_url,
+        )
+        if decided:
+            return detected, conf, status
+
+        if self.llm is not None and self._take_identity_llm_budget():
+            try:
+                res = self._llm_identity(
+                    product_name=inp.product_name,
+                    title=scrape.title,
+                    text=scrape.text,
+                )
+            except Exception:
+                res = None
+            if res is not None:
+                detected = (res.detected_product_name or "").strip() or None
+                c = float(res.confidence)
+                if res.is_target_product:
+                    # identity_confidence = 「确属目标产品」的置信度 = LLM 对该判断的置信
+                    if c >= self.IDENTITY_LLM_CONFIRM_MIN:
+                        return (detected or inp.product_name), round(c, 3), "confirmed"
+                    return detected, round(c, 3), "ambiguous"
+                # 判为「不是目标产品」：确属目标的置信度 = 1 - c（低）
+                if c >= self.IDENTITY_LLM_CONFIRM_MIN:
+                    return detected, round(1.0 - c, 3), "mismatch"
+                return detected, round(1.0 - c, 3), "ambiguous"
+
+        # 无 LLM / 裁定失败：保守停在启发式给的 ambiguous
+        return detected, conf, status
+
+    def _llm_identity(
+        self, *, product_name: str, title: str | None, text: str
+    ) -> _IdentityCheck | None:
+        if self.llm is None:
+            return None
+        prompt = (PROMPT_DIR / "identity_validator.md").read_text(encoding="utf-8")
+        system, user_template = _split_prompt(prompt)
+        user = _render(
+            user_template,
+            product_name=product_name,
+            title=title,
+            text_preview=text[:1500],
+        )
+        resp = self.llm.chat(
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            response_format=_IdentityCheck,
+            temperature=0.0,
+            max_tokens=300,
+        )
+        self._record_llm_usage(resp)
+        return _coerce_pydantic(resp, _IdentityCheck)
 
     # ----- REVIEWS 维度：LLM 联网搜索路径 -----
 
@@ -1051,9 +1341,16 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
                     fetch_method="search",
                     http_status=None,
                     robots_allowed=True,
-                    source_authority=0.75,  # 评论站权威性低于官方页（0.95）
+                    # 相对语义：评论站在 user_reviews 维度是**正典源**（高权威），
+                    # 不再沿用「评论站一律低于官方页」的绝对标量。
+                    source_authority=authority_for("review", CollectDimension.REVIEWS),
                     detected_paywall=False,
                     detected_outdated=False,
+                    # LLM 联网搜索是按「{product} reviews」定向找的，身份默认成立
+                    detected_product_name=inp.product_name,
+                    identity_confidence=0.85,
+                    identity_status="confirmed",
+                    source_class="review",
                 )
                 docs.append(doc)
             except ValidationError:
@@ -1094,6 +1391,9 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
         dimension: CollectDimension,
         scrape: ScrapeResult,
         fetch_method: Literal["firecrawl", "playwright", "mock", "manual"],
+        detected_product_name: str | None = None,
+        identity_confidence: float | None = None,
+        identity_status: IdentityStatus = "unvalidated",
     ) -> RawSourceDoc:
         url = scrape.final_url or scrape.url
         source_id = "src_" + hashlib.sha1(
@@ -1119,9 +1419,14 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
                 url=url,
                 product_name=inp.product_name,
                 official_url=inp.official_url,
+                dimension=dimension,
             ),
             detected_paywall=scrape.detected_paywall,
             detected_outdated=outdated,
+            detected_product_name=detected_product_name,
+            identity_confidence=identity_confidence,
+            identity_status=identity_status,
+            source_class=_source_class(url, inp.product_name, inp.official_url),
         )
 
     # ----- 收尾：confidence / critique / coverage -----
@@ -1136,29 +1441,50 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
                 coverage[src.dimension] += 1
         return coverage
 
+    def _is_usable(self, s: RawSourceDoc) -> bool:
+        """该源是否提供了**可用内容**（用于「可用覆盖」判定）。
+
+        评论聚合站在 user_reviews 维度是预期源——付费墙(需登录)/短文本是其固有特征，
+        视为可用（相对语义豁免）。其余：短文本/付费墙/抓错产品(mismatch) → 不可用。
+        """
+        if s.dimension is CollectDimension.REVIEWS and _is_review_host(
+            str(s.source_url)
+        ):
+            return True
+        if _short_text(s.raw_text):
+            return False
+        if s.detected_paywall:
+            return False
+        if s.identity_status == "mismatch":
+            return False
+        return True
+
     def _compute_confidence(
         self,
         sources: list[RawSourceDoc],
         dimensions: list[CollectDimension],
     ) -> float:
-        score = self.BASE_CONFIDENCE
-        coverage = self._compute_coverage(dimensions, sources)
-        empty = sum(1 for d in dimensions if coverage[d] == 0)
-        score -= empty * self.PENALTY_EMPTY_DIMENSION
+        """置信度按**可用覆盖**判，而非「失败页数」累加。
 
-        paywall = sum(1 for s in sources if s.detected_paywall)
-        score -= paywall * self.PENALTY_PAYWALL
-
-        short = sum(1 for s in sources if _short_text(s.raw_text))
-        score -= short * self.PENALTY_SHORT_TEXT
-
-        blocked = sum(1 for s in sources if not s.robots_allowed)
-        total = len(sources) or 1
-        if blocked / total > self.ROBOTS_BLOCK_RATIO_THRESHOLD:
-            score -= self.PENALTY_HIGH_ROBOTS_BLOCK_RATIO
-
+        关键修正：个别页付费墙/短文本/robots 是**抓取环境失败**，重采大概率同样失败；
+        只要该维度还有别的**可用**源，就不该因这些失败把置信压低、把整次采集冤判
+        NEEDS_REWORK（空转返工）。故只扣两类**实质缺口**：
+        - 某维度无任何可用源（完全没采到，或采到的全是短文本/付费墙/抓错产品）；
+        - 身份 mismatch（抓到别的产品，actionable，足量 → NEEDS_REWORK）。
+        """
         if not sources:
-            score = 0.0
+            return 0.0
+        score = self.BASE_CONFIDENCE
+        usable_by_dim = {d: 0 for d in dimensions}
+        for s in sources:
+            if s.dimension in usable_by_dim and self._is_usable(s):
+                usable_by_dim[s.dimension] += 1
+        gap = sum(1 for d in dimensions if usable_by_dim[d] == 0)
+        score -= gap * self.PENALTY_EMPTY_DIMENSION
+
+        mismatch = sum(1 for s in sources if s.identity_status == "mismatch")
+        score -= mismatch * self.PENALTY_IDENTITY_MISMATCH
+
         return max(0.0, min(1.0, score))
 
     def _build_self_critique(
@@ -1167,26 +1493,55 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
         dimensions: list[CollectDimension],
         errors: list[AgentError],
     ) -> str:
-        lines: list[str] = []
         coverage = self._compute_coverage(dimensions, sources)
+        # 分两类：**需处理**（真缺口，可能值得返工）vs **采集受限**（环境失败，重采多半同样
+        # 失败、通常无需返工）。让用户一眼分清「该管的」和「噪音」。
+        actionable: list[str] = []
+        env: list[str] = []
+
         empty = [d.value for d in dimensions if coverage[d] == 0]
         if empty:
-            lines.append(f"未采集到维度: {', '.join(empty)}")
-        paywall = [s.source_url for s in sources if s.detected_paywall]
+            actionable.append(f"未采集到维度: {', '.join(empty)}")
+        mismatch = [s for s in sources if s.identity_status == "mismatch"]
+        if mismatch:
+            actionable.append(
+                f"身份不符(疑似抓到别的产品): {len(mismatch)} 个页面，"
+                f"例如 {mismatch[0].detected_product_name!r}"
+            )
+        # 维度有源但**无任何可用源**（全是短/墙/抓错）→ 实质缺口，归「需处理」
+        thin = [
+            d.value
+            for d in dimensions
+            if coverage[d] > 0
+            and not any(s.dimension is d and self._is_usable(s) for s in sources)
+        ]
+        if thin:
+            actionable.append(f"维度有源但无可用内容(全部抓取受限): {', '.join(thin)}")
+
+        paywall = [s for s in sources if s.detected_paywall]
         if paywall:
-            lines.append(f"付费墙阻挡: {len(paywall)} 个页面")
-        short = [s.source_url for s in sources if _short_text(s.raw_text)]
+            env.append(f"付费墙阻挡: {len(paywall)} 个页面")
+        short = [s for s in sources if _short_text(s.raw_text)]
         if short:
-            lines.append(f"正文过短(<200 字符): {len(short)} 个页面，可能抓取失败")
-        blocked = [s.source_url for s in sources if not s.robots_allowed]
+            env.append(f"正文过短(<200 字符): {len(short)} 个页面，可能抓取失败")
+        blocked = [s for s in sources if not s.robots_allowed]
         if blocked:
-            lines.append(f"robots.txt 禁止抓取: {len(blocked)} 个页面")
+            env.append(f"robots.txt 禁止抓取: {len(blocked)} 个页面")
+        ambiguous = [s for s in sources if s.identity_status == "ambiguous"]
+        if ambiguous:
+            env.append(f"身份存疑(无法确证属目标产品): {len(ambiguous)} 个页面")
         warn_codes = sorted({e.code for e in errors if e.severity in ("warn", "error")})
         if warn_codes:
-            lines.append(f"过程告警: {', '.join(warn_codes)}")
-        if not lines:
+            env.append(f"过程告警: {', '.join(warn_codes)}")
+
+        parts: list[str] = []
+        if actionable:
+            parts.append("需处理: " + " | ".join(actionable))
+        if env:
+            parts.append("采集受限(已跳过,通常无需返工): " + " | ".join(env))
+        if not parts:
             return f"采集正常完成，共 {len(sources)} 个页面，覆盖维度 {len(dimensions)}/{len(dimensions)}。"
-        return " | ".join(lines)
+        return "  ".join(parts)
 
     # ----- 工具注入辅助 -----
 

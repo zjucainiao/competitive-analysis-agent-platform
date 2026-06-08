@@ -44,6 +44,7 @@ async def _read_native_run_state(
     AgentOutput 对象 —— 装配器只取其 metric 字段，对象/dict 皆可）。
     """
     from backend.orchestrator.graph import build_native_graph
+    from backend.orchestrator.orchestrator import native_thread_config
     from backend.storage.langgraph_adapter import to_langgraph_saver
 
     try:
@@ -52,7 +53,9 @@ async def _read_native_run_state(
             project=project,
             checkpointer=to_langgraph_saver(orch.storage.checkpointer),
         )
-        config = {"configurable": {"thread_id": project.project_id}}
+        # P2-RUNSCOPE：读「当前 run」那条 thread(= 最近 RunRef 的 run_id)，与执行侧一致。
+        run_id = project.runs[-1].run_id if project.runs else None
+        config = native_thread_config(project.project_id, run_id)
         snapshot = await graph.aget_state(config)
     except Exception:  # noqa: BLE001
         _log.exception(
@@ -120,7 +123,8 @@ async def start_run(
     async def _run_in_bg() -> None:
         final_status = "done"
         try:
-            async for _ in orch.run(plan, project_with_run):
+            # 复用本次 run_id，让 native RunState.run_id 与 RunRef/快照/URL 一致(P2-a)
+            async for _ in orch.run(plan, project_with_run, run_id=run_id):
                 pass
         except Exception:  # noqa: BLE001
             _log.exception("orchestrator run failed for project_id=%s", project_id)
@@ -154,7 +158,11 @@ async def start_run(
             try:
                 final_plan = await storage.state_store.get_dag_plan(project_id)
                 final_outputs = await storage.state_store.list_node_outputs(project_id)
-                final_verdicts = await storage.state_store.list_qa_verdicts(project_id)
+                # 翻成升序(round1..N)落快照：与 LIVE 视图(RunState.verdicts 为 append 升序)
+                # 一致，且 best_round / 回放按轮次升序理解(P1P2-VERDICT-ORDER)。
+                final_verdicts = list(
+                    reversed(await storage.state_store.list_qa_verdicts(project_id))
+                )
                 # native 引擎：从 checkpoint 取最终 history（回放真相源），落进快照。
                 # legacy 引擎无 native RunState，history 保持空（向后兼容）。
                 history: list[dict] = []
@@ -327,19 +335,33 @@ async def get_run_state_view(
     2. 无 checkpoint（从未跑 native）时，从持久化的 ``list_node_outputs`` 兜底，
        history 留空（前端按持久化 outputs 渲染最终态）；二者皆无则返回空 5 阶段骨架。
 
+    P1-NODEOUTPUTS-VS-CHECKPOINT：人工修改(段落 PATCH /reports、证据 dispute /evidence)
+    只写 ``node_outputs``，**不**回写 checkpoint。故无论走 checkpoint 还是兜底，都用持久化
+    ``node_outputs`` **覆盖**同名 ref，让工作台刷新能反映最新编辑(与导出口径一致)，而不是
+    一直显示 checkpoint 里的旧内容。
+
     始终返回含 5 个静态阶段的骨架；metrics 取 ``project.metrics``。
     """
+    persisted = await storage.state_store.list_node_outputs(project_id)
+    # list_node_outputs 返回 AgentOutput 对象；视图契约要求 outputs 为 dict —— 归一成
+    # dict（与 checkpoint 路径的 model_dump 形态一致，前端按字段存在性判别类型）。
+    persisted_dicts = {
+        nid: (out.model_dump(mode="json") if hasattr(out, "model_dump") else out)
+        for nid, out in persisted.items()
+    }
     state = await _read_native_run_state(orch, project)
     if state is None:
         # 兜底：从持久化 outputs 构造一个最小 RunState dump（history 空）。
-        outputs = await storage.state_store.list_node_outputs(project_id)
         state = RunState(
             project_id=project_id,
             run_id=project.runs[-1].run_id if project.runs else "",
             analysis_mode=project.analysis_mode.value,
             products=[project.target_product, *project.competitors],
         ).model_dump()
-        state["outputs"] = {nid: out for nid, out in outputs.items()}
+        state["outputs"] = persisted_dicts
+    elif persisted_dicts:
+        # checkpoint 为底，持久化 node_outputs(含人工编辑)按 ref 覆盖同名 key
+        state["outputs"] = {**(state.get("outputs") or {}), **persisted_dicts}
     return run_state_to_view(state, project=project, metrics=project.metrics)
 
 

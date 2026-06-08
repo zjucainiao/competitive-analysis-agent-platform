@@ -62,14 +62,23 @@ def _metric_fields(out: Any) -> dict[str, Optional[float]]:
     }
 
 
-def _overall_status(history: list[dict], *, aborted: bool) -> str:
+def _overall_status(
+    history: list[dict], *, aborted: bool, verdicts: list | None = None
+) -> str:
     """计算整体 run 状态：running / done / failed / aborted。
 
     规则（保守、健壮）：
     - aborted=True → "aborted"
     - 否则：若存在某「终端 failed」节点且其后再无该逻辑节点的成功记录 → "failed"
-    - 否则：若**最新一轮 qa** 是 success/partial（终判通过）→ "done"
-      （最新 qa 仍是 needs_rework 说明还在返工 → "running"，避免误判成 done）
+    - 否则：**返工进行中 → "running"**。判据有二，任一成立即返工未结束：
+      1. 最后一条 qa 之后 history 里还有别的节点（返工轮的上游 collect/extract/…
+         已经在跑，但本轮新 qa 还没出）。
+      2. 最后一条 verdict 是 blocking 且带 routing（QA 判了要返工，下一轮即将/正在
+         dispatch）—— 覆盖「qa 刚判完、返工节点还没 append 进 history」的瞬态窗口。
+      关键 bug 修复：QA agent 对 **blocking reject** 也返回 PARTIAL（见
+      qa.agent._derive_status），故不能仅凭「最后一条 qa = partial」就判 done，
+      否则返工刚触发时会过早显示 done，再冒出 _v2 节点 → 返工实时观感错乱。
+    - 否则：最后一条 qa 为 success/partial（终判落定、无后续返工）→ "done"
     - 否则 → "running"
     """
     if aborted:
@@ -83,12 +92,31 @@ def _overall_status(history: list[dict], *, aborted: bool) -> str:
     if any(s == "failed" for s in last_status_by_key.values()):
         return "failed"
 
-    # 最新一轮 qa 通过才算 done；needs_rework 的最新 qa = 返工进行中 → running
-    qa_runs = [r for r in history if r.get("node") == "qa"]
-    if qa_runs:
-        latest_qa = max(qa_runs, key=lambda r: r.get("round", 1))
-        if latest_qa.get("status", "") in {"success", "partial"}:
-            return "done"
+    qa_idx = [i for i, r in enumerate(history) if r.get("node") == "qa"]
+    if not qa_idx:
+        return "running"
+    last_qa_i = qa_idx[-1]
+
+    # 判据 1：最后一条 qa 之后还有节点在跑（返工轮上游已启动，新 qa 未出）→ running
+    if last_qa_i < len(history) - 1:
+        return "running"
+
+    # 判据 2：最后一条 verdict blocking 且有 routing → 返工已判、即将 dispatch → running
+    if verdicts:
+        last_v = verdicts[-1]
+        blocking = (
+            last_v.get("blocking") if isinstance(last_v, dict)
+            else getattr(last_v, "blocking", None)
+        )
+        routing = (
+            last_v.get("routing") if isinstance(last_v, dict)
+            else getattr(last_v, "routing", None)
+        ) or []
+        if blocking and routing:
+            return "running"
+
+    if history[last_qa_i].get("status", "") in {"success", "partial"}:
+        return "done"
     return "running"
 
 
@@ -141,7 +169,7 @@ def run_state_to_view(
     return RunStateView(
         project_id=project.project_id,
         run_id=state.get("run_id"),
-        status=_overall_status(history, aborted=aborted),
+        status=_overall_status(history, aborted=aborted, verdicts=raw_verdicts),
         products=products,
         stages=stages,
         history=history,

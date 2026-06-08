@@ -6,7 +6,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backend.orchestrator.metrics import compute_project_metrics
+from backend.orchestrator.metrics import (
+    best_round_reporter_key,
+    compute_project_metrics,
+)
 from backend.schemas import (
     AgentOutputBase,
     AgentStatus,
@@ -278,7 +281,7 @@ def test_metrics_handles_verdict_without_schema_dim() -> None:
 
 
 def test_metrics_uses_last_verdict() -> None:
-    """多份 verdict 时只用最后一份算 accuracy。"""
+    """多份 verdict 时 coverage/accuracy 仍用最后一份（语义不变，best 另存字段）。"""
     plan = _plan()
     verdicts = [
         _verdict({QADimension.SCHEMA_COMPLETENESS: 0.3}),  # 旧的
@@ -286,3 +289,83 @@ def test_metrics_uses_last_verdict() -> None:
     ]
     m = compute_project_metrics(plan=plan, outputs={}, verdicts=verdicts, qa_round_count=1)
     assert m.coverage == pytest.approx(0.9)
+
+
+# ---------- A4: 跨轮 delta + best-round ----------
+
+
+def test_per_round_series_and_delta_positive() -> None:
+    """round2 比 round1 高 → delta 为正、best_round=2。"""
+    plan = _plan()
+    verdicts = [
+        _verdict({QADimension.FACT_CONSISTENCY: 0.6, QADimension.EXPRESSION: 0.6}),  # 0.6
+        _verdict({QADimension.FACT_CONSISTENCY: 0.8, QADimension.EXPRESSION: 1.0}),  # 0.9
+    ]
+    m = compute_project_metrics(plan=plan, outputs={}, verdicts=verdicts, qa_round_count=1)
+    assert m.per_round_accuracy == [pytest.approx(0.6), pytest.approx(0.9)]
+    assert m.round_delta == [pytest.approx(0.3)]
+    assert m.best_round == 2
+
+
+def test_best_round_picks_earlier_when_rework_worsens() -> None:
+    """返工把质量改差(round2<round1) → best_round=1、delta 为负。"""
+    plan = _plan()
+    verdicts = [
+        _verdict({QADimension.FACT_CONSISTENCY: 0.9, QADimension.EXPRESSION: 0.9}),  # 0.9
+        _verdict({QADimension.FACT_CONSISTENCY: 0.5, QADimension.EXPRESSION: 0.5}),  # 0.5
+    ]
+    m = compute_project_metrics(plan=plan, outputs={}, verdicts=verdicts, qa_round_count=1)
+    assert m.round_delta == [pytest.approx(-0.4)]
+    assert m.best_round == 1
+
+
+def test_best_round_tie_prefers_latest() -> None:
+    """两轮并列(无改善) → best_round 取较晚轮，退化为最后一轮行为。"""
+    plan = _plan()
+    verdicts = [
+        _verdict({QADimension.FACT_CONSISTENCY: 0.866}),
+        _verdict({QADimension.FACT_CONSISTENCY: 0.866}),
+    ]
+    m = compute_project_metrics(plan=plan, outputs={}, verdicts=verdicts, qa_round_count=1)
+    assert m.best_round == 2
+
+
+def test_best_round_reporter_key_selects_best_scoring_output() -> None:
+    outputs = {"reporter": object(), "reporter_v2": object()}
+    # round1 高 → 发 round1 的 "reporter"
+    better_first = [
+        _verdict({QADimension.FACT_CONSISTENCY: 0.9}),
+        _verdict({QADimension.FACT_CONSISTENCY: 0.5}),
+    ]
+    assert best_round_reporter_key(outputs, better_first) == "reporter"
+    # round2 高 → 发 "reporter_v2"
+    better_second = [
+        _verdict({QADimension.FACT_CONSISTENCY: 0.5}),
+        _verdict({QADimension.FACT_CONSISTENCY: 0.9}),
+    ]
+    assert best_round_reporter_key(outputs, better_second) == "reporter_v2"
+    # 无 verdict → 退回最高 revision
+    assert best_round_reporter_key(outputs, []) == "reporter_v2"
+    # 平局 → 取较晚轮
+    tie = [
+        _verdict({QADimension.FACT_CONSISTENCY: 0.8}),
+        _verdict({QADimension.FACT_CONSISTENCY: 0.8}),
+    ]
+    assert best_round_reporter_key(outputs, tie) == "reporter_v2"
+
+
+def test_best_round_requires_ascending_order_storage_is_desc() -> None:
+    """P1P2-VERDICT-ORDER：storage 按 DESC 返回；直接喂会选错，reversed 回升序才对。
+
+    round1 维度均分更高(返工把质量改差) → 正确应发 round1 的 "reporter"。
+    """
+    outputs = {"reporter": object(), "reporter_v2": object()}
+    asc = [  # 真实轮次升序：round1 高、round2 低
+        _verdict({QADimension.FACT_CONSISTENCY: 0.9}),
+        _verdict({QADimension.FACT_CONSISTENCY: 0.5}),
+    ]
+    desc = list(reversed(asc))  # storage list_qa_verdicts 的实际返回顺序(最新在前)
+    # 直接喂 DESC（修复前的 bug）→ 把最新轮误当 round1 → 选错
+    assert best_round_reporter_key(outputs, desc) == "reporter_v2"
+    # 消费端 reversed 回升序（修复后）→ 选对（round1 更优）
+    assert best_round_reporter_key(outputs, list(reversed(desc))) == "reporter"

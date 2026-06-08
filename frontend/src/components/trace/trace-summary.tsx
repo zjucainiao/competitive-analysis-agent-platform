@@ -13,10 +13,19 @@ import type { TraceSummary } from "@/lib/trace-mock";
 export type TraceFilter = "all" | "errors" | "rework";
 
 const FILTERS: Array<{ id: TraceFilter; label: string }> = [
-  { id: "all", label: "all" },
-  { id: "rework", label: "rework only" },
-  { id: "errors", label: "errors only" },
+  { id: "all", label: "全部" },
+  { id: "rework", label: "仅返工" },
+  { id: "errors", label: "仅失败" },
 ];
+
+/** agent 枚举 → 中文（与 DAG / 执行日志一致，不在过滤器暴露裸枚举） */
+const AGENT_LABELS: Record<string, string> = {
+  collector: "信息采集",
+  extractor: "证据入库",
+  analyst: "结构化分析",
+  reporter: "报告撰写",
+  qa: "质量审查",
+};
 
 const AGENTS = [
   "collector",
@@ -60,21 +69,21 @@ export function TraceHeader({
       <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border-subtle px-5 py-4">
         <div>
           <div className="text-[10px] font-medium uppercase tracking-wider text-text-muted">
-            Trace
+            执行轨迹
           </div>
           <code className="mt-0.5 block font-mono text-sm font-medium text-text-primary">
             {summary.traceId}
           </code>
         </div>
         <div className="flex flex-wrap items-center gap-5 text-xs">
-          <Stat label="spans" value={String(summary.spanCount)} mono />
-          <Stat label="elapsed" value={`${durSec}s`} mono />
+          <Stat label="节点" value={String(summary.spanCount)} mono />
+          <Stat label="总时长" value={`${durSec}s`} mono />
           <Stat
-            label="tokens"
+            label="Token"
             value={(summary.totalTokensIn + summary.totalTokensOut).toLocaleString()}
             mono
           />
-          <Stat label="cost" value={`$${summary.totalCostUsd.toFixed(3)}`} mono />
+          <Stat label="成本" value={`$${summary.totalCostUsd.toFixed(3)}`} mono />
           <StatusMix summary={summary} />
         </div>
       </div>
@@ -110,13 +119,13 @@ export function TraceHeader({
           className="gap-1.5"
         >
           <GitCompareArrowsIcon className="h-3.5 w-3.5" />
-          <span>diff v1 ↔ v2</span>
+          <span>当前版 ↔ 修订版 对比</span>
         </Button>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 border-t border-border-subtle px-5 py-2.5">
         <span className="text-[10px] uppercase tracking-wider text-text-muted">
-          agent
+          环节
         </span>
         {AGENTS.map((a) => {
           const active = agentFilter.has(a);
@@ -126,13 +135,13 @@ export function TraceHeader({
               type="button"
               onClick={() => toggleAgent(a)}
               className={cn(
-                "rounded-pill border px-2 py-0.5 text-[11px] font-mono transition-colors duration-120 ease-out-quart",
+                "rounded-pill border px-2 py-0.5 text-[11px] transition-colors duration-120 ease-out-quart",
                 active
                   ? "border-accent-border bg-accent-bg text-accent-base"
                   : "border-transparent text-text-muted hover:text-text-secondary"
               )}
             >
-              {a}
+              {AGENT_LABELS[a] ?? a}
             </button>
           );
         })}
@@ -143,7 +152,7 @@ export function TraceHeader({
             className="ml-1 inline-flex items-center gap-0.5 text-[11px] text-text-muted hover:text-text-secondary"
           >
             <XIcon className="h-3 w-3" />
-            clear
+            清除
           </button>
         ) : null}
       </div>
@@ -182,11 +191,11 @@ function Stat({
 
 function StatusMix({ summary }: { summary: TraceSummary }) {
   const items: Array<{ label: string; count: number; cls: string }> = [
-    { label: "success", count: summary.successCount, cls: "bg-success-base" },
-    { label: "running", count: summary.runningCount, cls: "bg-running-base" },
-    { label: "rework", count: summary.reworkCount, cls: "bg-rework-base" },
-    { label: "failed", count: summary.failedCount, cls: "bg-error-base" },
-    { label: "pending", count: summary.pendingCount, cls: "bg-neutral-base" },
+    { label: "已完成", count: summary.successCount, cls: "bg-success-base" },
+    { label: "运行中", count: summary.runningCount, cls: "bg-running-base" },
+    { label: "需返工", count: summary.reworkCount, cls: "bg-rework-base" },
+    { label: "失败", count: summary.failedCount, cls: "bg-error-base" },
+    { label: "等待中", count: summary.pendingCount, cls: "bg-neutral-base" },
   ].filter((x) => x.count > 0);
 
   return (

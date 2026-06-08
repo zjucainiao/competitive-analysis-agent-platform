@@ -78,12 +78,17 @@ def decide_qa_route(
     Returns:
         (goto, state_update_dict)，goto=END 表示收尾。
     """
-    # 规则 1：轮次上限 → 强制终止
-    if qa_round >= max_rounds:
+    # 规则 1：轮次上限 → 强制终止。
+    # 用 qa_round+1(=即将开始的下一轮)判断，使「最多 max_rounds 轮 QA」名实相符：
+    # max_rounds=3 时产出 reporter/reporter_v2/reporter_v3 三版后熔断，而非旧逻辑的
+    # qa_round>=max_rounds 会多跑一轮(reporter_v4 + qa_v4 才 abort，白烧一轮 LLM)。
+    # (P2-MAXROUNDS：off-by-one 成本修复)
+    if qa_round + 1 >= max_rounds:
         return END, {
             "aborted": True,
             "abort_reason": (
-                f"qa_round={qa_round} >= max_rounds={max_rounds}; force-publish"
+                f"qa_round+1={qa_round + 1} reached max_rounds={max_rounds}; "
+                "force-publish"
             ),
         }
 

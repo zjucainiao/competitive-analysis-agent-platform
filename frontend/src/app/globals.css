@@ -217,9 +217,13 @@
   --running-bg: oklch(96% 0.04 230);
   --running-border: oklch(78% 0.14 230);
 
-  --rework-base: oklch(64% 0.20 35);
-  --rework-bg: oklch(96% 0.04 35);
-  --rework-border: oklch(80% 0.14 35);
+  /* 返工/reprocessing：QA 驱动的迭代是「系统在自我改进」的正向动作，不是错误。
+     旧值是高饱和红橙(hue 35)，紧挨 error 红(hue 25)→ 观感像报错、发慌。
+     改为冷静的 teal(hue 195) + 降饱和：与暖色系 error/warning 拉开，也区别于
+     running 蓝(hue 230)与 accent 紫(hue 285)，读作「正在重处理」而非「出事了」。 */
+  --rework-base: oklch(62% 0.12 195);
+  --rework-bg: oklch(96% 0.035 195);
+  --rework-border: oklch(82% 0.08 195);
 
   --neutral-base: oklch(56% 0.012 280);
   --neutral-bg: oklch(94% 0.008 280);
@@ -351,9 +355,10 @@
   --running-bg: oklch(22% 0.04 230);
   --running-border: oklch(38% 0.12 230);
 
-  --rework-base: oklch(74% 0.20 35);
-  --rework-bg: oklch(24% 0.05 35);
-  --rework-border: oklch(40% 0.14 35);
+  /* 返工 = 冷静 teal(hue 195)，见 light 主题注释。dark 提亮 base、压暗 bg。 */
+  --rework-base: oklch(74% 0.12 195);
+  --rework-bg: oklch(26% 0.05 195);
+  --rework-border: oklch(44% 0.09 195);
 
   --neutral-base: oklch(60% 0.015 280);
   --neutral-bg: oklch(22% 0.012 280);

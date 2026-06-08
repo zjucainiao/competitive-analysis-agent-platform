@@ -367,10 +367,10 @@ def test_qa_feedback_payload_validates_as_qafeedback() -> None:
     payload = outcome.qa_feedback_by_node["analyst_v2"]
     # payload 含 revision 字段（Reporter 专用，Agent 之间约定）
     assert payload["revision"] == 1
-    # 把 revision 摘掉后必须能反序列化回 QAFeedback
-    qaf_payload = {k: v for k, v in payload.items() if k != "revision"}
-    rebuilt = QAFeedback.model_validate(qaf_payload)
+    # P2-b：revision 已纳入 QAFeedback 模型，整个 payload 直接校验通过（不再需要摘 revision）
+    rebuilt = QAFeedback.model_validate(payload)
     assert rebuilt.from_verdict_id == "vd_1"
+    assert rebuilt.revision == 1
 
 
 def test_qa_feedback_payload_revision_increments_with_round() -> None:
@@ -380,6 +380,24 @@ def test_qa_feedback_payload_revision_increments_with_round() -> None:
     payload = outcome.qa_feedback_by_node["analyst_v2"]
     # qa_round = qa_round_count + 1 = 2
     assert payload["revision"] == 2
+
+
+def test_validate_qa_feedback_is_fail_soft() -> None:
+    """P2-b 边界校验：None / 合法 payload / 畸形 payload 都不抛（畸形仅 warning）。"""
+    from backend.schemas import validate_qa_feedback
+
+    validate_qa_feedback(None)
+    validate_qa_feedback(
+        {
+            "from_verdict_id": "v",
+            "issues": [],
+            "instructions": "",
+            "must_address": [],
+            "revision": 1,
+        }
+    )
+    # 缺必填 from_verdict_id → 校验失败，但 fail-soft 只 warning，不抛
+    validate_qa_feedback({"garbage": True})
 
 
 # ---------- 控制节点不应被作为 rework 目标 ----------

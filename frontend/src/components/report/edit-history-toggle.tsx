@@ -29,14 +29,14 @@ export function EditHistoryToggle({
           active={!showV2}
           onClick={() => onChange(false)}
           icon={<GitCommitIcon className="h-3.5 w-3.5" />}
-          label="v1 · current"
-          sub="published"
+          label="当前版"
+          sub="已发布"
         />
         <ToggleBtn
           active={showV2}
           onClick={() => onChange(true)}
           icon={<GitBranchIcon className="h-3.5 w-3.5" />}
-          label="v2 · preview"
+          label="修订版 · 预览"
           sub={
             v2NodeRunning
               ? `修订生成中 · ${pendingDiffCount} 项`
@@ -58,7 +58,7 @@ export function EditHistoryToggle({
           </span>
         ) : null}
         <span className="text-[10px] uppercase tracking-wider">
-          metrics.edit_rate · auto-tracked
+          编辑率 · 自动统计
         </span>
       </div>
     </div>

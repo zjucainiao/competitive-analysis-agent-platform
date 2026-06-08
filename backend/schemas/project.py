@@ -85,6 +85,12 @@ class ProjectMetrics(BaseModel):
 
     qa_round_count: int = 0
 
+    # 跨轮质量追踪(A4)：每轮 QAVerdict 维度均分序列、相邻轮 delta、最高分轮(1-based,
+    # 0=无 verdict)。用于回答「返工后是否真有改善」并支撑 best-round 择优发布。
+    per_round_accuracy: list[float] = Field(default_factory=list)
+    round_delta: list[float] = Field(default_factory=list)
+    best_round: int = 0
+
     real_fetch_count: int = 0
     mock_fetch_count: int = 0
 

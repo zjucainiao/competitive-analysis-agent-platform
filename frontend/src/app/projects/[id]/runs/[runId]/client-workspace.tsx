@@ -30,7 +30,7 @@ import { runViewToProjectState } from "@/lib/api/run-view-to-state";
 import { useProjectEvents } from "@/lib/api/ws";
 import {
   apiStateToDagData,
-  findLatestReporter,
+  findBestReporter,
   aggregateEvidences,
 } from "@/lib/api/adapters";
 import { DEMO_RUN_CONTEXT } from "@/lib/mock-run";
@@ -43,7 +43,9 @@ import type {
   RunStateView,
   RunRef,
   DAGNode,
+  CollectProgressSource,
 } from "@/lib/api/types";
+import { CollectLiveFeed } from "@/components/dag/collect-live-feed";
 import type { RunStatus } from "@/lib/workspace-actions";
 import type { DagNodeData } from "@/lib/dag-mock";
 
@@ -115,7 +117,13 @@ function TabBody({
     );
   }
   const dagData = apiStateToDagData(state);
-  const latestReporter = findLatestReporter(state.outputs);
+  // 发布择优：run 已结束(done)时展示「历史最优轮」报告，与 markdown 导出 / 接受发布
+  // 同口径（best_round_reporter_key），让「看到的=发布的」；运行/返工途中仍看最新在产版。
+  const reportFinished = state.project.status === "done";
+  const shownReporter = findBestReporter(
+    state.outputs,
+    reportFinished ? state.project.metrics?.best_round : null
+  );
   const allEvidences = aggregateEvidences(state.outputs);
   const ctx = projectToRunContext(state.project);
   return (
@@ -148,9 +156,9 @@ function TabBody({
         </div>
       )}
       {tab === "report" &&
-        (latestReporter ? (
+        (shownReporter ? (
           <ReportLayout
-            apiReporter={latestReporter}
+            apiReporter={shownReporter}
             apiEvidences={allEvidences}
             apiProjectId={projectId ?? undefined}
             apiVerdicts={state.verdicts}
@@ -170,7 +178,11 @@ function TabBody({
       )}
       {tab === "metrics" &&
         (state.project?.metrics ? (
-          <MetricsLayout ctx={ctx} apiProject={state.project} />
+          <MetricsLayout
+            ctx={ctx}
+            apiProject={state.project}
+            apiOutputs={state.outputs}
+          />
         ) : (
           <WorkspaceEmpty
             icon={BarChart3Icon}
@@ -250,8 +262,19 @@ function ApiWorkspace({
     mutate: mutateRunState,
   } = useRunState(projectId);
 
-  const { status: wsStatus, reconnect: wsReconnect } = useProjectEvents(projectId, {
+  const {
+    events: wsEvents,
+    status: wsStatus,
+    reconnect: wsReconnect,
+  } = useProjectEvents(projectId, {
     onMessage: (msg) => {
+      // 采集进度事件由「实时采集」面板消费，不改 run-state，跳过整页 revalidate（避免刷屏）。
+      if (
+        (msg.metadata as { kind?: string } | undefined)?.kind ===
+        "collect_progress"
+      ) {
+        return;
+      }
       void revalidate.runState(projectId);
       void revalidate.project(projectId);
       if (msg.status === "failed" && msg.error) {
@@ -267,6 +290,27 @@ function ApiWorkspace({
       }
     },
   });
+
+  // 从 WS 累积事件里解出采集进度（按 product|url 去重，后到的覆盖——返工重采会更新身份判定）。
+  const liveSources: CollectProgressSource[] = useMemo(() => {
+    const map = new Map<string, CollectProgressSource>();
+    for (const e of wsEvents) {
+      const m = e.metadata as Record<string, unknown> | undefined;
+      if (!m || m.kind !== "collect_progress") continue;
+      const product = String(m.product ?? "");
+      const url = String(m.url ?? "");
+      if (!product || !url) continue;
+      map.set(`${product}|${url}`, {
+        product,
+        url,
+        title: (m.title as string) ?? null,
+        dimension: String(m.dimension ?? ""),
+        identity_status: String(m.identity_status ?? "unvalidated"),
+        detected_product_name: (m.detected_product_name as string) ?? null,
+      });
+    }
+    return [...map.values()];
+  }, [wsEvents]);
 
   const error = projectError ?? runStateError;
   if (error) {
@@ -290,6 +334,7 @@ function ApiWorkspace({
       project={project}
       runState={runState}
       tab={tab}
+      liveSources={liveSources}
       wsConnected={wsStatus === "open"}
       wsStatus={wsStatus}
       onReconnect={wsReconnect}
@@ -302,6 +347,7 @@ function ApiWorkspaceShell({
   project,
   runState,
   tab,
+  liveSources,
   wsConnected,
   wsStatus,
   onReconnect,
@@ -310,6 +356,7 @@ function ApiWorkspaceShell({
   project: Project;
   runState: RunStateView;
   tab: TabKey;
+  liveSources: CollectProgressSource[];
   wsConnected: boolean;
   wsStatus: string;
   onReconnect: () => void;
@@ -395,6 +442,7 @@ function ApiWorkspaceShell({
             )}
           </div>
         )}
+        <CollectLiveFeed sources={liveSources} runStatus={runState.status} />
         <TabBody
           tab={tab}
           state={state}

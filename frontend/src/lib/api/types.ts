@@ -67,6 +67,10 @@ export interface ProjectMetrics {
   total_cost_usd: number;
   duration_seconds: number;
   qa_round_count: number;
+  // 跨轮质量追踪：每轮 QA 维度均分序列 / 相邻轮 delta / 最高分轮(1-based, 0=无 verdict)。
+  per_round_accuracy: number[];
+  round_delta: number[];
+  best_round: number;
   real_fetch_count: number;
   mock_fetch_count: number;
   manual_edits: number;
@@ -233,6 +237,9 @@ export interface AgentOutputBase {
   cost_usd: number;
   duration_ms: number;
   errors: AgentError[];
+  /** 本次 invoke 输入的紧凑摘要（后端 summarize_agent_input 生成）。
+   *  让 node detail 的「输入」区与「输出」对称可观测。旧数据可能缺省。 */
+  input_snapshot?: Record<string, string>;
 }
 
 /* RawSourceDoc / Evidence */
@@ -342,7 +349,8 @@ export type QADimension =
   | "logic_consistency"
   | "freshness"
   | "expression"
-  | "coverage_density";
+  | "coverage_density"
+  | "identity_consistency";
 
 export interface QAIssue {
   issue_id: string;
@@ -530,6 +538,19 @@ export interface NodeExecutionResult {
   output: AnyAgentOutput | null;
   error: AgentError | null;
   next_nodes: string[];
+  /** 进度/旁路事件载荷。``metadata.kind === "collect_progress"`` 时携带逐条来源信息
+   * （实时采集面板消费；复用 NodeExecutionResult 通道，不另开 schema）。 */
+  metadata?: Record<string, unknown>;
+}
+
+/** 采集实时进度的单条来源（从 collect_progress 事件 metadata 解出）。 */
+export interface CollectProgressSource {
+  product: string;
+  url: string;
+  title: string | null;
+  dimension: string;
+  identity_status: string;
+  detected_product_name: string | null;
 }
 
 /* ── interventions ───────────────────────────────────────────────────── */

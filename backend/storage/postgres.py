@@ -246,15 +246,21 @@ class PostgresStateStore:
     # ----- NodeOutput -----
 
     async def save_node_output(
-        self, project_id: str, node_id: str, output: AgentOutputBase
+        self,
+        project_id: str,
+        node_id: str,
+        output: AgentOutputBase,
+        *,
+        run_id: str | None = None,
     ) -> None:
         payload = dump_output(output)
         sql = text(
             """
-            INSERT INTO node_outputs (project_id, node_id, agent_name, status, payload, saved_at)
-            VALUES (:project_id, :node_id, :agent_name, :status, CAST(:payload AS jsonb), now())
+            INSERT INTO node_outputs (project_id, node_id, run_id, agent_name, status, payload, saved_at)
+            VALUES (:project_id, :node_id, :run_id, :agent_name, :status, CAST(:payload AS jsonb), now())
             ON CONFLICT (project_id, node_id) DO UPDATE
-              SET agent_name = EXCLUDED.agent_name,
+              SET run_id = EXCLUDED.run_id,
+                  agent_name = EXCLUDED.agent_name,
                   status = EXCLUDED.status,
                   payload = EXCLUDED.payload,
                   saved_at = now()
@@ -266,51 +272,68 @@ class PostgresStateStore:
                 {
                     "project_id": project_id,
                     "node_id": node_id,
+                    "run_id": run_id,
                     "agent_name": output.agent_name,
                     "status": output.status.value,
                     "payload": json.dumps(payload, default=str),
                 },
             )
 
+    # P2-RUNSCOPE：run_id 省略时作用域为「最新一次 run」。用 ``IS NOT DISTINCT FROM
+    # (SELECT max(run_id) ...)`` —— max 忽略 NULL，全是老行(run_id=NULL)时退化为匹配
+    # NULL 行，故对未迁移数据向后兼容。
+    _RUN_SCOPE = (
+        "run_id IS NOT DISTINCT FROM "
+        "(SELECT max(run_id) FROM node_outputs WHERE project_id = :pid)"
+    )
+
     async def get_node_output(
-        self, project_id: str, node_id: str
+        self, project_id: str, node_id: str, *, run_id: str | None = None
     ) -> AgentOutputBase | None:
+        scope = "run_id = :run_id" if run_id is not None else self._RUN_SCOPE
         sql = text(
             "SELECT payload FROM node_outputs "
-            "WHERE project_id = :pid AND node_id = :nid"
+            f"WHERE project_id = :pid AND node_id = :nid AND {scope}"
         )
+        params = {"pid": project_id, "nid": node_id}
+        if run_id is not None:
+            params["run_id"] = run_id
         async with self._engine.connect() as conn:
-            row = (
-                await conn.execute(sql, {"pid": project_id, "nid": node_id})
-            ).first()
+            row = (await conn.execute(sql, params)).first()
         if row is None:
             return None
         return load_output(_as_dict(row[0]))
 
     async def list_node_outputs(
-        self, project_id: str
+        self, project_id: str, *, run_id: str | None = None
     ) -> dict[str, AgentOutputBase]:
+        scope = "run_id = :run_id" if run_id is not None else self._RUN_SCOPE
         sql = text(
-            "SELECT node_id, payload FROM node_outputs WHERE project_id = :pid"
+            "SELECT node_id, payload FROM node_outputs "
+            f"WHERE project_id = :pid AND {scope}"
         )
+        params = {"pid": project_id}
+        if run_id is not None:
+            params["run_id"] = run_id
         async with self._engine.connect() as conn:
-            rows = (await conn.execute(sql, {"pid": project_id})).all()
+            rows = (await conn.execute(sql, params)).all()
         return {r[0]: load_output(_as_dict(r[1])) for r in rows}
 
     # ----- QAVerdict -----
 
     async def save_qa_verdict(
-        self, project_id: str, verdict: QAVerdict
+        self, project_id: str, verdict: QAVerdict, *, run_id: str | None = None
     ) -> None:
         payload = verdict.model_dump(mode="json")
         sql = text(
             """
             INSERT INTO qa_verdicts
-              (verdict_id, project_id, overall_status, blocking, payload, created_at)
+              (verdict_id, project_id, run_id, overall_status, blocking, payload, created_at)
             VALUES
-              (:verdict_id, :project_id, :status, :blocking, CAST(:payload AS jsonb), now())
+              (:verdict_id, :project_id, :run_id, :status, :blocking, CAST(:payload AS jsonb), now())
             ON CONFLICT (verdict_id) DO UPDATE
-              SET overall_status = EXCLUDED.overall_status,
+              SET run_id = EXCLUDED.run_id,
+                  overall_status = EXCLUDED.overall_status,
                   blocking = EXCLUDED.blocking,
                   payload = EXCLUDED.payload
             """
@@ -321,22 +344,35 @@ class PostgresStateStore:
                 {
                     "verdict_id": verdict.verdict_id,
                     "project_id": project_id,
+                    "run_id": run_id,
                     "status": verdict.overall_status.value,
                     "blocking": verdict.blocking,
                     "payload": json.dumps(payload, default=str),
                 },
             )
 
-    async def list_qa_verdicts(self, project_id: str) -> list[QAVerdict]:
-        sql = text(
-            """
-            SELECT payload FROM qa_verdicts
-             WHERE project_id = :pid
-             ORDER BY created_at DESC
-            """
+    async def list_qa_verdicts(
+        self, project_id: str, *, run_id: str | None = None
+    ) -> list[QAVerdict]:
+        # P2-RUNSCOPE：run_id 省略 → 只取最新一次 run 的 verdict(同上 max+IS NOT DISTINCT)。
+        scope = (
+            "run_id = :run_id"
+            if run_id is not None
+            else (
+                "run_id IS NOT DISTINCT FROM "
+                "(SELECT max(run_id) FROM qa_verdicts WHERE project_id = :pid)"
+            )
         )
+        sql = text(
+            "SELECT payload FROM qa_verdicts "
+            f"WHERE project_id = :pid AND {scope} "
+            "ORDER BY created_at DESC"
+        )
+        params = {"pid": project_id}
+        if run_id is not None:
+            params["run_id"] = run_id
         async with self._engine.connect() as conn:
-            rows = (await conn.execute(sql, {"pid": project_id})).all()
+            rows = (await conn.execute(sql, params)).all()
         return [QAVerdict.model_validate(_as_dict(r[0])) for r in rows]
 
     # ----- LLMCallRecord -----

@@ -24,9 +24,9 @@ import { apiProjectToCard } from "./adapters";
 type SortKey = "recent" | "name" | "competitors";
 
 const SORTS: Array<{ id: SortKey; label: string }> = [
-  { id: "recent", label: "Recently updated" },
-  { id: "name", label: "Name (A-Z)" },
-  { id: "competitors", label: "Most competitors" },
+  { id: "recent", label: "最近更新" },
+  { id: "name", label: "名称（A-Z）" },
+  { id: "competitors", label: "竞品最多" },
 ];
 
 /**
@@ -44,7 +44,8 @@ export function ProjectsList() {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("recent");
 
-  const projects = data?.projects ?? [];
+  // useMemo 稳定 projects 身份（裸 `?? []` 每次新建数组 → 触发下游 useMemo 每帧重算）
+  const projects = useMemo(() => data?.projects ?? [], [data]);
 
   const industries = useMemo(() => {
     const map = new Map<string, string>();
@@ -100,7 +101,7 @@ export function ProjectsList() {
       <header className="flex flex-wrap items-end justify-between gap-3 border-b border-border-subtle pb-4">
         <div>
           <div className="text-xs font-medium uppercase tracking-wider text-text-muted">
-            Projects
+            项目
           </div>
           <h1 className="mt-1 text-xl font-semibold text-text-primary">
             竞品分析项目
@@ -113,15 +114,9 @@ export function ProjectsList() {
           />
         </div>
         <div className="flex items-center gap-3">
-          <Link
-            href="/design-system"
-            className="text-xs text-text-muted hover:text-text-secondary"
-          >
-            → design system
-          </Link>
           <Button render={<Link href="/projects/new" />}>
             <SparklesIcon className="h-3.5 w-3.5" />
-            <span>New analysis</span>
+            <span>新建分析</span>
           </Button>
         </div>
       </header>
@@ -155,7 +150,7 @@ export function ProjectsList() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[10px] uppercase tracking-wider text-text-muted">
-              industry
+              行业
             </span>
             <button
               type="button"
@@ -167,7 +162,7 @@ export function ProjectsList() {
                   : "border-transparent text-text-muted hover:text-text-secondary"
               )}
             >
-              any
+              不限
             </button>
             {industries.map((i) => (
               <button
@@ -193,7 +188,7 @@ export function ProjectsList() {
               <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-muted" />
               <Input
                 type="search"
-                placeholder="搜索项目 / target / 竞品"
+                placeholder="搜索项目 / 目标产品 / 竞品"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-[260px] pl-8"
@@ -203,7 +198,7 @@ export function ProjectsList() {
                   type="button"
                   onClick={() => setSearch("")}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary"
-                  aria-label="clear"
+                  aria-label="清除"
                 >
                   <XIcon className="h-3.5 w-3.5" />
                 </button>
@@ -216,7 +211,7 @@ export function ProjectsList() {
             >
               {SORTS.map((s) => (
                 <option key={s.id} value={s.id}>
-                  Sort · {s.label}
+                  排序 · {s.label}
                 </option>
               ))}
             </select>
@@ -332,7 +327,7 @@ function ApiErrorBanner({
       </div>
       <Button size="sm" variant="outline" onClick={onRetry} className="gap-1.5">
         <PlugZapIcon className="h-3 w-3" />
-        Retry
+        重试
       </Button>
     </div>
   );
@@ -367,7 +362,7 @@ function EmptyState({
           ? "没有匹配当前筛选条件的项目。"
           : hasAnyProjects
             ? "本筛选下无结果。"
-            : "暂无项目。点右上「New analysis」创建第一个。"}
+            : "暂无项目。点右上「新建分析」创建第一个。"}
       </p>
       {hasFilter ? (
         <Button size="sm" variant="outline" onClick={clear} className="mt-3">
@@ -381,7 +376,7 @@ function EmptyState({
             className="mt-3 gap-1.5"
           >
             <SparklesIcon className="h-3 w-3" />
-            <span>New analysis</span>
+            <span>新建分析</span>
           </Button>
         )
       )}

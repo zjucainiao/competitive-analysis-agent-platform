@@ -180,6 +180,34 @@ async def test_state_store_node_output_polymorphic(
     assert type(fetched).__name__ == "CollectorOutput"
 
 
+async def test_node_outputs_run_scoped_excludes_stale_prior_run(
+    make_project, make_collector_output
+):
+    """P2-RUNSCOPE：list_node_outputs 默认只返回最新一次 run 的产出。
+
+    run_A 有返工(n1 + n1_v2)；run_B 没返工(只有 n1)。默认列表只应见 run_B 的 n1，
+    run_A 的旧 n1_v2 不能混进来；显式 run_id 仍可分别取回各 run。
+    """
+    ss = InMemoryStateStore()
+    project = make_project()
+    await ss.save_project(project)
+    pid = project.project_id
+
+    await ss.save_node_output(pid, "n1", make_collector_output(), run_id="run_A")
+    await ss.save_node_output(pid, "n1_v2", make_collector_output(), run_id="run_A")
+    # run_B 没返工：只 upsert n1（同 (pid,node_id) 主键 → 覆盖 run_A 的 n1 行，
+    # 带上 run_B 的 run_id）；run_A 的 n1_v2 行保持不变。
+    await ss.save_node_output(pid, "n1", make_collector_output(), run_id="run_B")
+
+    # 默认 → 最新 run(run_B)：只见 n1；run_A 的旧 n1_v2 被排除（核心修复点）
+    assert set(await ss.list_node_outputs(pid)) == {"n1"}
+    # n1_v2 这条仍带 run_A：默认作用域(最新=run_B)取不到，显式 run_A 才取得到
+    assert await ss.get_node_output(pid, "n1_v2") is None
+    assert await ss.get_node_output(pid, "n1_v2", run_id="run_A") is not None
+    # 显式最新 run 也只见 n1
+    assert set(await ss.list_node_outputs(pid, run_id="run_B")) == {"n1"}
+
+
 async def test_state_store_qa_verdicts_ordered_desc(
     make_project, make_qa_verdict
 ):

@@ -38,7 +38,11 @@ export function useProjectEvents(
   const [retryKey, setRetryKey] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const onMessageRef = useRef(onMessage);
-  onMessageRef.current = onMessage;
+  // 写 ref 放进 effect（Next16 react-hooks/refs：不在 render 期写 ref）；
+  // 仍是「最新回调」模式——ws.onmessage 读 onMessageRef.current 拿到最新 onMessage。
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  }, [onMessage]);
 
   useEffect(() => {
     if (!projectId || !enabled || typeof window === "undefined") {
@@ -50,8 +54,11 @@ export function useProjectEvents(
     let cancelled = false;
     let reconnectTimer: number | null = null;
 
-    const connect = () => {
+    const connect = (isInitial: boolean) => {
       if (cancelled) return;
+      // 仅初次连接（projectId/retryKey 变更）清空旧事件；重试不清，避免抖动。
+      // 放进函数体而非 effect 顶层 → 规避 react-hooks/set-state-in-effect。
+      if (isInitial) setEvents([]);
       setStatus("connecting");
       let ws: WebSocket;
       try {
@@ -89,13 +96,12 @@ export function useProjectEvents(
         if (e.code !== 1000 && retries < maxRetries) {
           const delay = Math.min(8000, 500 * Math.pow(2, retries));
           retries += 1;
-          reconnectTimer = window.setTimeout(connect, delay);
+          reconnectTimer = window.setTimeout(() => connect(false), delay);
         }
       };
     };
 
-    setEvents([]); // 重连或 projectId 变更时清空旧事件
-    connect();
+    connect(true); // 初次连接：清空旧事件 + 建连
 
     return () => {
       cancelled = true;

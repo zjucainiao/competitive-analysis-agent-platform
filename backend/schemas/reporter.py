@@ -24,7 +24,11 @@ class ReportParagraph(BaseModel):
     claim_ids: list[str] = Field(default_factory=list)
     evidence_ids: list[str] = Field(
         default_factory=list,
-        description="非软结论段落必须非空，否则在 BaseAgent 输出校验阶段拒绝",
+        description=(
+            "schema 层**有意允许为空**(default=[])，便于 Reporter 分步构建草稿；"
+            "‘非软结论段落必须非空’这一条件性约束**不在本模型**强制，而由 "
+            "Reporter._post_validate 在输出校验阶段拒绝（见 reporter/agent.py）。"
+        ),
     )
     is_quantitative: bool = Field(
         default=False,
@@ -73,6 +77,14 @@ class ReporterInput(AgentInputBase):
     output_format: Literal["markdown", "html"] = "markdown"
     target_audience: str | None = None
     qa_feedback: dict | None = None
+    prior_draft: ReportDraft | None = Field(
+        default=None,
+        description=(
+            "返工时上一版草稿。配合 qa_feedback.must_address 做『定向改稿』："
+            "只重写被 QA 命中 location 的 section，其余 section 原样复用，"
+            "让反馈真正有抓手（而非整篇无状态重生成）。None → 全篇生成（首轮/兜底）。"
+        ),
+    )
 
 
 class ReporterOutput(AgentOutputBase):

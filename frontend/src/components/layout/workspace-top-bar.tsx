@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ClockIcon,
-  BellIcon,
   PanelRightCloseIcon,
   PanelRightOpenIcon,
 } from "lucide-react";
@@ -55,10 +54,16 @@ export function WorkspaceTopBar({
   railOpen?: boolean;
   onToggleRail?: () => void;
 }) {
-  const pct =
-    progressTotal > 0
-      ? Math.min(100, Math.round((progressDone / progressTotal) * 100))
-      : 0;
+  const pct = (() => {
+    if (progressTotal <= 0) return 0;
+    const raw = Math.min(100, Math.round((progressDone / progressTotal) * 100));
+    // 运行中(含 QA 返工)永不显示 100%：返工时 round-1 的节点已全部终态，raw 会到
+    // 100，但 run 仍在迭代 → 「100% 却还在跑」自相矛盾。封顶 99，待真正跑完再满。
+    if ((runStatus === "running" || runStatus === "rework") && raw >= 100) {
+      return 99;
+    }
+    return raw;
+  })();
 
   return (
     <div className="fixed inset-x-0 top-0 z-30 flex h-16 items-center border-b border-border-subtle bg-bg-overlay/80 backdrop-blur">
@@ -122,13 +127,6 @@ export function WorkspaceTopBar({
         </div>
         <CmdTrigger />
         <ThemeToggle />
-        <button
-          type="button"
-          aria-label="通知"
-          className="flex h-8 w-8 items-center justify-center rounded-md text-text-muted hover:bg-bg-hover hover:text-text-primary"
-        >
-          <BellIcon className="h-4 w-4" />
-        </button>
         {onToggleRail ? (
           <RailToggleButton open={!!railOpen} onClick={onToggleRail} />
         ) : null}

@@ -15,6 +15,21 @@ import { emitIntervention } from "@/lib/workspace-actions";
 import { cn } from "@/lib/utils";
 
 /**
+ * 展示前清洗：把标题/说明里的内部命名（reporter_v2 / Reporter / _v2 / (v1)）
+ * 替换成读者向中文，避免在「决策回放」面板泄漏内部术语。
+ */
+function sanitizeText(text: string): string {
+  return text
+    .replace(/reporter[\s_]*v(\d+)/gi, "报告（修订版）")
+    .replace(/reporter\s*\(v1\)/gi, "报告（当前版）")
+    .replace(/\bqa[\s_]*v(\d+)/gi, "质检（修订版）")
+    .replace(/\bReporter\b/g, "报告")
+    .replace(/\bAnalyst\b/g, "分析")
+    .replace(/\(v1\)/g, "（当前版）")
+    .replace(/_v(\d+)\b/g, "（修订版）");
+}
+
+/**
  * v1 ↔ v2 prompt diff 抽屉。
  *
  * 评分项「Agent 决策回放 · QA 反馈闭环可视化」的杀手锏：
@@ -44,7 +59,7 @@ export function DiffSheet({
         >
           <SheetHeader className="gap-2 border-b border-border-subtle p-5">
             <SheetTitle className="text-base font-semibold">
-              v1 ↔ v2 prompt diff
+              当前版 ↔ 修订版 提示词对比
             </SheetTitle>
             <SheetDescription className="text-xs text-text-secondary">
               本次运行暂无返工轮次
@@ -70,17 +85,17 @@ export function DiffSheet({
       >
         <SheetHeader className="gap-2 border-b border-border-subtle p-5">
           <SheetTitle className="text-base font-semibold">
-            v1 ↔ v2 prompt diff
+            当前版 ↔ 修订版 提示词对比
           </SheetTitle>
           <SheetDescription className="text-xs text-text-secondary">
-            {pair.description}
+            {sanitizeText(pair.description)}
           </SheetDescription>
         </SheetHeader>
 
         <div className="p-5">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div className="text-sm font-medium text-text-primary">
-              {pair.label}
+              {sanitizeText(pair.label)}
             </div>
             <div className="flex items-center gap-1.5">
               <Button
@@ -90,13 +105,13 @@ export function DiffSheet({
                   if (typeof navigator !== "undefined" && navigator.clipboard) {
                     navigator.clipboard.writeText(pair.rightContent);
                   }
-                  toast.success("v2 prompt 已复制");
+                  toast.success("修订版提示词已复制");
                   emitIntervention("copy-diff", pair.id);
                 }}
                 className="gap-1.5"
               >
                 <CopyIcon className="h-3 w-3" />
-                Copy v2
+                复制修订版
               </Button>
             </div>
           </div>
@@ -109,10 +124,10 @@ export function DiffSheet({
           />
 
           <p className="mt-4 text-[11px] text-text-muted leading-relaxed">
-            高亮行：<span className="text-success-base font-medium">绿 +</span> v2
-            新增（重写时根据质检反馈调整）·{" "}
-            <span className="text-error-base font-medium">红 −</span> v2
-            删除 · 灰色为未变行。
+            高亮行：<span className="text-success-base font-medium">绿 +</span>{" "}
+            修订版新增（重写时根据质检反馈调整）·{" "}
+            <span className="text-error-base font-medium">红 −</span>{" "}
+            修订版删除 · 灰色为未变行。
           </p>
         </div>
       </SheetContent>
@@ -120,11 +135,37 @@ export function DiffSheet({
   );
 }
 
+/** agent / 节点 slug → 中文环节名（与 Trace 过滤器 / DAG 一致，不暴露裸枚举） */
+const AGENT_LABELS: Record<string, string> = {
+  collector: "信息采集",
+  extractor: "证据入库",
+  analyst: "结构化分析",
+  reporter: "报告撰写",
+  qa: "质量审查",
+};
+
+/** 列标题里出现的内部版本标记 → 中文版本词（不暴露 reporter_v2 / (v1) 等裸名）。
+ *  把 `_v2` / `(v2)` / `· v2` 这类后缀映射为「修订版」，`v1` 映射为「当前版」，
+ *  剩余 base 若是 agent slug 再映射为中文环节名，否则原样透传。 */
+function versionTitle(raw: string): string {
+  let s = raw;
+  s = s.replace(/_v\d+\b/gi, "");
+  s = s.replace(/\s*[·•]?\s*\(?\bv\d+\)?/gi, "");
+  s = s.trim().replace(/[·•]\s*$/, "").trim();
+  const base = AGENT_LABELS[s.toLowerCase()] ?? s;
+  const suffix = /_v[2-9]\d*\b|\bv[2-9]\d*\b/i.test(raw)
+    ? " · 修订版"
+    : /\bv1\b/i.test(raw)
+      ? " · 当前版"
+      : "";
+  return (base || raw) + suffix;
+}
+
 function DiffGrid({
   left,
   right,
-  leftTitle = "reporter · v1",
-  rightTitle = "reporter_v2",
+  leftTitle = "当前版",
+  rightTitle = "修订版",
 }: {
   left: string;
   right: string;
@@ -138,11 +179,11 @@ function DiffGrid({
   return (
     <div className="grid grid-cols-2 gap-3">
       <DiffColumn
-        title={leftTitle}
+        title={versionTitle(leftTitle)}
         lines={leftLines.map((line) => ({ line, kind: "ctx" as const }))}
       />
       <DiffColumn
-        title={rightTitle}
+        title={versionTitle(rightTitle)}
         lines={rightLines.map((line) => ({
           line,
           kind: leftSet.has(line)

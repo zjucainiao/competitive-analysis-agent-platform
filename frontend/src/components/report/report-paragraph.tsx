@@ -33,7 +33,6 @@ import { useEvidenceLookup } from "@/lib/evidence-context";
  */
 export function ReportParagraph({
   paragraph,
-  index,
   showV2,
   reviewMode,
   isFocused,
@@ -126,7 +125,7 @@ export function ReportParagraph({
         />
         <div className="mt-3 flex items-center justify-between">
           <span className="text-[11px] text-text-muted">
-            保存后段落标记为 v2（用户编辑） · 计入 metrics.edit_rate
+            保存后段落标记为修订版（用户编辑） · 计入编辑率指标
           </span>
           <div className="flex items-center gap-1.5">
             <Button
@@ -137,7 +136,7 @@ export function ReportParagraph({
               className="gap-1.5"
             >
               <XIcon className="h-3.5 w-3.5" />
-              <span>Cancel</span>
+              <span>取消</span>
             </Button>
             <Button
               size="sm"
@@ -146,7 +145,7 @@ export function ReportParagraph({
               className="gap-1.5"
             >
               <CheckIcon className="h-3.5 w-3.5" />
-              <span>{saving ? "Saving…" : "Save edit"}</span>
+              <span>{saving ? "保存中…" : "保存"}</span>
             </Button>
           </div>
         </div>
@@ -231,7 +230,7 @@ function EditingHeader({ id }: { id: string }) {
     <div className="mb-2 flex items-center gap-2">
       <PenLineIcon className="h-3.5 w-3.5 text-accent-base" />
       <span className="text-xs font-medium text-text-primary">
-        Editing paragraph
+        编辑段落
       </span>
       <code className="font-mono text-[10px] text-text-muted">{id}</code>
     </div>
@@ -267,7 +266,7 @@ function QaIssueLine({
 function UserEditedBadge() {
   return (
     <span className="ml-2 inline-flex items-center rounded-pill border border-accent-border bg-accent-bg px-1.5 py-0.5 align-middle text-[10px] font-medium text-accent-base">
-      已编辑 · v2
+      已编辑 · 修订版
     </span>
   );
 }
@@ -305,6 +304,7 @@ const QA_DIMENSION_LABELS: Record<string, string> = {
   freshness: "时新性",
   expression: "表达质量",
   coverage_density: "覆盖密度",
+  identity_consistency: "产品身份一致性",
 };
 
 function qaDimensionLabel(dimension: string): string {
@@ -358,7 +358,7 @@ function V2Preview({
     <div className="mt-3 rounded-md border border-running-border bg-running-bg/40 p-3">
       <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-running-base">
         <span className="block h-1.5 w-1.5 rounded-pill bg-running-base animate-pulse-soft" />
-        <span>v2 预览 · 修订版将替换为以下内容…</span>
+        <span>修订版预览 · 将替换为以下内容…</span>
       </div>
       <p className="mt-2 text-sm leading-relaxed text-text-primary">
         {v2.text}
@@ -368,15 +368,15 @@ function V2Preview({
       </p>
       <details className="mt-2 text-[11px]">
         <summary className="cursor-pointer text-text-muted hover:text-text-secondary">
-          v1 → v2 diff
+          当前版 → 修订版 对比
         </summary>
         <div className="mt-2 grid grid-cols-2 gap-2">
           <div className="rounded-sm bg-error-bg/40 p-2">
-            <div className="mb-1 font-mono text-error-base">- v1</div>
+            <div className="mb-1 font-mono text-error-base">− 当前版</div>
             <p className="text-text-secondary">{current}</p>
           </div>
           <div className="rounded-sm bg-success-bg/40 p-2">
-            <div className="mb-1 font-mono text-success-base">+ v2</div>
+            <div className="mb-1 font-mono text-success-base">+ 修订版</div>
             <p className="text-text-secondary">{v2.text}</p>
           </div>
         </div>

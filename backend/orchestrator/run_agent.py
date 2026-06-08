@@ -50,8 +50,11 @@ def _collect_evidences(outputs: dict[str, AgentOutputBase]) -> dict[str, Evidenc
     多个 Extractor 的输出按遍历顺序后写覆盖（实际 evidence_id 跨产品全局唯一，
     不会冲突）。
     """
+    from backend.orchestrator.run_state import latest_outputs
+
     db: dict[str, Evidence] = {}
-    for nid, out in outputs.items():
+    # 收敛到每产品最新轮,避免返工后把 v1 旧证据混入 reporter/qa 的证据库
+    for nid, out in latest_outputs(outputs).items():
         if not nid.startswith("extract."):
             continue
         for ev in getattr(out, "evidences", None) or []:
@@ -123,6 +126,11 @@ async def run_agent_node(
     """
     from backend.agents._base import reset_user_prompt_override, set_user_prompt_override
     from backend.observability.llm_call_log import reset_trace_context, set_trace_context
+    from backend.schemas import validate_qa_feedback
+
+    # P2-b：qa_feedback 在 Agent input 里是裸 dict（不被 Pydantic 校验结构），
+    # 在所有 agent 的统一入口对其做一次容错结构校验，畸形 payload 早 warning。
+    validate_qa_feedback(getattr(input_obj, "qa_feedback", None))
 
     agent = _resolve_agent(registry, agent_name, outputs)
     started = _now()

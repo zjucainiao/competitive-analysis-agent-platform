@@ -71,12 +71,16 @@ export function DagCanvas({
 
   const isApiMode = nodesProp !== undefined;
 
+  // 受控同步：响应父层「打开某节点详情」请求（requestedNode 变更 → 选中并展开 sheet）。
+  // 合法的 prop→state 受控同步，对 Next16 该规则刻意豁免。
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (requestedNode) {
       setSelectedId(requestedNode);
       setSheetOpen(true);
     }
   }, [requestedNode]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (isApiMode || !isPlaying) {

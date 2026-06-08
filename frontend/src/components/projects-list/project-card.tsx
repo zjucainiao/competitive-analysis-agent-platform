@@ -24,6 +24,13 @@ import { revalidate } from "@/lib/api/hooks";
 import type { MockProject } from "@/lib/projects-mock";
 import { cn } from "@/lib/utils";
 
+/* 报告模板 id → 中文标签（隐藏内部 *_v1 命名） */
+const TEMPLATE_LABELS: Record<string, string> = {
+  standard_v1: "标准对比模板",
+  single_research_v1: "单产品调研模板",
+};
+const templateLabel = (id: string): string => TEMPLATE_LABELS[id] ?? id;
+
 async function callOrToast(
   label: string,
   op: () => Promise<unknown>,
@@ -49,7 +56,7 @@ export function ProjectCard({
 }) {
   const href = project.isLive
     ? `/projects/${project.id}/runs/${project.lastRunId}`
-    : "#";
+    : `/projects/${project.id}`;
 
   return (
     <article
@@ -72,7 +79,7 @@ export function ProjectCard({
               {project.name}
               {project.isLive ? (
                 <span className="ml-2 inline-flex items-center rounded-pill border border-accent-border bg-accent-bg px-1.5 py-0.5 align-middle text-[10px] font-medium text-accent-base">
-                  live demo
+                  演示
                 </span>
               ) : null}
             </Link>
@@ -97,24 +104,22 @@ export function ProjectCard({
             <span>{project.industryLabel}</span>
             <span className="text-border-default">·</span>
             <span>
-              template{" "}
-              <code className="font-mono text-text-secondary">
-                {project.templateId}
-              </code>
+              报告模板{" "}
+              <span className="text-text-secondary">
+                {templateLabel(project.templateId)}
+              </span>
             </span>
             <span className="text-border-default">·</span>
-            <span>
-              {project.runCount} run{project.runCount === 1 ? "" : "s"}
-            </span>
+            <span>{project.runCount} 次运行</span>
             <span className="text-border-default">·</span>
-            <span>updated {project.lastUpdatedAt}</span>
+            <span>更新于 {project.lastUpdatedAt}</span>
           </div>
 
           {/* compact metrics */}
           {project.metrics.spans > 0 ? (
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
               <Metric
-                label="accuracy"
+                label="准确率"
                 value={project.metrics.accuracy?.toFixed(2) ?? "—"}
                 tone={
                   project.metrics.accuracy == null
@@ -125,18 +130,18 @@ export function ProjectCard({
                 }
               />
               <Metric
-                label="coverage"
+                label="覆盖率"
                 value={project.metrics.coverage?.toFixed(2) ?? "—"}
               />
               <Metric
-                label="edit_rate"
+                label="修订率"
                 value={project.metrics.editRate?.toFixed(2) ?? "—"}
               />
               <Metric
-                label="cost"
+                label="成本"
                 value={`$${project.metrics.costUsd.toFixed(2)}`}
               />
-              <Metric label="spans" value={String(project.metrics.spans)} />
+              <Metric label="段落数" value={String(project.metrics.spans)} />
             </div>
           ) : null}
         </div>
@@ -147,24 +152,24 @@ export function ProjectCard({
           <div className="flex items-center gap-1 opacity-0 transition-opacity duration-120 ease-out-quart group-hover:opacity-100">
             <ActionIconButton
               icon={RotateCcwIcon}
-              label="Rerun"
+              label="重新运行"
               onClick={async () => {
                 if (project.isLive) {
                   const ok = await callOrToast(
-                    "Rerun",
+                    "重新运行",
                     () => restartRun(project.id),
-                    `${project.name} · 已派发新一轮 run`
+                    `${project.name} · 已派发新一轮分析`
                   );
                   if (ok) await revalidate.projects();
                 } else {
-                  toast.info(`${project.name} · 已派发新一轮 run（mock）`);
+                  toast.info(`${project.name} · 已派发新一轮分析（演示）`);
                 }
                 emitIntervention("rerun", project.id);
               }}
             />
             <ActionIconButton
               icon={CopyIcon}
-              label="Duplicate"
+              label="复制"
               onClick={() => {
                 toast.info(`${project.name} · 已复制为草稿`, {
                   description: "该功能暂未开放",
@@ -174,11 +179,11 @@ export function ProjectCard({
             />
             <ActionIconButton
               icon={ArchiveIcon}
-              label={project.archived ? "Unarchive" : "Archive"}
+              label={project.archived ? "取消归档" : "归档"}
               onClick={async () => {
                 onToggleArchive(project.id);
                 if (project.isLive) {
-                  const action = project.archived ? "Unarchive" : "Archive";
+                  const action = project.archived ? "取消归档" : "归档";
                   const ok = await callOrToast(
                     action,
                     () =>
@@ -197,18 +202,18 @@ export function ProjectCard({
             />
             <ActionIconButton
               icon={Trash2Icon}
-              label="Delete"
+              label="删除"
               onClick={async () => {
                 if (project.isLive) {
                   const ok = await callOrToast(
-                    "Delete",
+                    "删除",
                     () => deleteProject(project.id),
                     `${project.name} · 已移至回收站 · 30 天内可恢复`
                   );
                   if (ok) await revalidate.projects();
                 } else {
                   toast.warning(`${project.name} · 已移至回收站`, {
-                    description: "30 天内可恢复（mock）",
+                    description: "30 天内可恢复（演示）",
                   });
                 }
                 emitIntervention("delete", project.id);
@@ -218,7 +223,7 @@ export function ProjectCard({
           </div>
           {project.isLive ? (
             <Button render={<Link href={href} />} size="sm">
-              <span>Open</span>
+              <span>进入</span>
               <ArrowRightIcon className="h-3 w-3" />
             </Button>
           ) : (
@@ -227,13 +232,13 @@ export function ProjectCard({
               size="sm"
               onClick={() =>
                 toast.info(`${project.name}`, {
-                  description: "此项目还在草稿状态 · 创建 run 后会有可进入的 workspace",
+                  description: "此项目还在草稿状态 · 启动分析后即可进入工作台",
                 })
               }
               className="gap-1.5"
             >
               <MoreHorizontalIcon className="h-3.5 w-3.5" />
-              <span>Details</span>
+              <span>详情</span>
             </Button>
           )}
         </div>

@@ -37,7 +37,9 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  // 懒初始化：无 token → loading 直接 false（不再在 effect 里同步 setLoading，
+  // 规避 Next16 react-hooks/set-state-in-effect）；有 token 才进 effect 拉 /me。
+  const [loading, setLoading] = useState(() => !!getAuthToken());
 
   const logout = useCallback(() => {
     setAuthToken(null);
@@ -54,12 +56,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => setUnauthorizedHandler(null);
   }, [router]);
 
-  /* 挂载时：有 token 就拉 /me 校验 */
+  /* 挂载时：有 token 就拉 /me 校验（无 token → loading 已懒初始化为 false） */
   useEffect(() => {
     let alive = true;
-    const token = getAuthToken();
-    if (!token) {
-      setLoading(false);
+    if (!getAuthToken()) {
       return;
     }
     fetchMe()

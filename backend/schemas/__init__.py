@@ -92,6 +92,7 @@ from .qa import (
     QARouting,
     QAStatus,
     QAVerdict,
+    validate_qa_feedback,
 )
 
 # Infrastructure
@@ -202,6 +203,7 @@ __all__ = [
     "QADimension",
     "QADimensionResult",
     "QAFeedback",
+    "validate_qa_feedback",
     "QAInput",
     "QAIssue",
     "QAOutput",

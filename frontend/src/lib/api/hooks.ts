@@ -55,7 +55,19 @@ export function useProject(
   return useSWR<Project>(
     id ? KEYS.project(id) : null,
     () => getProject(id!),
-    { revalidateOnFocus: false, ...config }
+    {
+      revalidateOnFocus: false,
+      // 运行中的项目轮询，让顶部状态 pill 在 run 结束后能自动翻到 done/failed；
+      // 静态项目(draft/done/failed)停轮询。
+      refreshInterval: (latest?: Project) =>
+        latest === undefined ||
+        latest.status === "running" ||
+        latest.status === "reviewing" ||
+        latest.status === "planning"
+          ? 5000
+          : 0,
+      ...config,
+    }
   );
 }
 
@@ -68,7 +80,12 @@ export function useRunState(
     () => getRunStateView(id!),
     {
       revalidateOnFocus: false,
-      refreshInterval: 30000,
+      // 动态轮询：运行中(含 QA 返工，后端此时 status 仍为 "running")每 3s 拉一次，
+      // 给足「实时感」；跑到终态(done/failed/aborted)即停，避免空轮询。
+      // 旧实现固定 30s —— run 每 ~15s 推进一个节点，30s 轮询会让进度「跳着走」，
+      // 返工时尤其割裂。
+      refreshInterval: (latest?: RunStateView) =>
+        latest === undefined || latest.status === "running" ? 3000 : 0,
       ...config,
     }
   );

@@ -60,6 +60,7 @@ export default function HomePage() {
 function HeroSearchCard() {
   const router = useRouter();
   const { user } = useAuth();
+  const { data: projectsData } = useProjects();
   const [query, setQuery] = useState("");
 
   const greeting = useMemo(() => {
@@ -79,6 +80,16 @@ function HeroSearchCard() {
     const q = query.trim();
     if (!q) {
       router.push("/projects/new");
+      return;
+    }
+    // 若已分析过同名产品 → 直接打开它的报告，不重复新建
+    const match = (projectsData?.projects ?? [])
+      .filter((p) => p.status !== "archived" && p.status !== "deleted")
+      .find((p) => p.target_product.trim().toLowerCase() === q.toLowerCase());
+    if (match) {
+      router.push(
+        `/projects/${match.project_id}/runs/${match.project_id}?tab=report`
+      );
       return;
     }
     router.push(`/projects/new?target=${encodeURIComponent(q)}`);
@@ -147,7 +158,7 @@ function RecentProjectsSection() {
       <header className="flex items-center justify-between border-b border-border-subtle px-5 py-3">
         <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-text-muted">
           <ClockIcon className="h-3 w-3" />
-          <span>Recent projects</span>
+          <span>最近项目</span>
           {recent.length > 0 ? (
             <span
               className="ml-1 font-mono text-text-secondary tabular-nums"

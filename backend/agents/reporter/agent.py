@@ -89,6 +89,11 @@ from .tools import (
 
 PROMPT_DIR = Path(__file__).parent / "prompts"
 
+# B1 定向改稿：从 QA issue.location 解析 section 归属。
+# 形如 ``report.sections[2].paragraphs[0]`` / ``report.paragraphs[p_sw_01]``。
+_SECTION_IDX_RE = re.compile(r"report\.sections\[(\d+)\]")
+_PARAGRAPH_ID_RE = re.compile(r"report\.paragraphs\[([^\]]+)\]")
+
 
 class EntailmentVerdict(BaseModel):
     """LLM-as-judge 对单段事实陈述的语义校验结果。
@@ -293,6 +298,47 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
 
     # ----- 内部：核心组装 -----
 
+    @staticmethod
+    def _affected_section_ids(
+        qa_feedback: dict, prior_draft: ReportDraft
+    ) -> set[str] | None:
+        """从 QA 反馈定位需要重写的 section_id 集合（B1 定向改稿）。
+
+        只认结构化 location：``report.sections[i]...`` / ``report.paragraphs[pid]``
+        （issue.dimension 是 QA 维度，与 section 的分析维度是两套体系，不能据此映射）。
+        不可定位的 issue（维度级补发 issue / 异常 location）**跳过**，只按可定位的
+        issue 收窄重写范围；一个都定位不到 → 返回 ``None`` 退化为全篇重生成。
+
+        注意：A1 给低分维度补发的 issue 用维度级 location(``report.dimension[...]``)，
+        且 fact 等会路由到 reporter；若不跳过它们，定向改稿会被它们拖成全篇重生成。
+        """
+        issues = qa_feedback.get("issues") or []
+        must = set(qa_feedback.get("must_address") or [])
+        flagged = [i for i in issues if not must or i.get("issue_id") in must]
+        if not flagged:
+            return None
+        pid_to_sec = {
+            p.paragraph_id: s.section_id
+            for s in prior_draft.sections
+            for p in s.paragraphs
+        }
+        affected: set[str] = set()
+        for iss in flagged:
+            loc = iss.get("location") or ""
+            m = _SECTION_IDX_RE.search(loc)
+            if m:
+                idx = int(m.group(1))
+                if 0 <= idx < len(prior_draft.sections):
+                    affected.add(prior_draft.sections[idx].section_id)
+                continue
+            m = _PARAGRAPH_ID_RE.search(loc)
+            if m and m.group(1) in pid_to_sec:
+                affected.add(pid_to_sec[m.group(1)])
+                continue
+            # 不可定位 → 跳过（不据此扩大/放弃定向）
+        # 没有任何可定位 issue → 无定向信号 → 退化全篇重生成
+        return affected or None
+
     def _build_output(self, inp: ReporterInput, *, allow_llm: bool) -> ReporterOutput:
         template = get_template(inp.template_id)
         errors: list[AgentError] = []
@@ -332,7 +378,28 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
             if t.dimension is None or t.dimension in analysed_dims
         ]
 
+        # B1 定向改稿：返工(有 prior_draft + qa_feedback)时只重写被 QA 命中
+        # location 的 section，其余原样复用上一版 → 反馈真正有抓手 + 省 LLM 调用。
+        # affected_ids=None → 全篇重生成（首轮 / 无 prior / 有不可定位 issue 的兜底）。
+        affected_ids: set[str] | None = None
+        prior_by_id: dict[str, ReportSection] = {}
+        if inp.prior_draft is not None and inp.qa_feedback:
+            affected_ids = self._affected_section_ids(
+                inp.qa_feedback, inp.prior_draft
+            )
+            if affected_ids is not None:
+                prior_by_id = {
+                    s.section_id: s for s in inp.prior_draft.sections
+                }
+
         def _build_one(sec_tpl: ReportSectionTemplate):
+            if (
+                affected_ids is not None
+                and sec_tpl.section_id not in affected_ids
+                and sec_tpl.section_id in prior_by_id
+            ):
+                # 未命中 section：原样复用上一版（不重新调用 LLM）
+                return prior_by_id[sec_tpl.section_id], [], 0, 0
             return self._build_section(
                 tpl=sec_tpl,
                 template=template,

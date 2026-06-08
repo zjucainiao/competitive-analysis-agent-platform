@@ -78,8 +78,9 @@ def rework_state(two_product_project: Project) -> dict:
         _nr("analyst", "analyst", output_ref="analyst"),
         _nr("reporter", "reporter", round_=1, output_ref="reporter"),
         _nr("qa", "qa", round_=1, status="needs_rework", output_ref="qa"),
-        _nr("reporter", "reporter", round_=2, output_ref="reporter"),
-        _nr("qa", "qa", round_=2, status="success", output_ref="qa"),
+        # 版本化(P1-a)：返工轮落独立 key reporter_v2 / qa_v2，不覆盖 round1
+        _nr("reporter", "reporter", round_=2, output_ref="reporter_v2"),
+        _nr("qa", "qa", round_=2, status="success", output_ref="qa_v2"),
     ]
     state = RunState(
         project_id=two_product_project.project_id,
@@ -95,8 +96,11 @@ def rework_state(two_product_project: Project) -> dict:
         "extract.Notion": _output(tokens_in=200, tokens_out=80, cost=0.02, conf=0.88),
         "extract.Asana": _output(tokens_in=210, tokens_out=85, cost=0.021, conf=0.7),
         "analyst": _output(tokens_in=300, tokens_out=150, cost=0.05, conf=0.85),
+        # round1 reporter(v1) 与 round2 reporter_v2 各占独立 key、内容不同
         "reporter": _output(tokens_in=500, tokens_out=400, cost=0.1, conf=0.82),
+        "reporter_v2": _output(tokens_in=520, tokens_out=420, cost=0.11, conf=0.91),
         "qa": _output(tokens_in=150, tokens_out=40, cost=0.03, conf=0.92),
+        "qa_v2": _output(tokens_in=160, tokens_out=45, cost=0.032, conf=0.95),
     }
     state.verdicts = [
         {"verdict_id": "v1", "overall_status": "needs_revision"},
@@ -192,6 +196,82 @@ def test_verdicts_and_metrics_attached(rework_state, two_product_project):
     assert view.metrics.total_tokens == 999
 
 
+def test_rework_in_progress_reports_running_not_done(two_product_project):
+    """返工进行中：round-1 qa 判 blocking(节点状态=partial)→已 dispatch round-2，
+    history 里 qa 之后又冒出 collect_v2 → 必须 running，不能过早 done。
+
+    回归 bug：QA 对 blocking reject 也返回 PARTIAL，旧逻辑「最后 qa=partial→done」
+    会在返工刚触发时显示 done，再蹦出 _v2 节点 → 返工实时观感错乱。
+    """
+    state = RunState(
+        project_id=two_product_project.project_id,
+        run_id="run_rip",
+        analysis_mode="competitive_compare",
+        products=["Notion", "Asana"],
+    )
+    state.history = [
+        _nr("collect", "collector", product="Notion", output_ref="collect.Notion"),
+        _nr("collect", "collector", product="Asana", output_ref="collect.Asana"),
+        _nr("extract", "extractor", product="Notion", output_ref="extract.Notion"),
+        _nr("extract", "extractor", product="Asana", output_ref="extract.Asana"),
+        _nr("analyst", "analyst", output_ref="analyst"),
+        _nr("reporter", "reporter", round_=1, output_ref="reporter"),
+        # QA blocking reject → 节点状态是 partial（不是 needs_rework）
+        _nr("qa", "qa", round_=1, status="partial", output_ref="qa"),
+        # 返工轮上游已启动
+        _nr("collect", "collector", product="Asana", round_=2, status="partial",
+            output_ref="collect.Asana_v2"),
+    ]
+    state.qa_round = 1
+    state.verdicts = [{"verdict_id": "v1", "blocking": True,
+                       "routing": [{"target_agent": "collector"}]}]
+    view = run_state_to_view(state.model_dump(), project=two_product_project)
+    assert view.status == "running"
+
+
+def test_blocking_qa_last_entry_still_running(two_product_project):
+    """瞬态窗口：qa 刚判完 blocking、返工节点还没 append 进 history（qa 是最后一条）。
+    靠 verdict.blocking+routing 也要判 running，不能因 qa=partial 就过早 done。"""
+    state = RunState(
+        project_id=two_product_project.project_id,
+        run_id="run_window",
+        analysis_mode="competitive_compare",
+        products=["Notion"],
+    )
+    state.history = [
+        _nr("collect", "collector", product="Notion", output_ref="collect.Notion"),
+        _nr("extract", "extractor", product="Notion", output_ref="extract.Notion"),
+        _nr("analyst", "analyst", output_ref="analyst"),
+        _nr("reporter", "reporter", round_=1, output_ref="reporter"),
+        _nr("qa", "qa", round_=1, status="partial", output_ref="qa"),
+    ]
+    state.qa_round = 1
+    state.verdicts = [{"verdict_id": "v1", "blocking": True,
+                       "routing": [{"target_agent": "collector"}]}]
+    view = run_state_to_view(state.model_dump(), project=two_product_project)
+    assert view.status == "running"
+
+
+def test_nonblocking_qa_last_entry_is_done(two_product_project):
+    """终判非 blocking（END）：qa 是最后一条且 partial、但 verdict 不 blocking → done。"""
+    state = RunState(
+        project_id=two_product_project.project_id,
+        run_id="run_done",
+        analysis_mode="competitive_compare",
+        products=["Notion"],
+    )
+    state.history = [
+        _nr("collect", "collector", product="Notion", output_ref="collect.Notion"),
+        _nr("extract", "extractor", product="Notion", output_ref="extract.Notion"),
+        _nr("analyst", "analyst", output_ref="analyst"),
+        _nr("reporter", "reporter", round_=1, output_ref="reporter"),
+        _nr("qa", "qa", round_=1, status="partial", output_ref="qa"),
+    ]
+    state.verdicts = [{"verdict_id": "v1", "blocking": False, "routing": []}]
+    view = run_state_to_view(state.model_dump(), project=two_product_project)
+    assert view.status == "done"
+
+
 def test_aborted_status(two_product_project):
     state = RunState(
         project_id=two_product_project.project_id,
@@ -216,8 +296,8 @@ def test_outputs_keyed_by_run_ref(rework_state, two_product_project):
     """outputs 字段按 run_ref（投影节点 ID）键，详情面板靠它取深内容。
 
     - 每产品 / 每轮次都应有 run_ref 入口；
-    - 返工 reporter_v2 也应在 outputs 里（与 reporter 映射到同一 output_ref="reporter"
-      的产物，native 引擎只保留最新一份）；
+    - 版本化(P1-a)后 reporter 与 reporter_v2 指向**各自轮次**的独立产物（不再都指向
+      最新一份）；前端 v1↔v2 diff 因此可信；
     - 键与 instances/revisions.run_ref 对得上，前端 outputs[run_ref] 可命中。
     """
     view = run_state_to_view(rework_state, project=two_product_project)
@@ -232,8 +312,10 @@ def test_outputs_keyed_by_run_ref(rework_state, two_product_project):
         "reporter_v2",
         "qa",
     } <= keys
-    # reporter 与 reporter_v2 都指向 output_ref="reporter" 的产物
-    assert view.outputs["reporter_v2"] == rework_state["outputs"]["reporter"]
+    # reporter(v1) 与 reporter_v2 各自映射到 round1 / round2 的独立产物
+    assert view.outputs["reporter"] == rework_state["outputs"]["reporter"]
+    assert view.outputs["reporter_v2"] == rework_state["outputs"]["reporter_v2"]
+    assert view.outputs["reporter"] != view.outputs["reporter_v2"]
     # instances/revisions 的 run_ref 都能在 outputs 里命中
     reporter = _stage(view, "reporter")
     for rev in reporter.revisions:

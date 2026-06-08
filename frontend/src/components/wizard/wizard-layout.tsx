@@ -85,10 +85,10 @@ const DIMENSIONS = [
 ];
 
 const STEPS = [
-  { id: 1, label: "Target & competitors" },
-  { id: 2, label: "Industry" },
-  { id: 3, label: "Dimensions" },
-  { id: 4, label: "Mode & review" },
+  { id: 1, label: "目标与竞品" },
+  { id: 2, label: "行业" },
+  { id: 3, label: "分析维度" },
+  { id: 4, label: "模式与确认" },
 ];
 
 const ANALYSIS_MODES: Array<{
@@ -117,6 +117,23 @@ const ANALYSIS_MODES: Array<{
   },
 ];
 
+
+/* 枚举 → 中文标签：Step 4 确认页复用以上选项定义渲染中文 */
+const analysisModeLabel = (id: string): string =>
+  ANALYSIS_MODES.find((m) => m.id === id)?.label ?? id;
+const industryLabel = (id: string | null): string =>
+  (id && INDUSTRIES.find((i) => i.id === id)?.label) || "—";
+const dimensionLabel = (id: string): string =>
+  DIMENSIONS.find((d) => d.id === id)?.label ?? id;
+const TEMPLATE_LABELS: Record<string, string> = {
+  standard_v1: "标准对比模板",
+  single_research_v1: "单产品调研模板",
+};
+const MODE_LABELS: Record<string, string> = {
+  real: "真实运行",
+  mock: "模拟",
+  hybrid: "混合",
+};
 
 const SAMPLE_TARGETS = ["Notion", "Linear", "Coda", "Figma"];
 const SAMPLE_COMPETITORS: Record<string, string[]> = {
@@ -150,7 +167,7 @@ export function WizardLayout() {
   const [submitting, setSubmitting] = useState(false);
 
   // 切换 analysis_mode 时清理 competitors（单产品调研下竞品无意义）。
-  // dimensions 不再因 mode 改动 —— 单产品也能选所有维度（Analyst 内部走单产品分支）。
+  // dimensions 不再因 mode 改动 —— 单产品也能选所有维度（内部走单产品分支）。
   const handleSwitchAnalysisMode = (next: AnalysisMode) => {
     setAnalysisMode(next);
     if (next === "single_research") {
@@ -196,13 +213,13 @@ export function WizardLayout() {
     emitIntervention("create-project", target);
     try {
       const project = await createProject(payload);
-      toast.success("Project 已创建", {
-        description: `${project.project_id} · 启动 run…`,
+      toast.success("项目已创建", {
+        description: `${project.project_id} · 启动分析…`,
       });
       try {
         await startRun(project.project_id);
-        toast.success("Run 已派发", {
-          description: "实时进度通过 WebSocket 推送",
+        toast.success("分析已启动", {
+          description: "实时进度将自动推送",
         });
       } catch (e) {
         if (e instanceof ApiError && e.status === 409) {
@@ -307,7 +324,7 @@ function Header({ step }: { step: number }) {
   return (
     <header>
       <div className="text-xs font-medium uppercase tracking-wider text-text-muted">
-        New analysis · step {step} / {STEPS.length}
+        新建分析 · 第 {step} / {STEPS.length} 步
       </div>
       <h1 className="mt-1 flex items-center gap-2 text-xl font-semibold text-text-primary">
         <SparklesIcon className="h-5 w-5 text-accent-base" />
@@ -330,7 +347,7 @@ function Stepper({
 }) {
   return (
     <ol className="flex items-center gap-2">
-      {STEPS.map((s, i) => {
+      {STEPS.map((s) => {
         const done = step > s.id;
         const active = step === s.id;
         return (
@@ -507,7 +524,7 @@ function Step1Target({
         />
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <span className="text-[10px] uppercase tracking-wider text-text-muted">
-            sample
+            示例
           </span>
           {SAMPLE_TARGETS.map((t) => (
             <button
@@ -577,7 +594,7 @@ function Step1Target({
               </div>
               {discoverError ? (
                 <div className="mt-2 text-[11px] text-warning-base">
-                  {discoverError}
+                  推荐竞品失败：{discoverError}
                 </div>
               ) : null}
               {discovered.length > 0 ? (
@@ -660,7 +677,7 @@ function Step1Target({
                     variant="outline"
                     onClick={() => addCompetitor(draft)}
                   >
-                    Add
+                    添加
                   </Button>
                 ) : null}
               </div>
@@ -809,7 +826,6 @@ function Step3Dimensions({
 
 function Step4Mode({
   mode,
-  onChangeMode,
   analysisMode,
   target,
   competitors,
@@ -835,11 +851,11 @@ function Step4Mode({
           <ServerCogIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent-base" />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-medium text-text-primary">Real</span>
-              <ModeBadge label="burns key" tone="warning" />
+              <span className="font-medium text-text-primary">真实运行</span>
+              <ModeBadge label="消耗额度" tone="warning" />
             </div>
             <div className="mt-1 text-[11px] leading-relaxed text-text-muted">
-              全真 LLM + 真采集，会消耗 API key 额度。
+              全真 LLM + 真采集，会消耗 API 额度。
             </div>
           </div>
         </div>
@@ -847,18 +863,20 @@ function Step4Mode({
 
       <section className="rounded-md border border-border-subtle bg-bg-sunken/50 p-4">
         <div className="text-[10px] font-medium uppercase tracking-wider text-text-muted">
-          Review
+          确认信息
         </div>
         <dl className="mt-2 grid grid-cols-[110px_1fr] gap-x-3 gap-y-1.5 text-xs">
-          <ReviewItem k="analysis_mode">
-            <code className="font-mono text-text-accent">{analysisMode}</code>
+          <ReviewItem k="分析模式">
+            <span className="font-medium text-text-accent">
+              {analysisModeLabel(analysisMode)}
+            </span>
           </ReviewItem>
-          <ReviewItem k="target">
+          <ReviewItem k="目标产品">
             <span className="font-medium text-text-accent">
               {target || "—"}
             </span>
           </ReviewItem>
-          <ReviewItem k="competitors">
+          <ReviewItem k="竞品">
             <span className="text-text-primary">
               {analysisMode === "single_research"
                 ? "—（单产品调研，无竞品）"
@@ -867,27 +885,31 @@ function Step4Mode({
                   : "—"}
             </span>
           </ReviewItem>
-          <ReviewItem k="industry">
-            <code className="font-mono text-text-secondary">
-              {industry ?? "—"}
-            </code>
+          <ReviewItem k="行业">
+            <span className="text-text-secondary">
+              {industryLabel(industry)}
+            </span>
           </ReviewItem>
-          <ReviewItem k="dimensions">
-            <span className="text-text-secondary">{dimensions.join(", ")}</span>
+          <ReviewItem k="分析维度">
+            <span className="text-text-secondary">
+              {dimensions.map(dimensionLabel).join("、")}
+            </span>
           </ReviewItem>
-          <ReviewItem k="report_tpl">
-            <code className="font-mono text-text-secondary">
+          <ReviewItem k="报告模板">
+            <span className="text-text-secondary">
               {analysisMode === "single_research"
-                ? "single_research_v1"
-                : "standard_v1"}
-            </code>
+                ? TEMPLATE_LABELS.single_research_v1
+                : TEMPLATE_LABELS.standard_v1}
+            </span>
           </ReviewItem>
-          <ReviewItem k="mode">
-            <code className="font-mono text-text-primary">{mode}</code>
+          <ReviewItem k="运行模式">
+            <span className="text-text-primary">
+              {MODE_LABELS[mode] ?? mode}
+            </span>
           </ReviewItem>
         </dl>
         <p className="mt-3 text-[11px] text-text-muted">
-          → 点「Create &amp; dispatch」创建项目并启动分析，跳转到工作台看实时进度
+          → 点「创建并启动」创建项目并启动分析，跳转到工作台看实时进度
         </p>
       </section>
     </div>

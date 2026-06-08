@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { SunIcon, MoonIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -35,12 +35,27 @@ export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>("light");
   const [mounted, setMounted] = useState(false);
 
+  // 挂载后从 localStorage 同步真实主题（首屏 inline script 已防闪烁）。这是 SSR 安全的
+  // 「挂载后初始化」——服务端无 localStorage，必须等挂载再读，故对该规则刻意豁免。
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const t = readPreferredTheme();
     setTheme(t);
     applyTheme(t);
     setMounted(true);
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // toggle 定义在键盘 effect **之前**（修 react-hooks/refs「变量声明前访问」）；
+  // useCallback 稳定身份 → 键盘 effect 依赖 [mounted, toggle] 即可，去掉 exhaustive-deps 豁免。
+  const toggle = useCallback(() => {
+    const next: Theme = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    applyTheme(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(STORAGE_KEY, next);
+    }
+  }, [theme]);
 
   /* keyboard shortcut */
   useEffect(() => {
@@ -53,17 +68,7 @@ export function ThemeToggle() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, theme]);
-
-  const toggle = () => {
-    const next: Theme = theme === "light" ? "dark" : "light";
-    setTheme(next);
-    applyTheme(next);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(STORAGE_KEY, next);
-    }
-  };
+  }, [mounted, toggle]);
 
   return (
     <button

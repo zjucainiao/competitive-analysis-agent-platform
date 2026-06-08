@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import {
   ChevronDownIcon,
@@ -42,6 +41,41 @@ const STATUS_META: Record<
     icon: ClockIcon,
   },
 };
+
+/** evidence.status 枚举 → 中文（不暴露机器枚举值） */
+const STATUS_LABELS: Record<string, string> = {
+  verified: "已验证",
+  disputed: "有异议",
+  stale: "已过期",
+};
+
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status;
+}
+
+/** evidence.sourceType → 简短人类可读标签（不暴露机器枚举值） */
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  homepage: "官网",
+  features: "功能页",
+  features_page: "功能页",
+  pricing: "定价页",
+  pricing_page: "定价页",
+  help_docs: "帮助文档",
+  docs: "帮助文档",
+  changelog: "更新日志",
+  customer_cases: "案例",
+  cases: "案例",
+  blog: "博客",
+  user_review: "用户评价",
+  user_reviews: "用户评价",
+  review: "用户评价",
+  reviews: "用户评价",
+  app_market: "应用市场",
+};
+
+function sourceTypeLabel(sourceType: string): string {
+  return SOURCE_TYPE_LABELS[sourceType] ?? "公开来源";
+}
 
 export function EvidenceRow({
   evidence,
@@ -107,26 +141,26 @@ export function EvidenceRow({
               )}
             >
               <StatusIcon className="h-2.5 w-2.5" />
-              <span>{displayStatus}</span>
+              <span>{statusLabel(displayStatus)}</span>
             </span>
             <span className="text-[11px] text-text-muted">{evidence.product}</span>
             <span className="text-[11px] text-text-muted">·</span>
-            <span className="font-mono text-[11px] text-text-secondary">
-              {evidence.sourceType}
+            <span className="text-[11px] text-text-secondary">
+              {sourceTypeLabel(evidence.sourceType)}
             </span>
             <span className="text-[11px] text-text-muted">·</span>
             <span
-              className="font-mono text-[11px] text-text-muted tabular-nums"
+              className="text-[11px] text-text-muted tabular-nums"
               data-num
             >
-              authority {evidence.authority}
+              可信度 {evidence.authority}
             </span>
             <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-text-muted">
               <ArrowLeftRightIcon className="h-3 w-3" />
               <span className="font-mono tabular-nums" data-num>
                 {refs.length}
               </span>
-              <span>ref{refs.length === 1 ? "" : "s"}</span>
+              <span>处引用</span>
               {expanded ? (
                 <ChevronDownIcon className="h-3.5 w-3.5" />
               ) : (
@@ -177,9 +211,9 @@ export function EvidenceRow({
               </a>
             </span>
             <span>·</span>
-            <span>collected {evidence.collectedAt}</span>
+            <span>采集于 {evidence.collectedAt}</span>
             <span>·</span>
-            <span className="font-mono">lang={evidence.language}</span>
+            <span>语言 {evidence.language}</span>
             {evidence.tags.length > 0 ? (
               <span className="ml-2 inline-flex items-center gap-1">
                 {evidence.tags.map((t) => (
@@ -197,11 +231,11 @@ export function EvidenceRow({
           {/* reverse lookup */}
           <section>
             <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-text-muted">
-              Referenced by ({refs.length} paragraph{refs.length === 1 ? "" : "s"})
+              被引用于（{refs.length} 个段落）
             </div>
             {refs.length === 0 ? (
               <p className="text-xs text-text-muted">
-                No paragraph references this evidence yet.
+                暂无段落引用此证据。
               </p>
             ) : (
               <ul className="space-y-1.5">
@@ -224,7 +258,7 @@ export function EvidenceRow({
                         — {r.textPreview}
                       </span>
                       <span className="ml-auto shrink-0 text-[10px] text-text-muted opacity-0 transition-opacity duration-120 ease-out-quart group-hover:opacity-100">
-                        open ↗
+                        打开 ↗
                       </span>
                     </Link>
                   </li>
@@ -244,7 +278,7 @@ export function EvidenceRow({
             >
               <AlertTriangleIcon className="h-3 w-3" />
               <span>
-                {isDisputedOverride ? "Undispute" : "Mark inaccurate"}
+                {isDisputedOverride ? "取消异议" : "标记有异议"}
               </span>
             </Button>
             <Button
@@ -255,7 +289,7 @@ export function EvidenceRow({
               className="gap-1.5"
             >
               <CopyIcon className="h-3 w-3" />
-              <span>Copy</span>
+              <span>复制</span>
             </Button>
             <Button
               type="button"
@@ -265,7 +299,7 @@ export function EvidenceRow({
               className="gap-1.5"
             >
               <StarIcon className="h-3 w-3" />
-              <span>Star</span>
+              <span>收藏</span>
             </Button>
             <span className="ml-auto text-[10px] text-text-muted">
               {evidence.id}

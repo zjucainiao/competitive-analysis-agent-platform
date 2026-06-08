@@ -117,6 +117,82 @@ async def test_legacy_engine_reachable_via_flag(
 
 
 @pytest.mark.asyncio
+async def test_run_id_threaded_into_native_state(
+    monkeypatch, stub_registry, two_product_project, memory_storage
+):
+    """P2-a:API 传入的 run_id 应成为 native RunState.run_id。
+
+    否则 LIVE 视图(读 checkpoint 的 run_id)与 历史/快照/URL(用 API run_id)
+    会指向不同 ULID,run identity 不一致。
+    """
+    monkeypatch.setenv("ORCH_ENGINE", "native")
+    from backend.orchestrator.graph import build_native_graph
+    from backend.orchestrator.orchestrator import Orchestrator
+    from backend.storage.langgraph_adapter import to_langgraph_saver
+
+    orch = Orchestrator(registry=stub_registry, storage=memory_storage)
+    plan = orch.plan(two_product_project)
+    pinned = "run_pinned_p2a"
+    _ = [r async for r in orch.run(plan, two_product_project, run_id=pinned)]
+
+    # 从 checkpoint 读回 RunState.run_id(与 LIVE 视图同路径)。
+    # 显式传了 run_id → checkpoint 落在 run-scoped thread(project::run_id)。
+    from backend.orchestrator.orchestrator import native_thread_config
+
+    graph = build_native_graph(
+        orch.registry,
+        project=two_product_project,
+        checkpointer=to_langgraph_saver(memory_storage.checkpointer),
+    )
+    config = native_thread_config(two_product_project.project_id, pinned)
+    snapshot = await graph.aget_state(config)
+    assert snapshot.values["run_id"] == pinned
+
+
+@pytest.mark.asyncio
+async def test_rework_native_targets_reporter_only(
+    monkeypatch, stub_registry, two_product_project, memory_storage
+):
+    """P1-AUTOREWORK：rework_native 只重跑 reporter(+qa)，不从 collect 重跑整个项目。"""
+    monkeypatch.setenv("ORCH_ENGINE", "native")
+    from backend.orchestrator.orchestrator import Orchestrator
+
+    orch = Orchestrator(registry=stub_registry, storage=memory_storage)
+    plan = orch.plan(two_product_project)
+    _ = [r async for r in orch.run(plan, two_product_project)]
+
+    before = await memory_storage.state_store.list_node_outputs(
+        two_product_project.project_id
+    )
+    assert "reporter" in before and "reporter_v2" not in before
+
+    fb = {
+        "reporter": {
+            "from_verdict_id": "v",
+            "issues": [],
+            "instructions": "avoid disputed evidence",
+            "must_address": [],
+            "revision": 1,
+        }
+    }
+    results = [
+        r
+        async for r in orch.rework_native(
+            two_product_project, qa_feedback_by_node=fb
+        )
+    ]
+    assert results, "rework_native 应触发并产出节点结果"
+
+    after = await memory_storage.state_store.list_node_outputs(
+        two_product_project.project_id
+    )
+    # 定向返工：reporter_v2 产出；collect/extract 未再产新版本(仍只有 v1)
+    assert "reporter_v2" in after
+    assert "collect.Notion_v2" not in after
+    assert "extract.Notion_v2" not in after
+
+
+@pytest.mark.asyncio
 async def test_native_engine_persists_reworked_output(
     monkeypatch, two_product_project, memory_storage
 ):
@@ -130,7 +206,10 @@ async def test_native_engine_persists_reworked_output(
 
     Bug(修复前): seen_refs 集合在第 1 次 reporter 后就把 "reporter" 加入,
       第 2 次 reporter 产出新对象时被跳过 → state_store 保留 version==1(旧)。
-    Fix: 改用 seen dict 按 id() 去重 → 新对象 id 不同 → 重新落库 → version==2。
+    Fix: 改用 seen dict 按 id() 去重 → 新对象 id 不同 → 重新落库。
+
+    版本化(P1-a)后: round1 落键 "reporter"(v1)、round2 落键 "reporter_v2"(v2),
+    两轮各自独立落库、互不覆盖 —— 既验证返工产物没丢,也验证 v1 历史被保留。
     """
     monkeypatch.setenv("ORCH_ENGINE", "native")
     from backend.orchestrator.orchestrator import Orchestrator
@@ -142,18 +221,24 @@ async def test_native_engine_persists_reworked_output(
     plan = orch.plan(two_product_project)
     results = [r async for r in orch.run(plan, two_product_project)]
 
-    # 流里应包含两次 reporter 结果
-    reporter_results = [r for r in results if r.node_id == "reporter"]
+    # 流里应包含两次 reporter 结果(reporter + reporter_v2)
+    reporter_results = [r for r in results if r.node_id.startswith("reporter")]
     assert len(reporter_results) == 2, (
         f"expected 2 reporter results (initial + rework), got {len(reporter_results)}"
     )
 
-    # 落库的 reporter output 必须是返工后的 draft(version==2)
-    persisted = await memory_storage.state_store.get_node_output(
+    # v1 与 v2 各占独立 key 落库:reporter==v1(历史保留)、reporter_v2==v2(返工产物)
+    persisted_v1 = await memory_storage.state_store.get_node_output(
         two_product_project.project_id, "reporter"
     )
-    assert persisted is not None, "reporter output was not persisted at all"
-    assert persisted.draft.version == 2, (
-        f"expected reworked draft version 2, got {persisted.draft.version} "
-        "(version 1 means the stale first-pass draft was kept — bug not fixed)"
+    persisted_v2 = await memory_storage.state_store.get_node_output(
+        two_product_project.project_id, "reporter_v2"
+    )
+    assert persisted_v1 is not None and persisted_v1.draft.version == 1, (
+        "round-1 reporter (v1) should be preserved under key 'reporter', not overwritten"
+    )
+    assert persisted_v2 is not None, "reworked reporter_v2 was not persisted at all"
+    assert persisted_v2.draft.version == 2, (
+        f"expected reworked draft version 2 under 'reporter_v2', "
+        f"got {persisted_v2.draft.version}"
     )

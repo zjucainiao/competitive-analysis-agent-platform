@@ -95,9 +95,12 @@ export function ReportLayout(props: ReportLayoutProps = {}) {
   const sectionFocus = sectionParam
     ? report.sections.find((s) => s.id === sectionParam)
     : null;
+  // 受控同步：URL ?section=xxx 变更 → 同步聚焦章节。合法的 param→state 受控同步。
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (sectionFocus) setActiveSectionId(sectionFocus.id);
   }, [sectionFocus]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   /* IO observer for section tracking */
   useEffect(() => {

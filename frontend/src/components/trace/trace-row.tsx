@@ -31,12 +31,12 @@ const STATUS_BG: Record<string, string> = {
 };
 
 const STATUS_LABEL: Record<string, string> = {
-  success: "success",
-  running: "running",
-  rework: "needs rework",
-  warning: "warning",
-  error: "failed",
-  neutral: "pending",
+  success: "已完成",
+  running: "运行中",
+  rework: "需返工",
+  warning: "警告",
+  error: "失败",
+  neutral: "等待中",
 };
 
 const STATUS_TEXT: Record<string, string> = {
@@ -47,6 +47,26 @@ const STATUS_TEXT: Record<string, string> = {
   error: "text-error-base",
   neutral: "text-text-muted",
 };
+
+/** 概要里残留的英文/内部短语 → 中文（数据源可能仍是英文，展示前兜底清洗） */
+function summaryLabel(raw: string): string {
+  const text = raw.trim();
+  if (/needs_revision/i.test(text)) {
+    const m = text.match(/(\d+)\s*issues?/i);
+    return m ? `需修订 · ${m[1]} 项问题 · 已触发质检反馈` : "需修订 · 已触发质检反馈";
+  }
+  if (/^running\b/i.test(text)) return "运行中 · 等待完成";
+  if (/^pending\b/i.test(text)) return "等待上游 · 暂未开始";
+  if (/\bok$/i.test(text)) return "已完成";
+  return text;
+}
+
+/** 节点 id 里的内部版本后缀（_v2 / _v3）→ 中文修订标记，避免暴露裸命名 */
+function nodeIdLabel(nodeId: string): string {
+  const m = nodeId.match(/^(.*)_v(\d+)$/i);
+  if (m) return `${m[1]} · 第${m[2]}版`;
+  return nodeId;
+}
 
 function OpenInDagLink({ nodeId }: { nodeId: string }) {
   const pathname = usePathname();
@@ -60,9 +80,9 @@ function OpenInDagLink({ nodeId }: { nodeId: string }) {
       className="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-bg-raised px-2 py-1 text-[11px] text-text-secondary transition-colors duration-120 ease-out-quart hover:border-accent-border hover:text-accent-base"
     >
       <ArrowUpRightIcon className="h-3 w-3" />
-      <span>Open in DAG</span>
+      <span>在工作流中查看</span>
       <code className="ml-1 font-mono text-[10px] text-text-muted">
-        {nodeId}
+        {nodeIdLabel(nodeId)}
       </code>
     </Link>
   );
@@ -121,7 +141,7 @@ export function TraceRow({
           {span.label}
           {span.revision > 1 ? (
             <span className="ml-1.5 inline-flex items-center rounded-pill bg-rework-bg px-1 text-[9px] font-medium text-rework-base">
-              v{span.revision}
+              第{span.revision}版
             </span>
           ) : null}
         </span>
@@ -156,7 +176,7 @@ export function TraceRow({
         </span>
 
         <span className="flex-1 truncate text-xs text-text-muted">
-          {span.summary}
+          {summaryLabel(span.summary)}
         </span>
 
         {expandable ? (
@@ -198,7 +218,7 @@ export function TraceRow({
           {span.selfCritique ? (
             <div className="rounded-md bg-bg-sunken px-3 py-2">
               <div className="text-[10px] font-medium uppercase tracking-wider text-text-muted">
-                Self-critique
+                自我审视
               </div>
               <p className="mt-1 text-xs leading-relaxed text-text-secondary">
                 {span.selfCritique}
@@ -209,7 +229,7 @@ export function TraceRow({
           {span.toolCalls.length > 0 ? (
             <div className="rounded-md border border-border-subtle bg-bg-raised">
               <div className="border-b border-border-subtle px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-text-muted">
-                Tool calls ({span.toolCalls.length})
+                工具调用 ({span.toolCalls.length})
               </div>
               <ul className="divide-y divide-border-subtle">
                 {span.toolCalls.map((t) => (
@@ -238,7 +258,7 @@ export function TraceRow({
           {span.llmCalls.length > 0 ? (
             <div className="space-y-2">
               <div className="text-[10px] font-medium uppercase tracking-wider text-text-muted">
-                LLM calls ({span.llmCalls.length})
+                模型调用 ({span.llmCalls.length})
               </div>
               {span.llmCalls.map((c, i) => (
                 <LLMCallDetail key={c.callId} call={c} index={i} />

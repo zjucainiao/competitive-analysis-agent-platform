@@ -504,6 +504,10 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
             if out.cost_usd == 0.0 and self._llm_counter.cost_usd > 0:
                 out.cost_usd = self._llm_counter.cost_usd
 
+            # 输入快照（让 node detail 的「输入」区与「输出」对称可观测）。
+            # 挂在 out 上 → 随 outputs 流到前端 / 持久化 / OTel output_snapshot。
+            self._safe_set_input_snapshot(out, inp)
+
             self._safe_set_output(span, out)
 
             # 清理 wrapper 上的 span 引用（防止下一次 invoke 之外的 chat 误用）
@@ -601,6 +605,16 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
         )
         with cm as span:
             yield span
+
+    @staticmethod
+    def _safe_set_input_snapshot(out: AgentOutputBase, inp: Any) -> None:
+        """容错地把输入摘要挂到 ``out.input_snapshot``；观测层永不打断主流程。"""
+        try:
+            from backend.observability.io_snapshot import summarize_agent_input
+
+            out.input_snapshot = summarize_agent_input(inp)
+        except Exception:  # noqa: BLE001
+            pass
 
     @staticmethod
     def _safe_set_output(span: Any, out: AgentOutputBase) -> None:

@@ -13,10 +13,34 @@ const STATUS_META: Array<{
   label: string;
   dot: string;
 }> = [
-  { id: "verified", label: "verified", dot: "bg-success-base" },
-  { id: "disputed", label: "disputed", dot: "bg-error-base" },
-  { id: "stale", label: "stale", dot: "bg-warning-base" },
+  { id: "verified", label: "已验证", dot: "bg-success-base" },
+  { id: "disputed", label: "有异议", dot: "bg-error-base" },
+  { id: "stale", label: "已过期", dot: "bg-warning-base" },
 ];
+
+/** evidence.sourceType → 简短人类可读标签（不暴露机器枚举值） */
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  homepage: "官网",
+  features: "功能页",
+  features_page: "功能页",
+  pricing: "定价页",
+  pricing_page: "定价页",
+  help_docs: "帮助文档",
+  docs: "帮助文档",
+  changelog: "更新日志",
+  customer_cases: "案例",
+  cases: "案例",
+  blog: "博客",
+  user_review: "用户评价",
+  user_reviews: "用户评价",
+  review: "用户评价",
+  reviews: "用户评价",
+  app_market: "应用市场",
+};
+
+function sourceTypeLabel(sourceType: string): string {
+  return SOURCE_TYPE_LABELS[sourceType] ?? "公开来源";
+}
 
 export function EvidenceFilter({
   filter,
@@ -53,7 +77,7 @@ export function EvidenceFilter({
     <aside className="sticky top-[152px] self-start space-y-5">
       <div className="flex items-center justify-between">
         <div className="text-[10px] font-medium uppercase tracking-wider text-text-muted">
-          Filter
+          筛选
         </div>
         {activeCount > 0 ? (
           <button
@@ -61,12 +85,12 @@ export function EvidenceFilter({
             onClick={resetAll}
             className="text-[10px] text-text-muted hover:text-text-secondary"
           >
-            reset ({activeCount})
+            重置（{activeCount}）
           </button>
         ) : null}
       </div>
 
-      <FilterGroup label="Status">
+      <FilterGroup label="状态">
         {STATUS_META.map((s) => (
           <FilterChip
             key={s.id}
@@ -82,7 +106,7 @@ export function EvidenceFilter({
         ))}
       </FilterGroup>
 
-      <FilterGroup label="Product">
+      <FilterGroup label="产品">
         {products.map((p) => (
           <FilterChip
             key={p}
@@ -97,7 +121,7 @@ export function EvidenceFilter({
         ))}
       </FilterGroup>
 
-      <FilterGroup label="Source type">
+      <FilterGroup label="来源类型">
         {sourceTypes.map((s) => (
           <FilterChip
             key={s}
@@ -110,20 +134,20 @@ export function EvidenceFilter({
             }
             count={counts.sourceType[s] ?? 0}
           >
-            <span className="font-mono text-[11px]">{s}</span>
+            <span className="text-[11px]">{sourceTypeLabel(s)}</span>
           </FilterChip>
         ))}
       </FilterGroup>
 
       <div className="border-t border-border-subtle pt-3 text-[10px] text-text-muted">
-        total{" "}
+        共{" "}
         <span
           className="font-mono font-medium text-text-primary tabular-nums"
           data-num
         >
           {totalCount}
         </span>{" "}
-        evidences
+        条证据
       </div>
     </aside>
   );

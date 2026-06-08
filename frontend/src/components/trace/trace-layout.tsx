@@ -51,7 +51,7 @@ export function TraceLayout({ apiState }: TraceLayoutProps = {}) {
     () => projectLLMCalls(projectId!, { limit: 500 }),
     { refreshInterval: 15000, revalidateOnFocus: false }
   );
-  const llmCalls = llmCallsData?.calls ?? [];
+  const llmCalls = useMemo(() => llmCallsData?.calls ?? [], [llmCallsData]);
 
   const spans: TraceSpan[] = useMemo(() => {
     if (isApi && apiState) return apiStateToSpans(apiState, llmCalls);
@@ -104,8 +104,7 @@ export function TraceLayout({ apiState }: TraceLayoutProps = {}) {
             </span>{" "}
             · 每条记录含状态 / 耗时 / Token / 成本 / 置信度；
             点击返工或运行中的行展开，可查看真实的
-            提示词摘要 · 模型回复 · 执行阶段 · 完成原因
-            （来源 <code className="font-mono">GET /api/projects/&#123;id&#125;/llm-calls</code>）。
+            提示词摘要 · 模型回复 · 执行阶段 · 完成原因。
           </p>
         </div>
       ) : null}
@@ -134,25 +133,20 @@ export function TraceLayout({ apiState }: TraceLayoutProps = {}) {
       {!isApi ? (
         <div className="rounded-md border border-dashed border-border-default bg-bg-sunken/60 px-4 py-3 text-[11px] text-text-muted">
           <strong className="font-medium text-text-secondary">
-            决策回放（time-travel）
+            决策回放
           </strong>
-          ：本面板是 evaluator 一眼看到「QA 反馈闭环 + Agent
-          如何收到反馈」的关键证据。点击 rework 行展开 LLM call →
-          看到 reporter_v2 system prompt 里已经注入了 QA FEEDBACK 章节；
-          点击右上「diff v1 ↔ v2」并排对比 v1/v2 prompt。
+          ：本面板让你一眼看到「质检反馈闭环 + 各环节如何收到反馈」的关键证据。
+          点击返工行展开模型调用 →
+          看到修订版报告的提示词顶部已经注入了质检反馈章节；
+          点击右上「当前版 ↔ 修订版 对比」并排查看修订前后的提示词。
         </div>
       ) : apiDiffPair ? (
         <div className="rounded-md border border-dashed border-border-default bg-bg-sunken/60 px-4 py-3 text-[11px] text-text-muted">
           <strong className="font-medium text-text-secondary">
             决策回放（真实运行）
           </strong>
-          ：本次运行触发了 QA 返工 ——{" "}
-          <code className="font-mono">{apiDiffPair.rightLabel}</code> 的 system
-          prompt 顶部已注入 QA FEEDBACK（来自{" "}
-          <code className="font-mono">GET /api/projects/&#123;id&#125;/llm-calls</code>{" "}
-          的真实 prompt_preview）。点击右上「diff v1 ↔ v2」并排对比{" "}
-          <code className="font-mono">{apiDiffPair.leftLabel}</code> ↔{" "}
-          <code className="font-mono">{apiDiffPair.rightLabel}</code>。
+          ：本次运行触发了质检返工 —— 修订版的提示词顶部已注入质检反馈
+          （取自真实运行记录）。点击右上「当前版 ↔ 修订版 对比」并排查看修订前后的提示词。
         </div>
       ) : null}
 
@@ -277,8 +271,8 @@ function buildApiDiffPair(spans: TraceSpan[]): DiffPair | undefined {
 
   return {
     id: `diff-${rework.nodeId}`,
-    label: `${rework.agent} · prompt（真实运行）`,
-    description: `真实运行：${rework.nodeId} 的 system prompt 顶部注入了 QA FEEDBACK（来源 prompt_preview）`,
+    label: `${AGENT_LABELS[rework.agent] ?? rework.agent} · 提示词对比（真实运行）`,
+    description: `真实运行：修订版的提示词顶部注入了质检反馈`,
     leftLabel: parent.nodeId,
     rightLabel: rework.nodeId,
     leftContent,
@@ -286,22 +280,46 @@ function buildApiDiffPair(spans: TraceSpan[]): DiffPair | undefined {
   };
 }
 
+/** agent 枚举 → 中文环节名（与 Trace 过滤器 / DAG 一致，不在面板暴露裸枚举） */
+const AGENT_LABELS: Record<string, string> = {
+  collector: "信息采集",
+  extractor: "证据入库",
+  analyst: "结构化分析",
+  reporter: "报告撰写",
+  qa: "质量审查",
+};
+
 function summarizeNode(
   nodeId: string,
   out: AnyAgentOutput | undefined
 ): string {
-  if (!out) return "pending · awaiting upstream";
+  if (!out) return "等待上游 · 暂未开始";
   if (out.status === "failed") {
-    return out.errors[0]?.message ?? "failed";
+    return out.errors[0]?.message ?? "执行失败";
   }
   if (out.status === "needs_rework") {
-    return "needs_revision · QA routing triggered";
+    return "需修订 · 已触发质检反馈";
   }
   if ("verdict" in out) {
-    return `verdict · ${(out as { verdict: { overall_status: string; issues: unknown[] } }).verdict.overall_status} · ${(out as { verdict: { issues: unknown[] } }).verdict.issues.length} issues`;
+    const verdict = (out as { verdict: { overall_status: string; issues: unknown[] } }).verdict;
+    return `质检结论 · ${verdictStatusLabel(verdict.overall_status)} · ${verdict.issues.length} 项问题`;
   }
   if ("draft" in out) {
-    return `ReportDraft v${(out as { draft: { version: number } }).draft.version}`;
+    return `报告草稿 · 第 ${(out as { draft: { version: number } }).draft.version} 版`;
   }
-  return `${nodeId} ok`;
+  return "已完成";
+}
+
+/** 质检总体结论枚举 → 中文（不在 UI 暴露 pass / needs_revision 等裸值） */
+const VERDICT_STATUS_LABELS: Record<string, string> = {
+  pass: "通过",
+  passed: "通过",
+  needs_revision: "需修订",
+  needs_rework: "需修订",
+  fail: "未通过",
+  failed: "未通过",
+};
+
+function verdictStatusLabel(status: string): string {
+  return VERDICT_STATUS_LABELS[status] ?? status;
 }

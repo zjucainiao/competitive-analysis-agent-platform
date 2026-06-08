@@ -22,7 +22,9 @@ profile，绕过 LLM；evidences 从 ``evidence_db.jsonl`` 取该产品的全部
 
 from __future__ import annotations
 
+import contextvars
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
@@ -296,6 +298,9 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
 
     # 调参
     DEFAULT_MAX_CLAIMS_PER_SOURCE: ClassVar[int] = 20
+    # 逐 source 抽取相互独立 → 并行执行。串行 13 个 source（每个 ~10-20s Doubao
+    # 结构化输出）会拖到 ~4min；并行后墙钟 ~= 最慢单 source。
+    MAX_SOURCE_WORKERS: ClassVar[int] = 8
     UNVERIFIED_FIELD_THRESHOLD: ClassVar[float] = 0.30  # >30% 字段未匹配 → 低 confidence
     MISSING_FIELD_THRESHOLD: ClassVar[float] = 0.20  # >20% 必填字段缺失 → 低 confidence
     BASE_CONFIDENCE: ClassVar[float] = 0.92
@@ -443,20 +448,27 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         tokens_input = 0
         tokens_output = 0
 
-        # 1. 逐 source 抽取 RawClaim
+        # 1. 逐 source 抽取 RawClaim（并行：各 source 独立，墙钟 ~= 最慢单 source）
         all_claims: list[tuple[_RawClaim, RawSourceDoc]] = []
-        for source in inp.raw_sources:
+
+        # 单 source 工作单元：成功返回 (source, extraction, t_in, t_out, None)，
+        # 失败返回 (source, None, 0, 0, error)。AgentRunError 不捕获 → 透出致命。
+        def _extract_one(
+            source: RawSourceDoc,
+        ) -> tuple[RawSourceDoc, _SourceExtraction | None, int, int, AgentError | None]:
             try:
                 extraction, t_in, t_out = self._extract_from_source(
-                    source=source,
-                    inp=inp,
+                    source=source, inp=inp
                 )
-                tokens_input += t_in
-                tokens_output += t_out
+                return source, extraction, t_in, t_out, None
             except AgentRunError:
                 raise
             except Exception as e:  # noqa: BLE001
-                errors.append(
+                return (
+                    source,
+                    None,
+                    0,
+                    0,
                     AgentError(
                         code="LLM_SCHEMA_INVALID",
                         message=(
@@ -465,11 +477,35 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
                         ),
                         severity="warn",
                         retriable=True,
-                    )
+                    ),
                 )
+
+        sources = list(inp.raw_sources)
+        if len(sources) <= 1:
+            source_results = [_extract_one(s) for s in sources]
+        else:
+            # 每 source copy_context()：把 LLM trace contextvar 带进 worker 线程，
+            # 否则并发 LLM call 丢失 node 归属（同 collector / analyst）。
+            contexts = [contextvars.copy_context() for _ in sources]
+            with ThreadPoolExecutor(
+                max_workers=min(len(sources), self.MAX_SOURCE_WORKERS)
+            ) as pool:
+                futures = [
+                    pool.submit(ctx.run, _extract_one, s)
+                    for s, ctx in zip(sources, contexts)
+                ]
+                # 按提交顺序取结果 → all_claims 顺序与串行一致（确定性）
+                source_results = [f.result() for f in futures]
+
+        for source, extraction, t_in, t_out, err in source_results:
+            if err is not None:
+                errors.append(err)
                 continue
-            for claim in extraction.claims:
-                all_claims.append((claim, source))
+            tokens_input += t_in
+            tokens_output += t_out
+            if extraction is not None:
+                for claim in extraction.claims:
+                    all_claims.append((claim, source))
 
         # 1.5 Consolidation pass：必填字段（含关键列表）缺失时，再跑一次专用 prompt
         #     用所有 raw_text 拼起来补缺。confidence < 阈值的 claim 直接丢，避免瞎填。
@@ -1500,6 +1536,12 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
             extracted_at=datetime.now(tz=UTC),
             confidence=float(link.confidence),
             tags=[tag] if tag else [],
+            # 身份校验结论从源文档继承：让 QA 的 identity_consistency 维度
+            # 能发现「这条证据其实来自别的产品」（如分析钉钉却引用了飞书评价）。
+            detected_product_name=src.detected_product_name,
+            identity_confidence=src.identity_confidence,
+            identity_status=src.identity_status,
+            source_class=src.source_class,
         )
 
     # ----- 失败兜底 -----

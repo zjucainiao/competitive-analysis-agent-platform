@@ -51,7 +51,7 @@ export function EvidenceDrawer({
             onClick={onUnpin}
             className="text-[10px] text-text-muted hover:text-text-secondary"
           >
-            unpin
+            取消固定
           </button>
         ) : null}
       </div>
@@ -108,7 +108,7 @@ function sourceTypeLabel(sourceType: string): string {
 function EmptyState() {
   return (
     <div className="rounded-md border border-dashed border-border-default bg-bg-raised/60 p-4 text-xs text-text-muted">
-      hover 段落或点击 evidence chip 查看证据原文
+      悬停段落或点击证据标记查看证据原文
     </div>
   );
 }
@@ -256,7 +256,7 @@ function EvidenceCard({
       </div>
 
       <div className="mt-2 text-[10px] text-text-muted">
-        想看「引用此 evidence 的所有段落」？切到 Evidence tab 点该卡片展开
+        想看「引用此证据的所有段落」？切到证据页点该卡片展开
       </div>
     </article>
   );

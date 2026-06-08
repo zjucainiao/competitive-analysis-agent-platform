@@ -11,6 +11,20 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
+# 产品身份校验状态（来源/证据内容是否真的属于 product_name 标注的产品）。
+# - unvalidated：未做校验（默认；mock / 旧数据 / 校验跳过）
+# - confirmed：内容确属目标产品
+# - mismatch：内容属于**别的**产品（如分析钉钉却抓到飞书评价）—— QA 据此返工
+# - ambiguous：提到目标产品但无法确证（对比页/跨语言别名漏命中等），仅浮出不强返工
+IdentityStatus = Literal["unvalidated", "confirmed", "mismatch", "ambiguous"]
+
+# 来源类型粗分类（用于「相对语义」权威度：权威度 = f(来源类型, 消费维度)）。
+# - official：目标产品官方页（官网/官方文档）
+# - review：评论聚合站（G2 / Capterra / TrustRadius …）
+# - other：其他第三方（博客/媒体/论坛/社媒等）
+# Collector 抓取时按 URL 判定并填入；None=未判定（旧数据/mock）→ 下游不做跨维度校正。
+SourceClass = Literal["official", "review", "other"]
+
 
 class CollectDimension(str, Enum):
     """采集维度。Collector 按此粒度抓取。"""
@@ -75,6 +89,31 @@ class Evidence(BaseModel):
     # 状态标记（用户可标记 disputed，触发重审）
     disputed: bool = False
 
+    # ---- 产品身份校验（从源文档 RawSourceDoc 继承；详见 docs/QA.md）----
+    # product_name 是「声称」的产品；以下三字段记录「内容实际像哪个产品」的检测结果，
+    # 让 QA 的 identity_consistency 维度能发现「抓错产品」（如分析钉钉却引用了飞书评价）。
+    detected_product_name: str | None = Field(
+        default=None,
+        description="内容检测出的产品名；None 表示未检测",
+    )
+    identity_confidence: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="该证据确属 product_name 的置信度（0-1）；None 表示未评估",
+    )
+    identity_status: IdentityStatus = Field(
+        default="unvalidated",
+        description="身份校验结论：unvalidated/confirmed/mismatch/ambiguous",
+    )
+    source_class: SourceClass | None = Field(
+        default=None,
+        description=(
+            "来源类型粗分类（official/review/other）；从 RawSourceDoc 继承。"
+            "供 QA 做「相对语义」跨维度权威度校正——None 表示未判定，下游不校正。"
+        ),
+    )
+
 
 class RawSourceDoc(BaseModel):
     """Collector 输出的单个原始来源文档。Extractor 的输入。"""
@@ -104,4 +143,29 @@ class RawSourceDoc(BaseModel):
     detected_outdated: bool = Field(
         default=False,
         description="页面 last-modified 早于 1 年",
+    )
+
+    # ---- 产品身份校验（Collector 抓取后填，Extractor 继承到 Evidence）----
+    # product_name 是「声称采集的」产品；以下记录「页面内容实际像哪个产品」，
+    # 用来拦截「搜索/排序选错源」导致抓到别的产品内容的情况。
+    detected_product_name: str | None = Field(
+        default=None,
+        description="页面内容检测出的产品名；None 表示未检测",
+    )
+    identity_confidence: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="该页面确属 product_name 的置信度（0-1）；None 表示未评估",
+    )
+    identity_status: IdentityStatus = Field(
+        default="unvalidated",
+        description="身份校验结论：unvalidated/confirmed/mismatch/ambiguous",
+    )
+    source_class: SourceClass | None = Field(
+        default=None,
+        description=(
+            "来源类型粗分类（official/review/other），Collector 按 URL 判定。"
+            "Extractor 透传到 Evidence，供 QA 跨维度权威度校正；None=未判定。"
+        ),
     )

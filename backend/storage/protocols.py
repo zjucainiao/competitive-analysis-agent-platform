@@ -149,29 +149,39 @@ class StateStoreProtocol(Protocol):
     # ----- NodeOutput（AgentOutputBase 多态） -----
 
     async def save_node_output(
-        self, project_id: str, node_id: str, output: AgentOutputBase
+        self,
+        project_id: str,
+        node_id: str,
+        output: AgentOutputBase,
+        *,
+        run_id: str | None = None,
     ) -> None:
-        """upsert：(project_id, node_id) 复合主键。"""
+        """upsert：(project_id, node_id) 复合主键；``run_id`` 标记产出归属哪次 run。"""
         ...
 
     async def get_node_output(
-        self, project_id: str, node_id: str
-    ) -> AgentOutputBase | None: ...
+        self, project_id: str, node_id: str, *, run_id: str | None = None
+    ) -> AgentOutputBase | None:
+        """``run_id`` 省略时作用域为「该项目最新一次 run」(P2-RUNSCOPE)。"""
+        ...
 
     async def list_node_outputs(
-        self, project_id: str
+        self, project_id: str, *, run_id: str | None = None
     ) -> dict[str, AgentOutputBase]:
-        """key=node_id。"""
+        """key=node_id。``run_id`` 省略 → 只返回**最新一次 run** 的产出，避免多次运行
+        同项目时把旧 run 的节点输出混进来(P2-RUNSCOPE)。"""
         ...
 
     # ----- QAVerdict -----
 
     async def save_qa_verdict(
-        self, project_id: str, verdict: QAVerdict
+        self, project_id: str, verdict: QAVerdict, *, run_id: str | None = None
     ) -> None: ...
 
-    async def list_qa_verdicts(self, project_id: str) -> list[QAVerdict]:
-        """按创建时间倒序。"""
+    async def list_qa_verdicts(
+        self, project_id: str, *, run_id: str | None = None
+    ) -> list[QAVerdict]:
+        """按创建时间倒序；``run_id`` 省略 → 只返回**最新一次 run** 的 verdict。"""
         ...
 
     # ----- LLMCallRecord（每节点完成后持久化其 LLM 调用流水，重启可查） -----

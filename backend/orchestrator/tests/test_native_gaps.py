@@ -216,13 +216,16 @@ async def test_gap4_rework_reporter_receives_qa_feedback(
     seen_feedback: list[Any] = []
     orig_build = nodes_mod.build_reporter_input
 
-    def _spy_build(project, *, trace_id, analyst_output, qa_feedback):
+    def _spy_build(
+        project, *, trace_id, analyst_output, qa_feedback, prior_draft=None
+    ):
         seen_feedback.append(qa_feedback)
         return orig_build(
             project,
             trace_id=trace_id,
             analyst_output=analyst_output,
             qa_feedback=qa_feedback,
+            prior_draft=prior_draft,
         )
 
     monkeypatch.setattr(nodes_mod, "build_reporter_input", _spy_build)

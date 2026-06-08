@@ -25,6 +25,7 @@ from langgraph.graph import END
 from langgraph.types import Command, Send
 
 from backend.orchestrator.inputs import (
+    BuildInputError,
     build_analyst_input,
     build_collector_input,
     build_extractor_input,
@@ -34,12 +35,25 @@ from backend.orchestrator.inputs import (
 )
 from backend.orchestrator.routing import decide_qa_route
 from backend.orchestrator.run_agent import AgentRunResult, run_agent_node
-from backend.orchestrator.run_state import NodeRun
+from backend.orchestrator.run_state import NodeRun, latest_output, versioned_ref
 from backend.schemas import AgentStatus
 from backend.schemas.evidence import CollectDimension
 
 # QA 路由轮次上限(与 decide_qa_route 的 max_rounds 一致)
 _MAX_QA_ROUNDS = 3
+
+# 各节点单次执行超时(ms)。run_agent_node 默认 60s，对**真实采集/抽取**远远不够：
+# collector 一个产品要 search + 抓多页 + 每页 page_type 分类 LLM + 身份校验 LLM
+# （第三方噪音多的产品如 Figma 可达 100+ 次 LLM 调用），60s 必然撞超时 → 节点 failed
+# → 下游全 "upstream output missing" 连锁失败。给足超时（仍受 collector 内部
+# constraints.timeout_seconds 与抓取上限约束，不会真跑到上限）。
+_NODE_TIMEOUT_MS: dict[str, int] = {
+    "collector": 300_000,
+    "extractor": 300_000,
+    "analyst": 240_000,
+    "reporter": 240_000,
+    "qa": 180_000,
+}
 
 # Collector 默认采集维度。
 # 注意:**不能**用 project.analysis_dimensions —— 那是 analyst 级枚举
@@ -87,6 +101,32 @@ def _node_run(
     )
 
 
+def _build_failed_run(
+    *, node: str, agent: str, product: str | None, round_: int
+) -> dict:
+    """构造一个「构造输入即失败」的 node 返回(无 outputs + 一条 failed NodeRun)。
+
+    fail-soft:``build_*_input`` 在 ``run_agent_node`` 之前调用,若上游缺失(collector
+    output=None / 无 profiles)会抛 ``BuildInputError``。捕获它返回 failed NodeRun,
+    让异常不冲出 LangGraph 节点、整条图优雅降级(下游 reporter/qa 已有 None fail-soft,
+    最终 qa 节点统一收尾标 aborted),而不是把整个 run 直接打断成不可展示的崩溃。
+    """
+    return {
+        "outputs": {},
+        "history": [
+            NodeRun(
+                node=node,
+                agent=agent,
+                product=product,
+                round=round_,
+                status="failed",
+                span_id=new_span_id(),
+                output_ref=None,
+            )
+        ],
+    }
+
+
 def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
     """构造原生图的节点闭包字典。
 
@@ -114,6 +154,7 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
         targets = state.rework_products or state.products
         round_ = state.qa_round + 1
         fb = state.qa_feedback_by_node
+        ov = state.prompt_override_by_node
         return Command(
             goto=[
                 Send(
@@ -122,6 +163,8 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
                         "product": p,
                         "round": round_,
                         "qa_feedback": fb.get(f"collect.{p}"),
+                        # worker 看不到全局 state，节点级 prompt 覆盖随 payload 带过去
+                        "prompt_override": ov.get(f"collect.{p}"),
                     },
                 )
                 for p in targets
@@ -136,23 +179,30 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
         """
         product = payload["product"]
         round_ = payload.get("round", 1)
-        inp = build_collector_input(
-            project,
-            trace_id=trace_id,
-            product=product,
-            official_url=None,
-            dims=dims,
-            qa_feedback=payload.get("qa_feedback"),
-        )
+        try:
+            inp = build_collector_input(
+                project,
+                trace_id=trace_id,
+                product=product,
+                official_url=None,
+                dims=dims,
+                qa_feedback=payload.get("qa_feedback"),
+            )
+        except BuildInputError:
+            return _build_failed_run(
+                node="collect", agent="collector", product=product, round_=round_
+            )
+        ref = versioned_ref(f"collect.{product}", round_)
         res = await run_agent_node(
             registry,
             "collector",
             inp,
             outputs={},
             trace_id=trace_id,
-            node_id=f"collect.{product}",
+            node_id=ref,
+            user_prompt_override=payload.get("prompt_override"),
+            timeout_ms=_NODE_TIMEOUT_MS["collector"],
         )
-        ref = f"collect.{product}"
         return {
             "outputs": {ref: res.output} if res.output is not None else {},
             "history": [
@@ -177,15 +227,20 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
         targets = state.rework_products or state.products
         round_ = state.qa_round + 1
         fb = state.qa_feedback_by_node
+        ov = state.prompt_override_by_node
         return Command(
             goto=[
                 Send(
                     "extract_one",
                     {
                         "product": p,
-                        "collector_output": state.outputs.get(f"collect.{p}"),
+                        # 取该产品「最新轮」collect 产物(返工后裸 key 可能仍是 v1)
+                        "collector_output": latest_output(
+                            state.outputs, f"collect.{p}"
+                        ),
                         "round": round_,
                         "qa_feedback": fb.get(f"extract.{p}"),
+                        "prompt_override": ov.get(f"extract.{p}"),
                     },
                 )
                 for p in targets
@@ -196,22 +251,30 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
         """Send-target:从 payload 取 product + collector_output,跑 extractor。"""
         product = payload["product"]
         round_ = payload.get("round", 1)
-        inp = build_extractor_input(
-            project,
-            trace_id=trace_id,
-            product=product,
-            collector_output=payload["collector_output"],
-            qa_feedback=payload.get("qa_feedback"),
-        )
+        try:
+            inp = build_extractor_input(
+                project,
+                trace_id=trace_id,
+                product=product,
+                collector_output=payload["collector_output"],
+                qa_feedback=payload.get("qa_feedback"),
+            )
+        except BuildInputError:
+            # 上游 collector 失败/无 raw_sources → 不崩图,记一条 failed 抽取节点
+            return _build_failed_run(
+                node="extract", agent="extractor", product=product, round_=round_
+            )
+        ref = versioned_ref(f"extract.{product}", round_)
         res = await run_agent_node(
             registry,
             "extractor",
             inp,
             outputs={},
             trace_id=trace_id,
-            node_id=f"extract.{product}",
+            node_id=ref,
+            user_prompt_override=payload.get("prompt_override"),
+            timeout_ms=_NODE_TIMEOUT_MS["extractor"],
         )
-        ref = f"extract.{product}"
         return {
             "outputs": {ref: res.output} if res.output is not None else {},
             "history": [
@@ -231,28 +294,38 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
     async def analyst(state) -> dict:
         """normal 节点:聚合所有 extract.* profile 跑 analyst。"""
         round_ = state.qa_round + 1
-        inp = build_analyst_input(
-            project,
-            trace_id=trace_id,
-            outputs=state.outputs,
-            qa_feedback=state.qa_feedback_by_node.get("analyst"),
-        )
+        try:
+            inp = build_analyst_input(
+                project,
+                trace_id=trace_id,
+                outputs=state.outputs,
+                qa_feedback=state.qa_feedback_by_node.get("analyst"),
+            )
+        except BuildInputError:
+            # 全部上游 extractor 失败 → 无 profiles → 不崩图,记 failed analyst,
+            # 下游 reporter/qa 的 None fail-soft 接力优雅收尾。
+            return _build_failed_run(
+                node="analyst", agent="analyst", product=None, round_=round_
+            )
+        ref = versioned_ref("analyst", round_)
         res = await run_agent_node(
             registry,
             "analyst",
             inp,
             outputs=state.outputs,
             trace_id=trace_id,
-            node_id="analyst",
+            node_id=ref,
+            user_prompt_override=state.prompt_override_by_node.get("analyst"),
+            timeout_ms=_NODE_TIMEOUT_MS["analyst"],
         )
         return {
-            "outputs": {"analyst": res.output} if res.output is not None else {},
+            "outputs": {ref: res.output} if res.output is not None else {},
             "history": [
                 _node_run(
                     res,
                     node="analyst",
                     agent="analyst",
-                    output_ref="analyst",
+                    output_ref=ref,
                     round_=round_,
                 )
             ],
@@ -266,7 +339,7 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
         NodeRun(无 outputs),让 qa 节点接力判断并优雅终止。
         """
         round_ = state.qa_round + 1
-        analyst_output = state.outputs.get("analyst")
+        analyst_output = latest_output(state.outputs, "analyst")
         if analyst_output is None:
             return {
                 "outputs": {},
@@ -281,28 +354,38 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
                     )
                 ],
             }
+        # B1 定向改稿：返工轮(round_>=2)把上一版 draft 传进去，让 reporter 只重写
+        # 被 QA 命中的 section，其余复用 → 反馈真正有抓手。首轮无 prior。
+        prior_reporter = (
+            latest_output(state.outputs, "reporter") if round_ >= 2 else None
+        )
+        prior_draft = getattr(prior_reporter, "draft", None)
         inp = build_reporter_input(
             project,
             trace_id=trace_id,
             analyst_output=analyst_output,
             qa_feedback=state.qa_feedback_by_node.get("reporter"),
+            prior_draft=prior_draft,
         )
+        ref = versioned_ref("reporter", round_)
         res = await run_agent_node(
             registry,
             "reporter",
             inp,
             outputs=state.outputs,
             trace_id=trace_id,
-            node_id="reporter",
+            node_id=ref,
+            user_prompt_override=state.prompt_override_by_node.get("reporter"),
+            timeout_ms=_NODE_TIMEOUT_MS["reporter"],
         )
         return {
-            "outputs": {"reporter": res.output} if res.output is not None else {},
+            "outputs": {ref: res.output} if res.output is not None else {},
             "history": [
                 _node_run(
                     res,
                     node="reporter",
                     agent="reporter",
-                    output_ref="reporter",
+                    output_ref=ref,
                     round_=round_,
                 )
             ],
@@ -317,8 +400,8 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
           reporter;route_update 含 qa_round / rework_* / aborted 等。
         """
         round_ = state.qa_round + 1
-        reporter_output = state.outputs.get("reporter")
-        analyst_output = state.outputs.get("analyst")
+        reporter_output = latest_output(state.outputs, "reporter")
+        analyst_output = latest_output(state.outputs, "analyst")
         # fail-soft:上游 reporter / analyst 任一缺失(上游失败)→ 直接 END,
         # 不构造 QAInput(否则 .draft / .result 会 AttributeError),记一条 failed
         # NodeRun 并标记 aborted,让 _run_native 投影与终态逻辑优雅收尾。
@@ -349,22 +432,25 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
             outputs=state.outputs,
             prior_verdicts=list(state.verdicts),
         )
+        ref = versioned_ref("qa", round_)
         res = await run_agent_node(
             registry,
             "qa",
             inp,
             outputs=state.outputs,
             trace_id=trace_id,
-            node_id="qa",
+            node_id=ref,
+            user_prompt_override=state.prompt_override_by_node.get("qa"),
+            timeout_ms=_NODE_TIMEOUT_MS["qa"],
         )
         update: dict[str, Any] = {
-            "outputs": {"qa": res.output} if res.output is not None else {},
+            "outputs": {ref: res.output} if res.output is not None else {},
             "history": [
                 _node_run(
                     res,
                     node="qa",
                     agent="qa",
-                    output_ref="qa",
+                    output_ref=ref,
                     round_=round_,
                 )
             ],
