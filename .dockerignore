@@ -1,0 +1,27 @@
+# 后端镜像构建上下文（context=仓库根）。把无关/巨大目录排除，加速构建。
+.git
+.gitignore
+.venv
+venv
+ENV
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# 前端整棵不进后端镜像
+frontend
+
+# 本地数据 / 密钥 / 文档
+.env
+.env.*
+!.env.prod.example
+!.env.example
+*.log
+docs
+.claude
+
+# Docker / compose 自身
+Dockerfile.backend
+docker-compose*.yml

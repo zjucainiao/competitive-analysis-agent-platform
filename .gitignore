@@ -45,7 +45,9 @@ htmlcov/
 .env
 .env.local
 .env.*.local
+.env.prod
 !.env.example
+!.env.prod.example
 
 # 本地嵌入式持久化数据库（pgserver + redis 的数据目录）
 .localdb/

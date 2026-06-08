@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1
+# 后端镜像（FastAPI + uvicorn）。精简版：不装 Playwright/Chromium——
+# collector 的 crawl4ai/playwright 是惰性导入的可选兜底，缺失自动降级，不影响启动。
+# 需要 SPA 真渲染抓取时，另建一个装了 `.[tools-crawl4ai]` + chromium 的变体即可。
+
+# ---- builder：带编译工具链，把依赖装进独立 venv ----
+FROM python:3.12-slim AS builder
+ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+WORKDIR /src
+# hatchling 构建 wheel 需要包源码 + README（pyproject 里 readme 指向它）
+COPY pyproject.toml README.md ./
+COPY backend ./backend
+RUN pip install --upgrade pip && pip install .
+
+# ---- runtime：只带 venv + 源码，精简 ----
+FROM python:3.12-slim AS runtime
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -u 10001 app
+COPY --from=builder /opt/venv /opt/venv
+
+WORKDIR /app
+# 从源码树运行（而非 venv 里的已安装副本）：fixtures 路径靠
+# Path(__file__).parents[3] 推仓库根，要求 backend/ 与 fixtures/ 在 /app 下同级。
+# PYTHONPATH=/app + `python -m uvicorn`（cwd 入 sys.path）确保 import 命中 /app/backend。
+COPY backend ./backend
+COPY fixtures ./fixtures
+COPY pyproject.toml README.md ./
+
+USER app
+EXPOSE 8000
+HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \
+  CMD curl -fsS http://localhost:8000/health || exit 1
+
+# workers=1：run 任务在进程内异步执行，且 LLM call 环形缓冲是进程级。
+# 横向扩展请看 docs/DEPLOY_PROD.md（state 已在 PG/Redis，可多副本，但 live 缓冲是 per-worker）。
+CMD ["python", "-m", "uvicorn", "backend.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

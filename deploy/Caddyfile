@@ -1,0 +1,27 @@
+# Caddy 反向代理 + 自动 HTTPS（Let's Encrypt）。
+# 站点地址取自 {$DOMAIN}，Caddy 据此自动签发/续期证书。
+# /api/* 与 /health 走后端；其余走前端。WebSocket(Upgrade) 由 reverse_proxy 自动透传。
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# 后端：REST + WebSocket(/api/projects/{id}/events) + 健康检查
+	@backend path /api/* /health
+	handle @backend {
+		reverse_proxy backend:8000
+	}
+
+	# 其余全部交给 Next.js 前端
+	handle {
+		reverse_proxy frontend:3000
+	}
+
+	# 证书到期/吊销通知邮箱
+	tls {$ACME_EMAIL}
+
+	# 访问日志（容器 stdout，docker logs 可查）
+	log {
+		output stdout
+		format console
+	}
+}

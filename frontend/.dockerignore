@@ -1,0 +1,11 @@
+# 前端镜像构建上下文（context=frontend/）。
+node_modules
+.next
+.git
+npm-debug.log*
+# 本地环境变量不进镜像（NEXT_PUBLIC_* 走 build arg 注入）
+.env
+.env.*
+!.env.local.example
+Dockerfile
+.dockerignore

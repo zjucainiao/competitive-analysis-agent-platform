@@ -1,0 +1,88 @@
+# 生产编排：Caddy(自动 HTTPS) + 前端(Next.js) + 后端(FastAPI) + Postgres + Redis。
+# 单机全栈，数据卷持久化。
+#
+# 用法（在仓库根，先备好 .env.prod，见 .env.prod.example）：
+#   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+#
+# 只有 Caddy 对公网暴露 80/443；前端/后端/PG/Redis 都只在内部网络互通。
+name: cap-prod
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [frontend, backend]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?在 .env.prod 里设 DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?在 .env.prod 里设 ACME_EMAIL（证书通知邮箱）}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # ACME 证书持久化，别删（删了会重新签、可能触发限频）
+      - caddy_config:/config
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # 构建期烘焙：前端所有请求打 https://<DOMAIN>/api/...（同源，Caddy 再分流）
+        NEXT_PUBLIC_API_BASE: https://${DOMAIN:?在 .env.prod 里设 DOMAIN}
+    restart: unless-stopped
+    expose:
+      - "3000"
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: unless-stopped
+    # .env.prod 里的 LLM/搜索 key、JWT_SECRET、CORS_ORIGINS 等整体注入容器
+    env_file:
+      - .env.prod
+    # 这三项指向容器内服务，强制覆盖 .env.prod 里的同名值（别在 .env.prod 里设它们）
+    environment:
+      STORAGE_MODE: postgres
+      POSTGRES_DSN: postgresql+asyncpg://app:${POSTGRES_PASSWORD:?在 .env.prod 里设 POSTGRES_PASSWORD}@postgres:5432/app
+      REDIS_URL: redis://redis:6379/0
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?在 .env.prod 里设 POSTGRES_PASSWORD}
+      POSTGRES_DB: app
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
