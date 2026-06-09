@@ -6,8 +6,8 @@ import { usePathname, useSearchParams } from "next/navigation";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
-  MoveRightIcon,
   ArrowUpRightIcon,
+  CircleAlertIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LLMCallDetail } from "./llm-call-detail";
@@ -190,11 +190,13 @@ export function TraceRow({
         )}
       </button>
 
-      {/* Rework / feedback inline hint (always shown, no expand) */}
+      {/* 自评 needs_rework：是 Agent 对自己产出的自评（置信偏低 / 多源字段冲突），
+          ≠ 被 QA 打回返工（后者由下方 isFeedbackTarget 的「反馈重跑」表达）。
+          故用中性告警色 + 准确文案，避免误读成「质检打回」。 */}
       {span.status === "rework" ? (
         <div className="ml-[88px] flex items-center gap-2 pb-2 text-[11px]">
-          <MoveRightIcon className="h-3 w-3 text-rework-base" />
-          <span className="text-rework-base font-medium">质检打回待修复</span>
+          <CircleAlertIcon className="h-3 w-3 text-warning-base" />
+          <span className="text-warning-base font-medium">自评偏低 · 待复核</span>
         </div>
       ) : null}
       {span.isFeedbackTarget ? (
