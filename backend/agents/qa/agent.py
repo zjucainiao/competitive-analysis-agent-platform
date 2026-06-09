@@ -53,6 +53,7 @@ from .routing import (
     count_prior_issue_occurrences,
     downgrade_repeated_issues,
     escalate_by_self_status,
+    mark_unresolved_from_prior,
     max_retry_error,
     synthesize_threshold_issues,
 )
@@ -189,6 +190,9 @@ class QA(BaseAgent[QAInput, QAOutput]):
 
         # ---- 防死循环：降级反复出现的 issue ----
         prior_counts = count_prior_issue_occurrences(inp.prior_verdicts)
+        # 逐条闭环：上一轮已要求修复但本轮仍在的 issue → 打未解决标记 + 强化反馈措辞
+        # （在降级之前做：第 2 次出现加压，第 3 次才交给 downgrade 放弃）。
+        all_issues = mark_unresolved_from_prior(all_issues, prior_counts)
         adjusted_issues, downgraded = downgrade_repeated_issues(
             all_issues, prior_counts
         )

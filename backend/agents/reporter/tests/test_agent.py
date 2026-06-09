@@ -221,6 +221,57 @@ def test_targeted_rework_ignores_unlocatable_dimension_issue() -> None:
     assert reused >= 2, "维度级 issue 不应把定向改稿拖成全篇重生成"
 
 
+def test_paragraph_ids_in_collects_strings_and_lists() -> None:
+    """改动3 helper：从 required_inputs 收集字符串值 + 字符串列表值；非字符串/空白忽略。"""
+    from backend.agents.reporter.agent import _paragraph_ids_in
+
+    ri = {
+        "paragraph_a": "p_1",
+        "paragraph_b": "p_2",
+        "paragraph_ids": ["p_3", "p_4"],
+        "score": 0.7,  # 非字符串 → 忽略
+        "synthesized": True,  # 非字符串 → 忽略
+        "blank": "   ",  # 空白 → 忽略
+    }
+    assert _paragraph_ids_in(ri) == {"p_1", "p_2", "p_3", "p_4"}
+
+
+def test_affected_sections_includes_paired_paragraph() -> None:
+    """改动3：logic 矛盾 location 只指向一段(p_a/sec_a)，但 required_inputs 带着冲突的
+    另一段(p_b/sec_b)。_affected_section_ids 应把【两段所在 section】都纳入，成对重写。"""
+    from types import SimpleNamespace
+
+    def _para(pid: str) -> ReportParagraph:
+        return ReportParagraph(
+            paragraph_id=pid,
+            text="...",
+            claim_ids=[],
+            evidence_ids=[],
+            is_quantitative=False,
+            is_soft_conclusion=False,
+        )
+
+    sec_a = ReportSection(section_id="sec_a", title="A", order=1, paragraphs=[_para("p_a")])
+    sec_b = ReportSection(section_id="sec_b", title="B", order=2, paragraphs=[_para("p_b")])
+    prior = SimpleNamespace(sections=[sec_a, sec_b])
+    feedback = {
+        "must_address": ["iss_lc"],
+        "issues": [
+            {
+                "issue_id": "iss_lc",
+                "dimension": "logic_consistency",
+                "severity": "critical",
+                "location": "report.sections[0].paragraphs[0]",  # 指向 sec_a / p_a
+                "problem": "p_a 与 p_b 矛盾",
+                "suggested_fix": "改写使一致",
+                "required_inputs": {"paragraph_a": "p_a", "paragraph_b": "p_b"},
+            }
+        ],
+    }
+    affected = Reporter._affected_section_ids(feedback, prior)
+    assert affected == {"sec_a", "sec_b"}, f"应成对命中两 section，实际 {affected}"
+
+
 def test_no_prior_draft_is_full_regeneration() -> None:
     """B1 兜底：无 prior_draft → 行为与现状一致（全篇生成，不受 qa_feedback 影响章节选择）。"""
     agent = Reporter(mock=True)

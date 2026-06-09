@@ -466,6 +466,7 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
             qa_round=state.qa_round,
             max_rounds=_MAX_QA_ROUNDS,
             products=state.products,
+            prior_verdicts=list(state.verdicts),
         )
         update.update(route_update)
         return Command(goto=goto, update=update)

@@ -36,6 +36,7 @@ from backend.agents.qa.routing import (
     build_routing,
     count_prior_issue_occurrences,
     downgrade_repeated_issues,
+    mark_unresolved_from_prior,
     synthesize_threshold_issues,
 )
 from backend.agents.qa.tests.conftest import FakeLLM, NullLLM, NullTracer
@@ -487,6 +488,51 @@ def test_downgrade_repeated_issues() -> None:
     assert downgraded
     assert adjusted[0].severity == "minor"
     assert adjusted[0].required_inputs.get("downgraded_due_to_recurrence") is True
+
+
+def test_mark_unresolved_from_prior_escalates_second_occurrence() -> None:
+    """改动1：上一轮已要求(第 2 次出现)的 issue → 打未解决标记 + problem 加前缀；
+    本轮新出现的(第 1 次)不标。severity 保持不变(不动权重/判级)。"""
+    loc = "report.sections[0].paragraphs[0]"
+    prior = [
+        _verdict_with_issue(
+            "iss_x", QADimension.LOGIC_CONSISTENCY, "major", "reporter", location=loc
+        )
+    ]
+    prior_counts = count_prior_issue_occurrences(prior)  # 该 key 计 1 次
+
+    recurring = _mk_issue(
+        "iss_x", QADimension.LOGIC_CONSISTENCY, "major", "reporter", location=loc
+    )
+    fresh = _mk_issue(
+        "iss_y",
+        QADimension.FACT_CONSISTENCY,
+        "major",
+        "reporter",
+        location="report.sections[1].paragraphs[0]",
+    )
+
+    out = {i.issue_id: i for i in mark_unresolved_from_prior([recurring, fresh], prior_counts)}
+
+    assert out["iss_x"].required_inputs.get("unresolved_from_prior_round") is True
+    assert out["iss_x"].problem.startswith("[上一轮已要求修复但仍未解决]")
+    assert out["iss_x"].severity == "major"  # 不升级 severity
+    assert out["iss_y"].required_inputs.get("unresolved_from_prior_round") is None
+
+
+def test_mark_unresolved_skips_downgrade_threshold() -> None:
+    """改动1：已复发到降级阈值的 issue 不在这里加压（交给 downgrade_repeated_issues 放弃）。"""
+    loc = "report.sections[0].paragraphs[0]"
+    pv = _verdict_with_issue(
+        "iss_z", QADimension.LOGIC_CONSISTENCY, "major", "reporter", location=loc
+    )
+    prior = [pv for _ in range(SAME_ISSUE_MAX_OCCURRENCES - 1)]  # 计 2 次
+    prior_counts = count_prior_issue_occurrences(prior)
+    issue = _mk_issue(
+        "iss_z", QADimension.LOGIC_CONSISTENCY, "major", "reporter", location=loc
+    )
+    out = mark_unresolved_from_prior([issue], prior_counts)
+    assert out[0].required_inputs.get("unresolved_from_prior_round") is None
 
 
 def test_max_retry_releases_blocking_via_agent() -> None:

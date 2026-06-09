@@ -316,6 +316,42 @@ def count_prior_issue_occurrences(
     return counts
 
 
+def mark_unresolved_from_prior(
+    issues: list[QAIssue], prior_counts: dict[str, int]
+) -> list[QAIssue]:
+    """给【上一轮已要求修复、本轮仍在】的 issue 打未解决标记 + 升级反馈措辞（逐条闭环）。
+
+    让模型被**明确告知**「上次让你修的还在」——把质量提升从「测得到」推向「管得住」。
+    只标尚未到降级阈值的(``prior + 1 < SAME_ISSUE_MAX_OCCURRENCES``)：已到阈值的会被
+    ``downgrade_repeated_issues`` 降级放弃、不再加压（避免与防死循环互相打架）。
+    **不改 severity**（不动权重/blocking 判级），仅在 ``required_inputs`` 打标 + 强化
+    problem 措辞；``build_routing`` / ``_instructions_for`` 据标记把未解决项排前并加重。
+    """
+    out: list[QAIssue] = []
+    for issue in issues:
+        key = issue_dedupe_key(issue.dimension, issue.location)
+        prior = prior_counts.get(key, 0)
+        if 1 <= prior < SAME_ISSUE_MAX_OCCURRENCES - 1:
+            new_required = dict(issue.required_inputs)
+            new_required["unresolved_from_prior_round"] = True
+            new_required["prior_occurrences"] = prior
+            out.append(
+                QAIssue(
+                    issue_id=issue.issue_id,
+                    dimension=issue.dimension,
+                    severity=issue.severity,
+                    location=issue.location,
+                    problem="[上一轮已要求修复但仍未解决] " + issue.problem,
+                    suggested_fix=issue.suggested_fix,
+                    target_agent=issue.target_agent,
+                    required_inputs=new_required,
+                )
+            )
+        else:
+            out.append(issue)
+    return out
+
+
 def downgrade_repeated_issues(
     issues: list[QAIssue], prior_counts: dict[str, int]
 ) -> tuple[list[QAIssue], list[QAIssue]]:
@@ -400,7 +436,11 @@ def build_routing(
 
 
 def _instructions_for(target: str, issues: list[QAIssue]) -> str:
-    """生成 target 视角的 actionable 指令文本。"""
+    """生成 target 视角的 actionable 指令文本。
+
+    逐条闭环：被 ``mark_unresolved_from_prior`` 标过的「上一轮未解决」项**排在最前**
+    并加重标记，让目标 Agent 优先处理上次没修好的，而不是淹没在新问题里。
+    """
     dims = sorted({i.dimension.value for i in issues})
     head = {
         "collector": "Collector 重新采集相关维度的来源文档：",
@@ -408,13 +448,19 @@ def _instructions_for(target: str, issues: list[QAIssue]) -> str:
         "analyst": "Analyst 复核相关 claim 的支撑：",
         "reporter": "Reporter 改写指定段落以解决以下问题：",
     }.get(target, "请处理以下问题：")
+
+    def _unresolved(i: QAIssue) -> bool:
+        return bool(i.required_inputs.get("unresolved_from_prior_round"))
+
+    ordered = sorted(issues, key=lambda i: 0 if _unresolved(i) else 1)
     fixes = []
     seen: set[str] = set()
-    for issue in issues:
+    for issue in ordered:
         if issue.suggested_fix in seen:
             continue
         seen.add(issue.suggested_fix)
-        fixes.append(f"- [{issue.severity}] {issue.suggested_fix}")
+        prefix = "【上一轮未解决，务必修复】" if _unresolved(issue) else ""
+        fixes.append(f"- {prefix}[{issue.severity}] {issue.suggested_fix}")
         if len(fixes) >= 5:
             break
     return f"{head}（维度：{', '.join(dims)}）\n" + "\n".join(fixes)
@@ -470,6 +516,7 @@ __all__ = [
     "count_prior_issue_occurrences",
     "downgrade_repeated_issues",
     "escalate_by_self_status",
+    "mark_unresolved_from_prior",
     "max_retry_error",
     "synthesize_threshold_issues",
 ]

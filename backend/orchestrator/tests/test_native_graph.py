@@ -27,6 +27,8 @@ from backend.schemas import (
     CollectorOutput,
     ExtractorOutput,
     Project,
+    QADimension,
+    QADimensionResult,
     QAOutput,
     QARouting,
     QAStatus,
@@ -186,6 +188,22 @@ def _block_reporter_verdict(vid: str = "v_block") -> QAVerdict:
     return _block_verdict("reporter", vid)
 
 
+def _block_reporter_verdict_scored(score: float, vid: str) -> QAVerdict:
+    """阻塞回 reporter，且带一个维度分数 —— 用于跨轮「无提升即停」(规则 2.5) 判断。"""
+    return QAVerdict(
+        verdict_id=vid,
+        overall_status=QAStatus.NEEDS_REVISION,
+        dimension_results={
+            QADimension.FACT_CONSISTENCY: QADimensionResult(
+                dimension=QADimension.FACT_CONSISTENCY, score=score, pass_=False
+            )
+        },
+        issues=[],
+        routing=[QARouting(target_agent="reporter", reason="rework", payload={})],  # type: ignore[arg-type]
+        blocking=True,
+    )
+
+
 class _StubQA:
     """可编程 verdict 序列;第 N 次 invoke 返回 verdicts[min(N-1, len-1)]。"""
 
@@ -329,8 +347,17 @@ async def test_qa_cycle_produces_reporter_v2() -> None:
 async def test_round_cap_aborts() -> None:
     products = ["Notion"]
     project = _load_demo_project(products=products)
-    # 永远阻塞回 reporter → 触发轮次上限熔断
-    registry = _FakeRegistry(_StubQA([_block_reporter_verdict()]))
+    # 每轮阻塞回 reporter，但分数**持续提升**(0.30→0.50→0.70)→ 不触发「无提升即停」，
+    # 一路跑到轮次上限熔断（这才是本测试要覆盖的 max_rounds 路径）。
+    registry = _FakeRegistry(
+        _StubQA(
+            [
+                _block_reporter_verdict_scored(0.30, "v1"),
+                _block_reporter_verdict_scored(0.50, "v2"),
+                _block_reporter_verdict_scored(0.70, "v3"),
+            ]
+        )
+    )
     app = build_native_graph(registry, project=project)
 
     final = await _run(app, project, products, "cap")
@@ -343,6 +370,34 @@ async def test_round_cap_aborts() -> None:
     assert len(reporter_runs) == 3
     assert max(h.round for h in reporter_runs) == 3
     assert "reporter_v4" not in final["outputs"]
+
+
+async def test_no_improvement_aborts_early() -> None:
+    """返工一轮后维度均分没提升(同分 0.40) → 规则 2.5 提前熔断，不跑满 max_rounds。
+
+    省掉「原地打转」的昂贵 LLM 轮次；best-round 在发布层兜底，绝不发更差版本。
+    """
+    products = ["Notion"]
+    project = _load_demo_project(products=products)
+    registry = _FakeRegistry(
+        _StubQA(
+            [
+                _block_reporter_verdict_scored(0.40, "v1"),
+                _block_reporter_verdict_scored(0.40, "v2"),
+                _block_reporter_verdict_scored(0.40, "v3"),
+            ]
+        )
+    )
+    app = build_native_graph(registry, project=project)
+
+    final = await _run(app, project, products, "noimprove")
+
+    assert final["aborted"] is True
+    assert "no meaningful improvement" in final["abort_reason"]
+    # round1 reporter + round2 reporter(返工) 后，round2 QA 发现没提升 → 熔断。
+    # 即只跑 2 版草稿，而非跑满 3 版(max_rounds)。
+    reporter_runs = [h for h in final["history"] if h.node == "reporter"]
+    assert len(reporter_runs) == 2
 
 
 # ---------- A3: 非 reporter 三条返工支线端到端流转 ----------

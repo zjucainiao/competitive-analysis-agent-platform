@@ -95,6 +95,23 @@ _SECTION_IDX_RE = re.compile(r"report\.sections\[(\d+)\]")
 _PARAGRAPH_ID_RE = re.compile(r"report\.paragraphs\[([^\]]+)\]")
 
 
+def _paragraph_ids_in(required_inputs: dict) -> set[str]:
+    """从 ``issue.required_inputs`` 里通用地挖出所有段落 id（字符串值或字符串列表值）。
+
+    logic_consistency 把冲突的两段记在 ``paragraph_a`` / ``paragraph_b`` /
+    ``paragraph_ids`` / ``strength_paragraph`` / ``weakness_paragraph`` 等键里。
+    这里不硬编码键名，收集所有字符串候选；调用方再用 ``pid_to_sec`` 过滤出真段落 id，
+    故顺带收进来的非段落字符串（如 product/plan 名）会被安全忽略。
+    """
+    out: set[str] = set()
+    for v in required_inputs.values():
+        if isinstance(v, str) and v.strip():
+            out.add(v.strip())
+        elif isinstance(v, list):
+            out.update(x.strip() for x in v if isinstance(x, str) and x.strip())
+    return out
+
+
 class EntailmentVerdict(BaseModel):
     """LLM-as-judge 对单段事实陈述的语义校验结果。
 
@@ -324,18 +341,25 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
         }
         affected: set[str] = set()
         for iss in flagged:
+            # 1) 主 location 定位（通常指向冲突的第一段 / 问题段）
             loc = iss.get("location") or ""
             m = _SECTION_IDX_RE.search(loc)
             if m:
                 idx = int(m.group(1))
                 if 0 <= idx < len(prior_draft.sections):
                     affected.add(prior_draft.sections[idx].section_id)
-                continue
-            m = _PARAGRAPH_ID_RE.search(loc)
-            if m and m.group(1) in pid_to_sec:
-                affected.add(pid_to_sec[m.group(1)])
-                continue
-            # 不可定位 → 跳过（不据此扩大/放弃定向）
+            else:
+                m = _PARAGRAPH_ID_RE.search(loc)
+                if m and m.group(1) in pid_to_sec:
+                    affected.add(pid_to_sec[m.group(1)])
+            # 2) 成对重写：logic 矛盾的 location 只指向一段（paragraph_a），但
+            #    required_inputs 里带着另一段（paragraph_b / paragraph_ids /
+            #    strength_paragraph / weakness_paragraph）。把相关段所在 section 一并纳入，
+            #    让矛盾的【两段】被一起重写、保证内部一致——否则只改一边，矛盾仍在。
+            for pid in _paragraph_ids_in(iss.get("required_inputs") or {}):
+                if pid in pid_to_sec:
+                    affected.add(pid_to_sec[pid])
+            # 都不可定位 → 跳过（不据此扩大/放弃定向）
         # 没有任何可定位 issue → 无定向信号 → 退化全篇重生成
         return affected or None
 
