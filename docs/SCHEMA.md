@@ -10,9 +10,9 @@
 |---|---|---|
 | **业务 Schema** | CompetitorProfile（通用 + 行业扩展）、AnalysisResult、ReportDraft | 架构窗口 |
 | **基础设施 Schema** | Evidence、TraceRecord、AgentInput/Output、DAGNode | 架构窗口 |
-| **行业扩展** | collaboration_saas / crm_saas / cross_border_ecommerce_saas | 架构窗口 + 各 Agent 窗口提需求 |
+| **行业扩展** | collaboration_saas / crm_saas / cross_border_ecommerce_saas / edu_saas | 架构窗口 + 各 Agent 窗口提需求 |
 
-**版本号**：当前 v1.0.0，存放于 `backend/schemas/__init__.py`。
+**版本号**：当前 v1.1.0，存放于 `backend/schemas/__init__.py:7`。1.1.0 相对 1.0.0 新增可选字段 `Evidence.source_published_at`（向后兼容，旧 JSON 默认 None）。
 
 **变更原则**：
 - 字段删除 / 类型变更 → major bump，必须走 PR
@@ -30,7 +30,7 @@
 ```python
 class CompetitorProfile(BaseModel):
     profile_id:    str
-    schema_version: str                # "1.0.0"
+    schema_version: str                # "1.1.0"
     industry:      str                 # "collaboration_saas"
 
     basic_info:    ProductBasicInfo
@@ -95,8 +95,8 @@ class FeatureProfile(BaseModel):
 
 class Feature(BaseModel):
     name:        str                    # "看板视图"
-    description: str | None
-    availability: PlanAvailability      # 哪些 plan 提供
+    description: str | None = None
+    availability: PlanAvailability = PlanAvailability()  # 默认空，可选，哪些 plan 提供
     tags:        list[str] = []         # ["view", "visualization"]
 
 class FeatureModule(BaseModel):
@@ -219,13 +219,14 @@ class Insight(BaseModel):
 ### 2.7 行业扩展
 
 ```python
-# 协作办公 / 项目管理
+# 协作办公 / 项目管理（v1 实际抽取的行业）
 class CollaborationSaasExtension(BaseModel):
     industry_id: Literal["collaboration_saas"] = "collaboration_saas"
 
     task_management:       MaturityScore | None
     kanban_view:           MaturityScore | None
     calendar_view:         MaturityScore | None
+    gantt_view:            MaturityScore | None
     document_collaboration: MaturityScore | None
     workflow_automation:   MaturityScore | None
     knowledge_base:        MaturityScore | None
@@ -233,10 +234,11 @@ class CollaborationSaasExtension(BaseModel):
     third_party_integration: MaturityScore | None
     mobile_support:        MaturityScore | None
     realtime_editing:      MaturityScore | None
+    ai_assistance:         MaturityScore | None
 
     evidence_refs: dict[str, list[str]] = {}
 
-# CRM
+# CRM（v1 占接口位，证明可扩展性；不在演示中实际抽取）
 class CrmSaasExtension(BaseModel):
     industry_id: Literal["crm_saas"] = "crm_saas"
     lead_management:        MaturityScore | None
@@ -246,9 +248,11 @@ class CrmSaasExtension(BaseModel):
     customer_segmentation:  MaturityScore | None
     reporting_dashboard:    MaturityScore | None
     marketing_integration:  MaturityScore | None
+    customer_service_integration: MaturityScore | None
+    mobile_support:         MaturityScore | None
     evidence_refs: dict[str, list[str]] = {}
 
-# 跨境电商
+# 跨境电商（v1 占接口位，证明可扩展性；不在演示中实际抽取）
 class CrossBorderEcommerceSaasExtension(BaseModel):
     industry_id: Literal["cross_border_ecommerce_saas"] = "cross_border_ecommerce_saas"
     store_builder:      MaturityScore | None
@@ -259,10 +263,31 @@ class CrossBorderEcommerceSaasExtension(BaseModel):
     plugin_ecosystem:   MaturityScore | None
     marketing_tools:    MaturityScore | None
     order_fulfillment:  MaturityScore | None
+    tax_compliance:     MaturityScore | None
+    evidence_refs: dict[str, list[str]] = {}
+
+# 教育 SaaS（v1 占接口位 + 模板可用，未在 demo 主链路中实际抽取）
+class EduSaasExtension(BaseModel):
+    industry_id: Literal["edu_saas"] = "edu_saas"
+    live_classroom:      MaturityScore | None
+    recorded_courses:    MaturityScore | None
+    content_library:     MaturityScore | None
+    homework_management: MaturityScore | None
+    exam_quiz:           MaturityScore | None
+    auto_grading:        MaturityScore | None
+    ai_tutoring:         MaturityScore | None
+    progress_tracking:   MaturityScore | None
+    parent_dashboard:    MaturityScore | None
+    multi_role:          MaturityScore | None
+    gamification:        MaturityScore | None
+    mobile_support:      MaturityScore | None
     evidence_refs: dict[str, list[str]] = {}
 
 IndustryExtensionUnion = Annotated[
-    CollaborationSaasExtension | CrmSaasExtension | CrossBorderEcommerceSaasExtension,
+    CollaborationSaasExtension
+    | CrmSaasExtension
+    | CrossBorderEcommerceSaasExtension
+    | EduSaasExtension,
     Field(discriminator="industry_id")
 ]
 
@@ -322,8 +347,9 @@ class Evidence(BaseModel):
     extracted_at:  datetime
     confidence:    float                # 抽取置信度
 
+    source_published_at: datetime | None # 源文档发布/修改时间（1.1.0 新增，可为 None）
     tags:          list[str] = []       # ["pricing", "feature"]
-    embedding_id:  str | None           # 向量库主键
+    embedding_id:  str | None           # 预留占位字段：v1 无向量库，始终为 None
 
 class EvidenceLocation(BaseModel):
     char_start: int | None
@@ -383,10 +409,13 @@ class LLMCallRecord(BaseModel):
     system_prompt: str
     messages:    list[dict]             # 完整 messages
     response:    dict                   # 完整响应
-    tokens_input: int
-    tokens_output: int
-    finish_reason: str
-    duration_ms: int
+    tokens_input: int = 0
+    tokens_output: int = 0
+    finish_reason: str | None = None
+    duration_ms: int = 0
+    temperature: float | None = None
+    max_tokens:  int | None = None
+    cost_usd:    float = 0.0
 
 class ToolCallRecord(BaseModel):
     call_id:     str
@@ -407,18 +436,23 @@ class ToolCallRecord(BaseModel):
 class DAGNode(BaseModel):
     node_id:     str
     project_id:  str
-    agent_name:  str | None             # None = 控制节点（start/end/merge）
     node_type:   NodeType
-    status:      NodeStatus
+    agent_name:  str | None = None      # None = 控制节点（start/end/merge）
+    status:      NodeStatus = NodeStatus.PENDING
 
-    input_refs:  list[str]              # 上游 node_id
-    output_ref:  str | None             # 输出落到哪
+    input_refs:  list[str] = []         # 上游 node_id
+    output_ref:  str | None = None      # 输出落到哪
 
     retry_count: int = 0
     max_retries: int = 3
+    timeout_ms:  int = 60000            # 节点执行超时
 
-    started_at:  datetime | None
-    ended_at:    datetime | None
+    started_at:  datetime | None = None
+    ended_at:    datetime | None = None
+
+    parent_node_id: str | None = None   # feedback 重做时指向被重做的老节点
+    revision:    int = 1                # 节点版本，feedback 重做时递增
+    metadata:    dict = {}
 
 class NodeType(str, Enum):
     START        = "start"
@@ -454,20 +488,29 @@ class Project(BaseModel):
 
     target_product: str
     competitors:    list[str]
+    analysis_mode:  AnalysisMode = AnalysisMode.COMPETITIVE_COMPARE  # 决定 DAG 形态 + Reporter 模板基调
     industry:       str                 # "collaboration_saas"
-    industry_schema_version: str
+    industry_schema_version: str = "1.0.0"
 
     analysis_dimensions: list[AnalysisDimension]
-    report_template_id:  str            # "standard_v1"
-    target_audience:     str | None
+    report_template_id:  str = "standard_v1"
+    target_audience:     str | None = None
 
     mode:           Literal["mock", "hybrid", "real"] = "hybrid"
     collect_constraints: CollectConstraints
 
     # 状态
-    status:         ProjectStatus
-    current_report_id: str | None
-    metrics:        ProjectMetrics | None
+    status:         ProjectStatus = ProjectStatus.DRAFT
+    current_report_id: str | None = None
+    metrics:        ProjectMetrics | None = None
+
+    # 每次 run 终态追加一份 metrics 快照（前端 sparkline 时间序列源；metrics 总是 metrics_history[-1]）
+    metrics_history: list[ProjectMetricsSnapshot] = []
+    # 多次 run 的 metadata（v1 只存 ref，完整 outputs 历史等 storage 改造）
+    runs:           list[RunRef] = []
+    # 软删 / 归档：archived_at 非 None 即进入回收站；deleted_at 真删
+    archived_at:    datetime | None = None
+    deleted_at:     datetime | None = None
 
 class ProjectStatus(str, Enum):
     DRAFT      = "draft"
@@ -476,6 +519,14 @@ class ProjectStatus(str, Enum):
     REVIEWING  = "reviewing"
     DONE       = "done"
     FAILED     = "failed"
+    ARCHIVED   = "archived"
+    DELETED    = "deleted"
+
+class AnalysisMode(str, Enum):
+    # wizard 第一步选择，决定 Planner DAG 形态 + Reporter 模板基调
+    COMPETITIVE_COMPARE = "competitive_compare"  # 标准对比，1+ 竞品，跑全部维度
+    SINGLE_RESEARCH     = "single_research"      # 单产品深度调研，0 竞品，调研基调模板
+    AUTO_DISCOVER       = "auto_discover"        # 只输 target_product，LLM 补 3-5 竞品后退化为 compare
 ```
 
 ---
@@ -484,15 +535,24 @@ class ProjectStatus(str, Enum):
 
 ```python
 class ProjectMetrics(BaseModel):
-    accuracy:       float    # 见 METRICS.md
-    coverage:       float
-    edit_rate:      float    # 人工修正率
-    evidence_count: int
-    fields_filled_ratio: float
-    total_tokens:   int
-    total_cost_usd: float
-    duration_seconds: int
-    qa_round_count: int      # QA 循环次数
+    accuracy:       float = 0.0   # 见 METRICS.md
+    coverage:       float = 0.0
+    edit_rate:      float = 0.0   # 人工修正率
+    evidence_count: int = 0
+    fields_filled_ratio: float = 0.0
+    total_tokens:   int = 0
+    total_cost_usd: float = 0.0
+    duration_seconds: int = 0
+    qa_round_count: int = 0       # QA 循环次数
+
+    # 跨轮质量追踪：每轮 QAVerdict 维度均分序列、相邻轮 delta、最高分轮（1-based，0=无 verdict）
+    per_round_accuracy: list[float] = []
+    round_delta:    list[float] = []
+    best_round:     int = 0
+
+    real_fetch_count: int = 0     # 真实抓取次数
+    mock_fetch_count: int = 0     # mock 抓取次数
+    manual_edits:   int = 0       # 用户 PATCH 段落累计次数
 ```
 
 详见 [METRICS.md](METRICS.md)。
@@ -503,37 +563,37 @@ class ProjectMetrics(BaseModel):
 
 ```
 backend/schemas/
-├── __init__.py            # SCHEMA_VERSION = "1.0.0"
+├── __init__.py            # SCHEMA_VERSION = "1.1.0"
 ├── agent_io.py            # AgentInputBase / AgentOutputBase / AgentError / AgentStatus
-├── collector.py           # CollectorInput/Output, RawSourceDoc
+├── collector.py           # CollectorInput/Output, CollectConstraints, CollectDimension
 ├── extractor.py           # ExtractorInput/Output
-├── analyst.py             # AnalystInput/Output, AnalysisResult, AnalysisClaim
-├── reporter.py            # ReporterInput/Output, ReportDraft, ReportSection
+├── analyst.py             # AnalystInput/Output, AnalysisResult, AnalysisClaim, AnalysisDimension
+├── reporter.py            # ReporterInput/Output, ReportDraft, ReportSection, ReportParagraph
 ├── qa.py                  # QAInput/Output, QAVerdict, QAIssue, QARouting
 ├── competitor.py          # CompetitorProfile, FeatureProfile, PricingProfile, ...
 ├── industry/
 │   ├── __init__.py        # IndustryExtensionUnion + registry
-│   ├── collab_saas.py
-│   ├── crm_saas.py
-│   └── cross_border.py
+│   ├── _maturity.py       # MaturityScore
+│   ├── collab_saas.py     # CollaborationSaasExtension
+│   ├── crm_saas.py        # CrmSaasExtension
+│   ├── cross_border.py    # CrossBorderEcommerceSaasExtension
+│   └── edu_saas.py        # EduSaasExtension
 ├── evidence.py            # Evidence, EvidenceLocation, RawSourceDoc
 ├── trace.py               # TraceRecord, LLMCallRecord, ToolCallRecord
-├── dag.py                 # DAGNode, NodeType, NodeStatus
-└── project.py             # Project, ProjectMetrics, CollectConstraints
+├── dag.py                 # DAGNode, DAGEdge, DAGPlan, DAGState, NodeType, NodeStatus
+└── project.py             # Project, ProjectMetrics, AnalysisMode, ProjectStatus
 ```
 
 **架构窗口承诺**：M0 时点这些文件全部成型，其他窗口直接 import 即可。
 
 ---
 
-## 12. JSON Schema 导出
+## 12. 前端类型同步
 
-为了支持非 Python 端（前端 TS 类型、答辩材料）：
+Pydantic 模型是唯一权威（source of truth：`backend/schemas` + `backend/api/schemas.py`）。
 
-```bash
-# 全量导出
-python -m backend.schemas.export --out schemas/json/
-# 输出：schemas/json/CompetitorProfile.schema.json 等
-```
+**现状（v1）**：前端 TS 类型由 `frontend/src/lib/api/types.ts` **手工维护**，命名 / 字段大小写完全匹配后端 JSON 序列化（snake_case）。该文件头部已注明「v1 手维护」（`frontend/src/lib/api/types.ts:5`）。
 
-前端通过 `openapi-typescript` 直接从 FastAPI 拿到类型，无需手维护。
+**未实现 / 计划**：
+- 自动从 `/openapi.json` 用 `openapi-typescript` 生成前端类型（当前仍手维护）。
+- 全量 JSON Schema 导出 CLI（如 `python -m backend.schemas.export`）—— 该模块尚不存在，未实现。

@@ -28,15 +28,16 @@
   按 Schema 字段抽取，每个字段记录 source_quote
         │
         ▼
-  source_quote 反向匹配回 chunk → 生成 Evidence（含 evidence_id）
+  source_quote 的 content_hash 反向匹配回 chunk → 生成 Evidence（含 evidence_id）
+  （见 extractor/agent.py::_mint_evidence；无向量库，纯 content_hash 关联）
         │
         ▼
-  Evidence 写入向量库 + 关系库
+  Evidence 随 ExtractorOutput 落 state_store（关系库 / localdb）
         │
         ▼
 [Analyst]
-  reasoning 时，通过 RAG 查询 evidence_id
-  每个 claim 的 evidence_ids ⊆ 已入库的 evidence
+  reasoning 时直接消费上游传入的 evidence（非 RAG / 非向量检索）
+  每个 claim 的 evidence_ids ⊆ 已抽取的 evidence
         │
         ▼
 [Reporter]
@@ -68,8 +69,12 @@
 | `location.char_start/end` | 在原文中的字符偏移 |
 | `source_authority` | 来源权威度（官方 0.95，UGC 0.6） |
 | `collected_at` | 抓取时间，用于时效性判断 |
-| `embedding_id` | 向量库主键 |
-| `content_hash` | 去重 |
+| `content_hash` | 去重 + Evidence 与 chunk 的关联键（见 §4） |
+| `embedding_id` | 预留字段：声明但 v1 未使用（无向量库），始终为 None（`evidence.py:87`） |
+| `detected_product_name` | 内容检测出的产品名；供 `identity_consistency` 拦截「抓错产品」（`evidence.py:95`） |
+| `identity_confidence` | 该证据确属 `product_name` 的置信度 0-1（`evidence.py:99`） |
+| `identity_status` | 身份校验结论 `unvalidated/confirmed/mismatch/ambiguous`（`evidence.py:105`） |
+| `source_class` | 来源粗分类 `official/review/other`，从 RawSourceDoc 继承（`evidence.py:109`） |
 
 ---
 
@@ -78,50 +83,56 @@
 ### 4.1 切片策略
 
 ```python
-# backend/tools/chunker.py
-def chunk_text(text: str, max_tokens: int = 400, overlap: int = 50) -> list[Chunk]:
-    """按段落优先，长段落切到 max_tokens，相邻 chunk 有 overlap。"""
+# backend/agents/extractor/tools.py
+class TextChunker:
+    def __init__(self, max_chars: int = 1200, overlap: int = 100) -> None: ...
+    def chunk(self, source: RawSourceDoc) -> list[Chunk]:
+        """按段落优先，长段落按句切；用 char（非 token）计长。"""
 ```
 
 - 优先按段落 / 列表项切
-- 单段超过 `max_tokens` 时按句子切
+- 单段超过 `max_chars` 时按句子切
 - 保留 `overlap` 让边界处不丢上下文
 - 记录每个 chunk 在原文中的 `char_start / char_end`
+- v1 用 char 计长（400 char ≈ 100 token），不引入额外 tokenizer 依赖
 
 ### 4.2 去重
 
 - 同一段文本（content_hash 相同）只入库一次
 - 多个 source_url 引用同一段文本 → Evidence 的 source_url 改为 list
 
-### 4.3 向量化
+### 4.3 向量化（v1 未实现）
 
-- 使用 multi-lingual embedding 模型（中英混合）
-- 默认 `bge-m3` 或 `text-embedding-3-small`
-- 通过 `LLMProvider.embed()` 统一调用，便于切换
+v1 **不做向量化、不建向量库、不走 RAG**。Evidence 与原文 chunk 的关联完全靠
+`content_hash` 反向匹配（见 §4.2 与 `extractor/agent.py::_mint_evidence`）。
 
-### 4.4 关系库映射
+- `LLMProvider.embed()` 是抽象基类上的占位方法，默认实现 `raise NotImplementedError`
+  （`backend/agents/_base.py:527`、`collector/llm_providers.py:322`），生产路径不调用。
+- `embedding_id` 字段声明但未消费，`chromadb` 在 `pyproject.toml` 中声明但全仓库无 `import`。
+- 留作后续扩展位，不影响当前证据链。
 
-PostgreSQL 表：
+### 4.4 持久化
+
+v1 **没有专门的 `evidences` 表**。Evidence 作为 `ExtractorOutput.evidences` 的一部分，
+随节点输出整体序列化为 JSON，落在 `node_outputs` 表的 `payload` 列
+（DDL 见 `backend/storage/sql.py`，`CREATE TABLE node_outputs`）：
 
 ```sql
-CREATE TABLE evidences (
-  evidence_id      text PRIMARY KEY,
-  source_id        text REFERENCES raw_sources(source_id),
-  product_name     text,
-  source_url       text,
-  content          text,
-  content_hash     text,
-  location         jsonb,
-  source_authority real,
-  language         text,
-  collected_at     timestamptz,
-  embedding_id     text,
-  tags             text[],
-  created_at       timestamptz DEFAULT now()
+CREATE TABLE IF NOT EXISTS node_outputs (
+  project_id  text,
+  node_id     text,        -- e.g. 'extract.notion'
+  run_id      text,
+  agent_name  text,
+  status      text,
+  payload     jsonb,       -- 序列化后的 ExtractorOutput（内含 evidences[]）
+  saved_at    timestamptz
 );
-CREATE INDEX ON evidences (product_name);
-CREATE INDEX ON evidences (content_hash);
 ```
+
+- 读取：`PostgresStateStore.list_node_outputs(project_id)` 反序列化回 Pydantic
+  （`backend/api/routes/evidence.py:92` 即按此遍历找 evidence）。
+- 内存 / 本地模式（`MemoryStateStore`，`backend/storage/memory.py`）同样存整份 output，
+  接口一致。
 
 ---
 
@@ -227,11 +238,15 @@ Reporter 在生成段落时：
 
 ## 9. 时效性
 
-每条 Evidence 带 `collected_at`。Profile 字段绑定 Evidence 时同步存最早的 `collected_at`。
+QA 的 `freshness` 维度按 Evidence 的 `source_published_at`（源文档发布时间，**非**
+`collected_at` 抓取时间）判时效（见 docs/QA.md §3.5、`checkers/freshness.py`）：
 
-- 超过 6 个月：标记 `freshness=stale`，QA 会提示
-- 超过 1 年：标记 `freshness=expired`，建议重新采集
-- 定价 / 版本号 / 功能等高变动字段，阈值更严（3 个月 stale，6 个月 expired）
+- 定价 / 版本号 / 功能等敏感字段引用的证据：超过 `SENSITIVE_MAX_DAYS=90` 天 → 过期，
+  开 issue 路由回 Collector 补采
+- 一般字段：超过 `GENERAL_MAX_DAYS=365` 天 → 提示加日期标注（minor）
+- `source_published_at` 为 None 的证据**不参与评分**（无日期 ≠ 过期）；全无日期则默认通过
+
+> 没有持久化的 `freshness=stale/expired` 枚举字段，时效性是 QA 运行时按上述阈值计算的。
 
 ---
 
@@ -239,9 +254,15 @@ Reporter 在生成段落时：
 
 ```
 backend/
-├── schemas/evidence.py         # Evidence / EvidenceLocation
-├── storage/evidence_store.py   # PG + Chroma 双写 + RAG retrieve
-├── tools/chunker.py
-├── tools/evidence_linker.py    # source_quote → Evidence 匹配
-└── api/routers/evidences.py    # REST: GET /evidences/{id}, search, etc.
+├── schemas/evidence.py              # Evidence / EvidenceLocation / RawSourceDoc
+├── agents/extractor/
+│   ├── tools.py                     # TextChunker.chunk() 切片 +
+│   │                                #   EvidenceLinker.link() 把 source_quote 匹配回原文
+│   └── agent.py                     # _mint_evidence() 生成 Evidence（content_hash 关联）
+├── storage/{postgres,memory,sql}.py # Evidence 随 ExtractorOutput 落 node_outputs（无独立表）
+└── api/routes/evidence.py           # PATCH /projects/{id}/evidence/{evidence_id}（标 disputed）
 ```
+
+> 不存在 `storage/evidence_store.py`、`tools/chunker.py`、`tools/evidence_linker.py`：
+> 切片 / 链接逻辑都在 `agents/extractor/`，无向量库、无 RAG retrieve。
+> API 仅有上面这一个 `PATCH` 端点（dispute / auto_rework），没有 `GET /evidences/{id}` 或 search。

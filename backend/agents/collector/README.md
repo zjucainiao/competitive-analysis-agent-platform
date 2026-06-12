@@ -107,7 +107,7 @@ agent = Collector(
 out = agent.invoke(my_input, trace_id="...", span_id="...")
 ```
 
-环境变量（详见 [docs/CONVENTIONS.md § 6](../../../docs/CONVENTIONS.md#61-环境变量)）：
+环境变量（完整清单见仓库根目录 [.env.example](../../../.env.example)）：
 
 | key | 用途 | 必需性 |
 |---|---|---|

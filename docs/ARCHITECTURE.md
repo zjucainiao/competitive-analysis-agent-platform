@@ -37,10 +37,10 @@
 │   通用 + 行业扩展 + Evidence + Trace + AgentIO              │
 ├────────────────────────────────────────────────────────────┤
 │ L6 存储层  (backend/storage/)                               │
-│   PostgreSQL · Chroma · Redis · 对象存储                    │
+│   PostgreSQL · Redis（事件总线 + 缓存）                      │
 ├────────────────────────────────────────────────────────────┤
 │ L7 模型与工具层  (backend/llm/, backend/tools/)             │
-│   LLMProvider · 搜索 · 网页抓取 · RAG · 校验                │
+│   LLMProvider · 搜索 · 网页抓取 · 校验                      │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -72,13 +72,20 @@ FastAPI 提供 REST API + WebSocket（DAG 实时进度推送）。**关键资源
 
 ### L3 Agent 编排层
 
-基于 **LangGraph** 实现 `StateGraph`。**核心职责**：
+基于 **LangGraph** 实现 `StateGraph`。两套引擎，由 `ORCH_ENGINE` 环境变量选择（默认 `native`，见 `backend/orchestrator/orchestrator.py:141`）：
 
-- 节点定义：每个节点对应一个 Agent 调用或工具调用
-- 边定义：依赖边 + 反馈边（条件分支）
-- 状态管理：六态状态机（pending / running / success / failed / needs_rework / skipped）
-- 自适应规划：Orchestrator 不是固定 DAG，而是根据 query 复杂度动态生成节点
-- Trace 注入：每个节点执行自动生成 `trace_id` + `span_id`
+- **NATIVE（默认）**：`backend/orchestrator/graph.py` 装配 `StateGraph(RunState)`，节点为
+  collect_dispatch / collect_one / extract_dispatch / extract_one / analyst / reporter / qa
+  （`backend/orchestrator/nodes.py`）。拓扑固定；并行采集/抽取经 `Command(goto=[Send(...)])` 扇出，
+  QA 经 `Command(goto=...)` 回环重做或 END。
+- **LEGACY（`ORCH_ENGINE=legacy`）**：`backend/orchestrator/orchestrator.py` 的 dispatch 循环引擎
+  （`StateGraph(OrchestratorState)`），保留向后兼容。
+
+**核心职责**：
+
+- 节点状态：`NodeRun.status ∈ {success, partial, needs_rework, failed}`（`backend/orchestrator/run_state.py:81`）
+- 反馈回环：QA verdict 经 `decide_qa_route` 决定回到哪个上游入口节点重做（最多 3 轮 + 无提升即停）
+- Trace 注入：每个节点执行自动生成 `span_id`
 
 详见 [DAG.md](DAG.md)。
 
@@ -112,19 +119,21 @@ QA         → ReportDraft → QAVerdict + 路由决策
 
 | 存储 | 数据 | 选型理由 |
 |---|---|---|
-| PostgreSQL | 项目 / 任务 / 报告 / Evidence 元数据 / Trace | 关系完整、事务、JSONB 灵活 |
-| Chroma | Evidence chunk 向量索引 | 轻量、Python 友好、本地可跑 |
-| Redis | DAG 状态、任务队列、缓存 | 实时、低延迟 |
-| 本地文件 / S3 | 原始 HTML、PDF、截图 | 体积大、对象存储 |
+| PostgreSQL | 项目 / 任务 / 报告 / Evidence / 原始来源 / Trace / checkpoint | 关系完整、事务、JSONB 灵活；原始来源直接落 PG/内存 state，不另设对象存储 |
+| Redis | 事件总线（节点进度广播）、缓存 | 实时、低延迟。注意：Redis 是事件总线，不是 checkpoint 存储 |
+
+> checkpoint 由 `InMemoryCheckpointer` / `PostgresCheckpointer`（`backend/storage/__init__.py`）提供，经
+> `to_langgraph_saver` 适配给 LangGraph。`mode="memory"` 走内存三件套，`mode="postgres"` 走 PG。
 
 ### L7 模型与工具层
 
-**LLMProvider 抽象**：所有 Agent 通过统一接口调用，默认 Claude，可切换 DeepSeek / Qwen / OpenAI。统一管理 token 计量、重试、降级、cache。
+**LLM 抽象**：所有 Agent 通过 `OpenAICompatibleLLM`（`backend/agents/collector/llm_providers.py`）统一调用。
+`build_llm_from_env`（`backend/llm/__init__.py:60`）按 **豆包（Doubao）优先 → DeepSeek → OpenAI（gpt-4o-mini）** 兜底装配。
+统一管理 token 计量（`backend/llm/pricing.py`）、重试、降级。
 
 **工具集**（每个 Agent 按需声明依赖）：
 - 搜索：Tavily / Serper
 - 抓取：Firecrawl / Playwright（fallback）
-- RAG：Chroma + 自建 retriever
 - 校验：JSON Schema validator、引用解析器
 
 ## 3. 端到端数据流（举例）
@@ -138,30 +147,30 @@ QA         → ReportDraft → QAVerdict + 路由决策
 [API] 持久化 Project，触发 Orchestrator
    │  enqueue(project_id)
    ▼
-[Orchestrator] 根据 query 复杂度生成 DAG
-   │  生成节点：3 个 Collector × 4 个维度，3 个 Extractor，5 个 Analyst，1 个 Reporter，1 个 QA
+[Orchestrator] native 图按行业模板装配（拓扑固定）
+   │  collect_dispatch 对每个产品扇出一个 collect_one（Send）
    ▼
-[Collector × N] 并行采集
-   │  调用 Tavily 搜索 → Firecrawl 抓取 → 存 raw HTML 到对象存储
-   │  输出 RawSourceDoc[]
+[Collector × N] 并行采集（collect_one）
+   │  调用 Tavily 搜索 → Firecrawl 抓取 → 原始来源进 RunState/PG（不另存对象存储）
+   │  输出 CollectorOutput（含 RawSourceDoc[]）
    ▼
-[Extractor × N] 抽取结构化竞品知识
+[Extractor × N] 抽取结构化竞品知识（extract_one，barrier 后扇出）
    │  对每个产品分别抽取 → CompetitorProfile（按行业 Schema）
-   │  同时生成 Evidence[] 并写入向量库
+   │  同时生成 Evidence[]（落 PG，无向量库）
    ▼
-[Analyst × N] 多维度对比分析
+[Analyst] 多维度对比分析（barrier：所有 extract 完成后跑一次）
    │  feature_comparison / pricing_comparison / swot / opportunities / pain_points
    │  每个 claim 绑定 evidence_ids[]
    ▼
 [Reporter] 生成 ReportDraft
    │  按模板组装 markdown，引用强制（无 evidence_id 的 claim 直接拒绝）
    ▼
-[QA] 6 维度审查
-   │  ├─ pass     → 写入 final_report，通知前端
-   │  └─ revise   → 路由回 Collector / Extractor / Analyst / Reporter
+[QA] 审查并经 decide_qa_route 决策
+   │  ├─ 通过 / 非阻塞   → Command(goto=END)，发布
+   │  └─ 阻塞需返工      → Command(goto=上游入口节点)（collect_dispatch / extract_dispatch / analyst / reporter）
    ▼
-[Orchestrator] 根据 QA 路由决策，触发上游 Agent 重做（带 QA 反馈消息）
-   │  循环直到 pass 或重试次数耗尽
+[图回环] native Command(goto=...) 直接把控制流送回上游入口节点重跑（带 QA 反馈）
+   │  最多 3 轮；维度均分无明显提升（Δ<0.01）即提前停，发布最优轮
    ▼
 [用户] 前端实时看到 DAG 节点状态变化、报告版本演进、证据库增长
 ```
@@ -172,7 +181,7 @@ QA         → ReportDraft → QAVerdict + 路由决策
 
 | 模块 | 不允许做的事 | 必须做的事 |
 |---|---|---|
-| Agent | 不直接读数据库（除 Evidence RAG） | 通过 `AgentInput` 接收所有上下文 |
+| Agent | 不直接读数据库 | 通过 `AgentInput` 接收所有上下文 |
 | Agent | 不自己写 trace 日志 | 通过 `BaseAgent.invoke()` 自动注入 trace |
 | Agent | 不互相直接调用 | 只通过 Orchestrator 路由 |
 | Orchestrator | 不做业务推理 | 只负责调度、状态、路由 |
@@ -186,19 +195,17 @@ QA         → ReportDraft → QAVerdict + 路由决策
 |---|---|---|
 | 后端框架 | FastAPI | 异步、Pydantic 原生支持 |
 | 包管理 | uv | 速度快、锁文件稳定 |
-| Agent 编排 | LangGraph | StateGraph、条件分支、checkpoint |
-| LLM 默认 | Claude Sonnet 4.6（开发）/ Claude Opus 4.7（关键路径） | 工具调用稳定、JSON 输出可靠 |
-| LLM 备选 | DeepSeek / Qwen / GPT-4.x | 通过 LLMProvider 抽象切换 |
-| 数据库 | PostgreSQL 16 | JSONB 用于 Schema 字段 |
-| 向量库 | Chroma | 本地可跑、零运维 |
-| 缓存 / 队列 | Redis 7 | DAG 状态 + Stream |
-| 搜索 | Tavily（主） / Serper（备） | 学术友好、配额合理 |
+| Agent 编排 | LangGraph（StateGraph + Send + Command(goto) 原生回环） | 静态拓扑、并行扇出、checkpoint |
+| LLM 默认 | 豆包（Doubao）优先 → DeepSeek → OpenAI（gpt-4o-mini）兜底 | 经 `OpenAICompatibleLLM` 统一调用 |
+| LLM 切换 | 任意 OpenAI 兼容端点 | `build_llm_from_env` 按环境变量装配 |
+| 数据库 | PostgreSQL | JSONB 用于 Schema 字段；同时存 checkpoint |
+| 事件总线 / 缓存 | Redis | 节点进度广播（非 checkpoint 存储） |
+| 搜索 | Tavily（主） / Serper（备） | 配额合理 |
 | 抓取 | Firecrawl（主） / Playwright（备） | 复杂站点用 Playwright |
-| 前端 | Next.js 14 + React 18 + TypeScript | 服务端渲染、文件路由 |
+| 前端 | Next.js 16.2 + React 19.2 + TypeScript | 服务端渲染、文件路由 |
 | UI 库 | shadcn/ui + Tailwind | 轻、定制度高 |
-| 可视化 | React Flow（DAG） + ECharts（指标） | 主流方案 |
-| 实时 | WebSocket（FastAPI 原生） | DAG 状态推送 |
-| 可观测 | LangSmith（可选） + 自建 Trace 表 | 不强依赖外部 |
+| 可视化 | React Flow（`@xyflow/react`，渲染 DAG / 运行视图） | — |
+| 实时 | WebSocket（FastAPI 原生） | 节点状态推送 |
 | 容器化 | Docker Compose | 本地一键启动 |
 
 ## 6. 部署架构（简化）
@@ -224,7 +231,7 @@ QA         → ReportDraft → QAVerdict + 路由决策
   │ Postgres │                  │ Redis      │
   └──────────┘                  └─────┬──────┘
                                       │
-                                      │ task queue
+                                      │ event bus（节点进度）
                                       ▼
                         ┌──────────────────────┐
                         │  Orchestrator Worker │  (LangGraph)
@@ -235,13 +242,14 @@ QA         → ReportDraft → QAVerdict + 路由决策
                         │ Agents (in-process)  │
                         └─────────┬────────────┘
                                   │
-                  ┌───────────────┼────────────────┐
-                  ▼               ▼                ▼
-            ┌─────────┐    ┌──────────┐    ┌──────────────┐
-            │ Chroma  │    │ LLM API  │    │ Tools API    │
-            └─────────┘    │ Claude…  │    │ Tavily/      │
-                           └──────────┘    │ Firecrawl    │
-                                           └──────────────┘
+                          ┌───────────────┴────────────────┐
+                          ▼                                 ▼
+                   ┌──────────────┐                 ┌──────────────┐
+                   │   LLM API    │                 │  Tools API   │
+                   │ Doubao/      │                 │ Tavily/      │
+                   │ DeepSeek/    │                 │ Firecrawl    │
+                   │ OpenAI       │                 └──────────────┘
+                   └──────────────┘
 ```
 
 v1 阶段 Orchestrator + Agents 可以同进程跑，后期分进程通过 Redis Stream 解耦。

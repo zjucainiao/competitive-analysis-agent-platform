@@ -16,7 +16,6 @@ variables:
     - help_docs
     # 加上 reviews：让 Collector 触发 reviews 路径（豆包 EP 自带联网搜索能采），
     # 防止 user_feedback.overall_rating 全空导致 QA schema_completeness critical。
-    # 详见 docs/E2E_INTEGRATION_LOG.md
     - user_reviews
   # 已知协作办公竞品的官网种子（real 模式 Collector 不再依赖外部搜索 API）。
   # planner 把命中的 URL 写进 Collector 节点 metadata.official_url；未命中的

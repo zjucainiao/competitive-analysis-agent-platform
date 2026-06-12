@@ -4,7 +4,8 @@
 > Caddy(反代+自动证书) + 前端(Next.js) + 后端(FastAPI) + Postgres + Redis。
 > 数据卷持久化；只有 Caddy 对公网开 80/443。LLM 用 DeepSeek + Tavily 搜索。
 >
-> 本机最快验证 / Jaeger 等本地玩法见 [DEPLOY.md](DEPLOY.md)。这里只讲上线。
+> 本地开发 / 快速验证见仓库根目录 [README.md](../README.md) 的「本地部署」一节。这里只讲上线。
+> 本地接 Jaeger 观测见下方 §7 可选增强。
 
 ---
 
@@ -54,7 +55,7 @@ dig +short yourdomain.com    # 应回显你的服务器 IP
 
 ```bash
 git clone <你的仓库地址> cap && cd cap
-git checkout local-env        # 或你要上线的分支
+git checkout main             # 或你要上线的分支
 
 cp .env.prod.example .env.prod
 vim .env.prod                 # 按下面清单填

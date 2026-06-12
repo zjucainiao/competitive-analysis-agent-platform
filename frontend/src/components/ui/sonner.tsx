@@ -12,7 +12,7 @@ import {
 /**
  * Toast 容器。v1 light-only，不接 next-themes。
  *
- * 视觉跟齐 DESIGN.md：暖白底 + 朱漆橙 accent + 状态色四档。
+ * 视觉跟齐 DESIGN.md：淡紫底 + 紫罗兰 accent + 状态色四档。
  * 用法：from "sonner" import { toast } → toast.success / .error / .info / .warning / .loading
  */
 const Toaster = ({ ...props }: ToasterProps) => {

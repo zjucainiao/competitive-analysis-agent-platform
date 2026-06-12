@@ -40,24 +40,30 @@ class DAGPlan(BaseModel):
 
 ### 1.4 实现
 
-```python
-# backend/orchestrator/planner.py
-class AdaptivePlanner:
-    def plan(self, project: Project) -> DAGPlan:
-        if project.mode == "fixed":
-            return self._load_template(project.industry)
+真实实现见 `backend/orchestrator/adaptive_planner.py` 的 `class AdaptivePlanner`，核心入口 `plan(self, project: Project) -> DAGPlan`：
 
-        # LLM-driven planning
-        plan = self.llm.chat(
-            system=PLANNER_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": render_project(project)}],
-            response_format=DAGPlan,
-            tools=[get_available_dimensions, get_available_agents],
+```python
+# backend/orchestrator/adaptive_planner.py
+class AdaptivePlanner:
+    """LLM-driven Planner。"""
+
+    def plan(self, project: Project) -> DAGPlan:
+        # 1. 让 LLM 推断每个产品的 URL + 该抓哪些 dimension + rationale
+        plan_sketch = self._invoke_llm(project)
+        # 2. 把推断结果落到节点 metadata（与 template 模式同结构）
+        products = self._merge_products(project, plan_sketch)
+        dimensions = self._select_dimensions(plan_sketch)
+        # 3. 组装成可执行 DAGPlan（带 rationale / confidence）
+        return self._assemble_plan(
+            project=project,
+            products=products,
+            dimensions=dimensions,
+            rationale=plan_sketch.rationale,
+            confidence=plan_sketch.confidence,
         )
-        # 校验
-        self._validate(plan)
-        return plan
 ```
+
+固定模板模式（非自适应）走另一条装配路径；上面是 LLM 驱动的自适应规划入口。
 
 ### 1.5 安全网
 
@@ -113,17 +119,14 @@ Output your evaluation in `self_critique` as 1-3 sentences,
 and a numeric `confidence` ∈ [0, 1].
 ```
 
-### 2.4 下游使用
+### 2.4 强制执行与自动降权
 
-Orchestrator 根据上游 confidence 决策：
+confidence / self_critique 不只是"装饰字段"，在 `_base.py` 里被硬性约束：
 
-- confidence < 0.5 → 不进入下游，直接触发 QA 提前介入
-- 0.5 ≤ confidence < 0.7 → 走完流程但报告中标"低置信度"
-- ≥ 0.7 → 正常
+- **自评估强制**（`backend/agents/_base.py`）：`SELF_CRITIQUE_THRESHOLD = 0.6`；`_enforce_self_critique()` 在 confidence < 0.6 且 `self_critique` 为空时抛 `SelfCritiqueRequiredError`（错误码 `SELF_CRITIQUE_REQUIRED`），并把输出 `status` 置为 `NEEDS_REWORK`，进入返工闭环。
+- **Extractor 自动降权**（`backend/agents/extractor/agent.py::_compute_confidence`）：从 `BASE_CONFIDENCE` 出发，按未印证字段比例（`UNVERIFIED_FIELD_THRESHOLD`）、冲突字段、必填字段缺失、行业字段缺失、unmatched 引用逐项扣分。缺失/冲突越多，confidence 越低，从而联动上面的自评估强制。
 
-Analyst / Reporter 在引用上游数据时也会读 `field_confidence`，对低置信字段：
-- 软化表述（"根据初步资料……"）
-- 标记给 QA 复查
+> 注：当前 orchestrator 不做"confidence 阈值 → 下游路由分流"（无 `confidence < 0.5 提前介入` 之类逻辑）；返工的触发来自 `status == NEEDS_REWORK` 与 QA 判定，而非 confidence 阈值分支。confidence 主要用于自评估强制、报告侧展示与排查。
 
 ### 2.5 评分价值
 
@@ -161,11 +164,11 @@ Analyst / Reporter 在引用上游数据时也会读 `field_confidence`，对低
 
 依赖完整的 Trace 体系（详见 [OBSERVABILITY.md](OBSERVABILITY.md)）。
 
-前端核心组件：
-- `<TraceTimeline />`：时间轴 + 状态 + 耗时叠加
-- `<SpanDetail />`：节点详情抽屉
-- `<LLMCallDetail />`：单次 LLM 调用详情
-- `<SpanDiff v1={...} v2={...} />`：版本对比
+前端核心组件（`frontend/src/components/trace/`）：
+- `trace-layout.tsx`：回放主布局（时间轴 + 状态 + 耗时叠加）
+- `trace-row.tsx`：单节点行
+- `llm-call-detail.tsx`：单次 LLM 调用详情（prompt / 输入 / 响应 / 用量）
+- `diff-sheet.tsx`：版本对比（v1 vs v2 重做 diff）
 
 ### 3.4 进阶能力
 

@@ -17,8 +17,9 @@
 **强约束**：
 - Agent 之间**只**通过 Pydantic 模型通信，禁止自然语言对话
 - 所有 Agent 继承 `BaseAgent`，通过 `invoke()` 统一入口调用
-- 所有 LLM 调用走 `LLMProvider` 抽象，不直接 import vendor SDK
+- 所有 LLM 调用走统一 provider 抽象（当前唯一实现 `OpenAICompatibleLLM`，见 `backend/agents/collector/llm_providers.py`），不直接 import vendor SDK
 - 所有 Agent 必须输出 `confidence`（[0, 1]）和 `self_critique`（自评估文本）
+- 所有 `*Input` 继承 `AgentInputBase`（`backend/schemas/agent_io.py:30-38`），含必填的 `task_id` / `project_id` / `trace_id` / `span_id`
 
 ---
 
@@ -70,13 +71,14 @@ class BaseAgent(Generic[TInput, TOutput], ABC):
 
 ### 2.2 通用消息字段
 
-所有 `*Output` 必须继承 `AgentOutputBase`：
+所有 `*Input` 必须继承 `AgentInputBase`，所有 `*Output` 必须继承 `AgentOutputBase`
+（`backend/schemas/agent_io.py`，均设 `model_config = ConfigDict(extra="forbid")`）：
 
 ```python
 # backend/schemas/agent_io.py
 from enum import Enum
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 class AgentStatus(str, Enum):
     SUCCESS         = "success"           # 正常完成
@@ -84,8 +86,17 @@ class AgentStatus(str, Enum):
     NEEDS_REWORK    = "needs_rework"      # 主动声明需要重做（自评估不通过）
     FAILED          = "failed"            # 失败
 
+class AgentInputBase(BaseModel):
+    """所有 Agent 输入的基类字段。各 *Input 继承后再加业务字段。"""
+    model_config = ConfigDict(extra="forbid")
+    task_id:    str
+    project_id: str
+    trace_id:   str
+    span_id:    str
+
 class AgentOutputBase(BaseModel):
     """所有 Agent 输出的基类字段。"""
+    model_config = ConfigDict(extra="forbid")
     agent_name:    str
     agent_version: str
     task_id:       str
@@ -94,7 +105,7 @@ class AgentOutputBase(BaseModel):
 
     status:        AgentStatus
     confidence:    float = Field(ge=0, le=1, description="本次输出整体置信度")
-    self_critique: str  = Field(description="自评估文本，置信度<0.6 时必填具体原因")
+    self_critique: str  = Field(description="自评估文本，confidence<0.6 时必填具体原因")
 
     # 度量
     tokens_input:  int = 0
@@ -102,29 +113,40 @@ class AgentOutputBase(BaseModel):
     cost_usd:      float = 0.0
     duration_ms:   int   = 0
 
-    # 错误
+    # 错误累积
     errors:        list["AgentError"] = []
+    # 输入快照（可观测）：本次 invoke 收到输入的紧凑摘要（计数 + 关键名，已脱敏），
+    # 由 BaseAgent.invoke 出口统一填充，随 output 流到前端做「输入」区可观测。
+    input_snapshot: dict = {}
 
 class AgentError(BaseModel):
-    code:    str       # e.g. "LLM_TIMEOUT", "SCHEMA_VALIDATION_FAILED"
+    model_config = ConfigDict(extra="forbid")
+    code:    str       # e.g. "LLM_TIMEOUT", "LLM_SCHEMA_INVALID"，见 § 2.5
     message: str
-    severity: Literal["warn", "error", "fatal"]
+    severity:  Literal["warn", "error", "fatal"] = "error"
     retriable: bool = True
+    details:   dict = {}    # 结构化补充信息
 ```
 
 ### 2.3 LLM 调用约定
 
 ```python
-# 通过 LLMProvider 抽象调用，禁止直接 anthropic.messages.create()
+# 统一走 provider 抽象（当前唯一实现 OpenAICompatibleLLM），禁止业务代码直接 import
+# 任何 vendor SDK（如 anthropic.messages.create()）——便于统计 / Mock / 切换 provider。
 result = self.llm.chat(
     system=SYSTEM_PROMPT,
     messages=[...],
-    response_format=MyOutputSchema,   # 强制 JSON Schema 输出
+    response_format=MyOutputSchema,   # 强制 JSON Schema 输出（三层兜底，见 llm_providers.py）
     tools=[tool_a, tool_b],
     max_tokens=4096,
     temperature=0.2,
 )
 ```
+
+> 实际 provider 由 `OpenAICompatibleLLM.from_env()` 按 `DOUBAO_API_KEY` > `DEEPSEEK_API_KEY`
+> > `OPENAI_API_KEY`（默认 `gpt-4o-mini`）优先级选取（`backend/agents/collector/llm_providers.py`）。
+> 项目内**没有** Anthropic / Claude / Qwen 的运行时 provider（仅 `backend/llm/pricing.py` 里有
+> 若干未被选用的价目表条目）。
 
 LLM 调用规则：
 1. **结构化输出强制**：能用 `response_format` / `tool_use` 的场景必须用，禁止"用自然语言拼 JSON 然后正则解析"
@@ -137,25 +159,31 @@ LLM 调用规则：
 每个 Agent 在 `__init__` 时声明依赖的工具：
 
 ```python
+# 实际声明见 backend/agents/collector/agent.py:437
 class Collector(BaseAgent):
-    required_tools = ["search.tavily", "scrape.firecrawl", "scrape.playwright"]
+    required_tools = [
+        "search.tavily", "search.duckduckgo",
+        "scrape.firecrawl", "scrape.httpx", "scrape.playwright",
+        "robots_checker", "domain_rate_limiter",
+    ]
 ```
 
 工具调用全部走 `ToolRegistry`，便于统计 / Mock / 降级。
 
 ### 2.5 错误码约定
 
-通用错误码（所有 Agent 共用）：
+通用错误码（所有 Agent 共用，均在代码中真实抛出）：
 
-| Code | 含义 | retriable |
-|---|---|---|
-| `LLM_TIMEOUT` | LLM 超时 | yes |
-| `LLM_RATE_LIMIT` | 限流 | yes（带退避） |
-| `LLM_SCHEMA_INVALID` | LLM 输出不符合 Schema | yes（最多 2 次） |
-| `TOOL_FAILED` | 工具调用失败 | yes |
-| `INPUT_INVALID` | 输入校验失败 | no |
-| `UPSTREAM_MISSING` | 上游必要数据缺失 | no |
-| `SELF_REJECT` | Agent 自评估主动拒绝 | no（直接走 needs_rework） |
+| Code | 含义 | retriable | 出处 |
+|---|---|---|---|
+| `LLM_TIMEOUT` | LLM 超时 | yes | `orchestrator/run_agent.py`、`executor.py` |
+| `LLM_SCHEMA_INVALID` | LLM 输出三层兜底后仍不符合 Schema | yes（带修复重试） | 各 agent `_run` |
+| `TOOL_FAILED` | 工具调用失败 | yes | `collector/agent.py` |
+| `INPUT_INVALID` | 输入校验失败 | no | `agents/_base.py:365` |
+| `UPSTREAM_MISSING` | 上游必要数据缺失 | no | `collector/extractor agent.py` |
+
+> 各 Agent 特有错误码在对应章节定义（均经代码核对）。除上表与各章节外，代码中还有少量
+> 未在文档登记的内部码（如 reporter 的 `UNVERIFIED_INFERENCE`）——以源码为准。
 
 Agent 特有错误码在各 Agent 章节定义。
 
@@ -170,13 +198,17 @@ Agent 特有错误码在各 Agent 章节定义。
 ### 3.2 输入
 
 ```python
-class CollectorInput(BaseModel):
-    task_id: str
+class CollectorInput(AgentInputBase):   # 继承 task_id/project_id/trace_id/span_id
     product_name: str                  # "Notion"
     official_url: str | None = None    # 可选，已知官网
     industry: str                      # "collaboration_saas"
     dimensions: list[CollectDimension] # ["homepage", "pricing", "docs", "reviews"]
-    constraints: CollectConstraints
+    constraints: CollectConstraints = CollectConstraints()
+
+    # 重做时由 QA 反馈注入（QAFeedback 的序列化；用 dict 避免循环依赖）
+    qa_feedback: dict | None = None
+    # 返工收敛：上一轮被 QA 判为身份不符的源 URL，重采时直接跳过
+    exclude_source_urls: list[str] = []
 
 class CollectDimension(str, Enum):
     HOMEPAGE     = "homepage"
@@ -201,27 +233,35 @@ class CollectConstraints(BaseModel):
 
 ```python
 class CollectorOutput(AgentOutputBase):
-    raw_sources: list[RawSourceDoc]
+    raw_sources: list[RawSourceDoc] = []
+    coverage_by_dimension: dict[CollectDimension, int] = {}  # 每维度成功采集页面数
 
+# 定义在 backend/schemas/evidence.py
 class RawSourceDoc(BaseModel):
     source_id:    str                  # uuid
     product_name: str
     dimension:    CollectDimension
-    source_url:   str
+    source_url:   HttpUrl              # 校验过的 URL，非裸 str
     source_type:  str                  # "html" / "pdf" / "json"
-    title:        str | None
-    raw_html:     str | None           # 完整 HTML（占位，实际放对象存储）
+    title:        str | None = None
+    raw_html:     str | None = None    # 完整 HTML（可选；v1 无对象存储，通常存摘要或 None）
     raw_text:     str                  # 抽正文后的纯文本
-    summary:      str | None           # 短摘要（可选，便于上游预览）
-    language:     str                  # "en" / "zh"
+    summary:      str | None = None    # 短摘要（可选，便于上游预览）
+    language:     str = "en"           # "en" / "zh"
 
     collected_at:        datetime
-    fetch_method:        Literal["search", "firecrawl", "playwright", "mock"]
-    http_status:         int | None
-    robots_allowed:      bool
-    source_authority:    float = Field(ge=0, le=1)  # 官方页 0.95，UGC 0.6
+    fetch_method:        Literal["search", "firecrawl", "playwright", "mock", "manual"]
+    http_status:         int | None = None
+    robots_allowed:      bool = True
+    source_authority:    float = Field(ge=0, le=1, default=0.7)  # 官方页 0.95，UGC 0.6
     detected_paywall:    bool = False
     detected_outdated:   bool = False  # 页面 last-modified 早于 1 年
+
+    # 产品身份校验（Collector 抓取后填，Extractor 继承到 Evidence；详见 § 7 / docs/QA.md）
+    detected_product_name: str | None = None        # 页面内容检测出的产品名
+    identity_confidence:   float | None = None      # 确属 product_name 的置信度 0-1
+    identity_status:       Literal["unvalidated", "confirmed", "mismatch", "ambiguous"] = "unvalidated"
+    source_class:          Literal["official", "review", "other"] | None = None
 ```
 
 ### 3.4 关键工具
@@ -269,18 +309,17 @@ Collector 主要靠工具，LLM 仅在以下场景介入：
 
 ### 4.1 职责
 
-把 `RawSourceDoc[]` 转换为符合 Schema 的结构化 `CompetitorProfile`，**同时**把支撑性事实切分为 `Evidence[]` 入库。**不做对比分析**——那是 Analyst 的事。
+把 `RawSourceDoc[]` 转换为符合 Schema 的结构化 `CompetitorProfile`，**同时**把支撑性事实切分为 `Evidence[]`（随 `ExtractorOutput.evidences` 返回，靠 `content_hash` 关联原文，**不入向量库**）。**不做对比分析**——那是 Analyst 的事。
 
 ### 4.2 输入
 
 ```python
-class ExtractorInput(BaseModel):
-    task_id: str
+class ExtractorInput(AgentInputBase):   # 继承 task_id/project_id/trace_id/span_id
     product_name: str
     industry_schema_id: str            # "collaboration_saas_v1"
     raw_sources: list[RawSourceDoc]
-    schema_fields: list[str] | None    # 指定要抽哪些字段，None=全部
-    qa_feedback: QAFeedback | None     # 重做时 QA 给的反馈
+    schema_fields: list[str] | None = None  # 指定要抽哪些字段，None=全部
+    qa_feedback: dict | None = None    # 重做时 QA 反馈（QAFeedback 序列化，dict 避循环依赖）
 ```
 
 ### 4.3 输出
@@ -288,9 +327,10 @@ class ExtractorInput(BaseModel):
 ```python
 class ExtractorOutput(AgentOutputBase):
     profile:   CompetitorProfile       # 见 SCHEMA.md
-    evidences: list[Evidence]          # 抽取过程产生的所有证据
-    field_confidence: dict[str, float] # 字段级置信度，e.g. {"pricing.plans": 0.92}
-    schema_version: str                # "1.0.0"
+    evidences: list[Evidence] = []     # 抽取过程产生的所有证据
+    field_confidence: dict[str, float] = {}  # 字段级置信度，e.g. {"pricing.plans": 0.92}
+    schema_version: str                # 对应 schemas.SCHEMA_VERSION（当前 "1.1.0"）
+    unmatched_quotes: list[str] = []   # LLM 给的 source_quote 中匹配不上 raw_text 的部分（供自评估）
 ```
 
 详细 `CompetitorProfile` / `Evidence` 结构见 [SCHEMA.md](SCHEMA.md)。
@@ -298,27 +338,32 @@ class ExtractorOutput(AgentOutputBase):
 ### 4.4 关键工具
 
 - LLM 结构化抽取（`response_format=CompetitorProfile`）
-- `text.chunker`：长文本切片用于 RAG
-- `vector.upsert`：Evidence 入向量库
+- `TextChunker`（`backend/agents/extractor/tools.py`）：段落优先、按 token 上限切分的切片器，
+  保留字符偏移，用于把长 `raw_text` 切片后逐块喂 LLM。**不是 ToolRegistry 工具，也不写向量库。**
+
+> 注意：本项目**没有向量库 / RAG / embedding**。`Evidence.embedding_id` 始终为 `None`，
+> `OpenAICompatibleLLM.embed()` 直接 `raise NotImplementedError`。证据与原文的关联完全靠
+> `content_hash`（见 `extractor/agent.py` 的 `_mint_evidence`），不经任何向量检索。
 
 ### 4.5 Prompt 设计要点
 
 **抽取分两步**（推荐拆成两次 LLM 调用，更稳）：
 
 1. **粗抽取**：让 LLM 按 Schema 输出 JSON，附带每个字段的来源句子（"source_quote": "..."）
-2. **证据绑定**：对每个 source_quote，匹配回 raw_source，生成 Evidence 并赋 evidence_id；如果匹配不上 → 该字段标记为 unverified 并降低 confidence
+2. **证据绑定**：对每个 source_quote，按文本匹配回 raw_source，生成 Evidence 并赋 evidence_id；
+   匹配不上的 quote 进 `unmatched_quotes`，对应字段降低 confidence
 
 **关键原则**：
 - 每个非空字段必须有 1 个以上 evidence_id 支撑
 - 如果原文没说，必须填 `null`，**禁止编造**（这是 Extractor 抑制幻觉的核心）
-- 长文本走 chunk + RAG，不一次性塞 LLM
+- 长文本先用 `TextChunker` 切片再逐块抽取，不一次性塞 LLM
 
 ### 4.6 自评估
 
 ```
 低 confidence 触发条件：
 - > 20% 必填字段为 null
-- > 30% 字段的 evidence 匹配失败
+- > 30% 字段的 source_quote 匹配失败（进 unmatched_quotes）
 - 字段值与多个来源出现矛盾
 ```
 
@@ -341,14 +386,13 @@ class ExtractorOutput(AgentOutputBase):
 ### 5.2 输入
 
 ```python
-class AnalystInput(BaseModel):
-    task_id: str
+class AnalystInput(AgentInputBase):             # 继承 task_id/project_id/trace_id/span_id
     target_product:  str                       # "Notion"
     competitors:     list[str]                 # ["ClickUp", "Asana", "Trello"]
     profiles:        dict[str, CompetitorProfile]   # {product_name: profile}
     dimensions:      list[AnalysisDimension]
-    evidence_store_handle: EvidenceStoreHandle # 可按 evidence_id 取详情
-    qa_feedback:     QAFeedback | None
+    evidence_store_handle: str | None = None   # 句柄字符串，可按 evidence_id 取详情
+    qa_feedback:     dict | None = None        # QAFeedback 序列化（dict 避循环依赖）
 
 class AnalysisDimension(str, Enum):
     FEATURE_COMPARISON   = "feature_comparison"
@@ -389,13 +433,12 @@ class AnalysisClaim(BaseModel):
 
 ### 5.4 关键工具
 
-- LLM 推理（带 RAG，按需取 evidence 详情）
-- `evidence.retrieve(claim_text)`：根据 claim 反查支撑证据
+- LLM 推理：evidence 池随输入直接传入（无向量检索 / RAG），LLM 只能从该池选 `evidence_ids`
 
 ### 5.5 Prompt 设计要点
 
 - 每个维度独立 prompt，避免一次塞太长
-- 强制要求 LLM 输出 `evidence_ids`，且仅能从输入提供的 evidence 池中选
+- 强制要求 LLM 输出 `evidence_ids`，且**仅能**从输入随 profiles 提供的 evidence 池中选
 - 鼓励输出 `counter_evidence_ids`：体现严谨，给质检 Agent 一个验证锚点
 - 维度间禁止串结论（避免互相污染）
 
@@ -427,14 +470,16 @@ class AnalysisClaim(BaseModel):
 ### 6.2 输入
 
 ```python
-class ReporterInput(BaseModel):
-    task_id: str
+class ReporterInput(AgentInputBase):   # 继承 task_id/project_id/trace_id/span_id
     project_name: str
     analysis: AnalysisResult
     template_id: str                   # "standard_v1" / "investor_v1" / "pm_v1"
     output_format: Literal["markdown", "html"] = "markdown"
-    target_audience: str | None        # "产品经理" / "投资人"
-    qa_feedback: QAFeedback | None
+    target_audience: str | None = None # "产品经理" / "投资人"
+    qa_feedback: dict | None = None    # QAFeedback 序列化（dict 避循环依赖）
+    # 返工时上一版草稿：配合 qa_feedback.must_address 做定向改稿（只重写命中 location 的 section），
+    # None → 全篇生成（首轮 / 兜底）
+    prior_draft: ReportDraft | None = None
 ```
 
 ### 6.3 输出
@@ -445,34 +490,39 @@ class ReporterOutput(AgentOutputBase):
 
 class ReportDraft(BaseModel):
     report_id:    str
-    version:      int                  # 1, 2, 3 ...（QA 退回时递增）
+    version:      int = Field(ge=1)    # 1, 2, 3 ...（QA 退回时递增）
     template_id:  str
-    sections:     list[ReportSection]
+    sections:     list[ReportSection] = []
     summary:      str                  # 摘要
-    metadata:     dict                 # 字数 / claim 数 / evidence 数
+    metadata:     dict = {}            # 字数 / claim 数 / evidence 数
 
 class ReportSection(BaseModel):
     section_id:  str
     title:       str                   # "定价策略对比"
     order:       int
-    paragraphs:  list[ReportParagraph]
+    paragraphs:  list[ReportParagraph] = []
 
 class ReportParagraph(BaseModel):
     paragraph_id: str
     text:         str
     claim_ids:    list[str] = []       # 引用了哪些 AnalysisClaim
     evidence_ids: list[str] = []       # 引用了哪些 Evidence（展开后）
-    is_quantitative: bool = False      # 含数字 / 价格 / 占比的段落要更严格校验
+    is_quantitative:   bool = False    # 含数字 / 价格 / 占比的段落要更严格校验
+    is_soft_conclusion: bool = False   # True 时允许 evidence_ids 为空（"可能"、"通常" 等模糊表述）
 ```
+
+> `evidence_ids` 在 schema 层**有意允许为空**（便于分步构建草稿）；"非软结论段落必须非空"
+> 这一条件约束不在模型里，而由 `Reporter._post_validate` 在输出校验阶段拒绝（见 `reporter/agent.py`）。
 
 ### 6.4 引用强制规则
 
 **这是 Reporter 抑制幻觉的核心**：
 
-1. 报告中每个**事实性陈述**段落必须有非空 `evidence_ids`
-2. 如果 LLM 生成的段落没有 evidence_ids，BaseAgent 在输出校验阶段直接抛 `MISSING_CITATION`
-3. 段落中的数字、价格、百分比、版本号必须可在 evidence 文本中找到（`is_quantitative=True` 时自动校验）
-4. 软性结论（"可能"、"通常"）允许 evidence_ids 为空但需在 self_critique 中说明
+1. 报告中每个**事实性陈述**段落（`is_soft_conclusion=False`）必须有非空 `evidence_ids`
+2. 缺 evidence_ids 的事实性段落由 `Reporter._post_validate` 在输出校验阶段标 `MISSING_CITATION`
+3. 段落中的数字、价格、百分比、版本号必须可在 evidence 文本中找到，`is_quantitative=True` 时
+   字面校验，找不到记 `UNVERIFIED_QUANTITY`（见 `reporter/agent.py:282`）
+4. 软性结论（`is_soft_conclusion=True`，如"可能"、"通常"）允许 evidence_ids 为空
 
 ### 6.5 Prompt 设计要点
 
@@ -504,18 +554,19 @@ class ReportParagraph(BaseModel):
 
 ### 7.1 职责
 
-对 `ReportDraft` 进行 **6 维度**审查，输出 `QAVerdict` + 路由决策。**不修改报告**，只负责诊断和路由。
+对 `ReportDraft` 进行 **8 维度**审查，输出 `QAVerdict` + 路由决策。**不修改报告**，只负责诊断和路由。
 
 ### 7.2 输入
 
 ```python
-class QAInput(BaseModel):
-    task_id: str
+class QAInput(AgentInputBase):             # 继承 task_id/project_id/trace_id/span_id
     draft: ReportDraft
     analysis: AnalysisResult
     profiles: dict[str, CompetitorProfile]
-    evidence_store_handle: EvidenceStoreHandle
+    evidence_store_handle: str | None = None
     prior_verdicts: list[QAVerdict] = []   # 历史质检结果，避免无限循环
+    # 上游各 Agent 的自评状态（如 {'collector':'needs_rework'}），QA 据此给已有 issue 加权
+    upstream_statuses: dict[str, str] = {}
 ```
 
 ### 7.3 输出
@@ -537,19 +588,21 @@ class QAStatus(str, Enum):
     NEEDS_REVISION    = "needs_revision"
     REJECT            = "reject"               # 严重不合格
 
-class QADimension(str, Enum):
+class QADimension(str, Enum):           # 共 8 维度（backend/schemas/qa.py:25-35）
     FACT_CONSISTENCY      = "fact_consistency"       # 事实一致性
     EVIDENCE_COMPLETENESS = "evidence_completeness"  # 证据完整性
     SCHEMA_COMPLETENESS   = "schema_completeness"    # Schema 完整性
     LOGIC_CONSISTENCY     = "logic_consistency"      # 逻辑一致性
     FRESHNESS             = "freshness"              # 时效性
     EXPRESSION            = "expression"             # 表达规范性
+    COVERAGE_DENSITY      = "coverage_density"       # 覆盖密度
+    IDENTITY_CONSISTENCY  = "identity_consistency"   # 产品身份一致性（拦截"抓错产品"）
 
 class QADimensionResult(BaseModel):
     dimension: QADimension
-    score:     float
-    pass_:     bool       # 字段名为 pass_，避免关键字冲突
-    notes:     str
+    score:     float = Field(ge=0, le=1)
+    pass_:     bool       # 字段名为 pass_（alias="pass"），避免关键字冲突
+    notes:     str = ""
 
 class QAIssue(BaseModel):
     issue_id:    str
@@ -567,19 +620,23 @@ class QARouting(BaseModel):
     payload:      dict                # 作为 qa_feedback 传给目标 Agent
 ```
 
-### 7.4 6 维度规则详见
+### 7.4 8 维度规则详见
 
 [QA.md](QA.md) 给出每个维度的具体规则、阈值和示例。
 
-### 7.5 关键工具
+### 7.5 校验手段
 
-- `evidence.lookup(evidence_id)`：取证据原文
-- `nlp.entailment_check(claim, evidence)`：判断 claim 是否被 evidence 蕴含（可用 LLM 或专门模型）
-- `nlp.contradiction_check(claim_a, claim_b)`：检查两个 claim 是否矛盾
+QA 没有专门的 NLP / 检索工具，蕴含与矛盾判定都以 **LLM-as-judge** 内联实现：
+
+- 蕴含判定：`fact_consistency` checker 对每个事实性段落调 LLM，输出 entailed / contradicted /
+  neutral 标签（`backend/agents/qa/checkers/fact_consistency.py`），蕴含失败记 `ENTAILMENT_FAILED`
+- 矛盾判定：`logic_consistency` checker 内联用 LLM 检查段落间是否自相矛盾
+- 量化字面校验：`is_quantitative` 段落做数字字面匹配（±5% 容差）
+- 证据原文随 `QAInput`（draft + analysis + profiles 中的 evidence）直接传入，无独立 lookup 工具
 
 ### 7.6 Prompt 设计要点
 
-- 6 维度独立检查（每个维度独立 prompt）
+- 各维度独立检查（每个 checker 独立 prompt）
 - 结构化输出：每个 issue 明确指向具体段落/句子
 - 给 routing 决策时附 payload：告诉上游 Agent 具体要补什么
 
@@ -591,11 +648,10 @@ class QARouting(BaseModel):
 
 ### 7.8 特有错误码
 
-| Code | 含义 |
-|---|---|
-| `ENTAILMENT_FAILED` | claim 与 evidence 蕴含校验失败 |
-| `MAX_RETRY_REACHED` | 反复重做仍未通过 |
-| `EVIDENCE_NOT_FOUND` | 报告引用的 evidence_id 在库中不存在 |
+| Code | 含义 | 出处 |
+|---|---|---|
+| `ENTAILMENT_FAILED` | claim 与 evidence 蕴含校验失败 | `qa/checkers/fact_consistency.py:169` |
+| `MAX_RETRY_REACHED` | 反复重做仍未通过 | `qa/routing.py:496` |
 
 ---
 
@@ -615,6 +671,7 @@ class QARouting(BaseModel):
 ### 8.2 与 Agent 的接口
 
 ```python
+# 完整定义见 backend/schemas/orchestrator.py（此处略去可观测/计量字段）
 class NodeExecutionRequest(BaseModel):
     project_id: str
     task_id:    str
@@ -623,13 +680,17 @@ class NodeExecutionRequest(BaseModel):
     input:      AgentInputBase         # 多态：CollectorInput / ExtractorInput / ...
     trace_id:   str
     span_id:    str
+    parent_span_id: str | None = None
+    enqueued_at:    datetime | None = None
 
 class NodeExecutionResult(BaseModel):
+    project_id: str
     node_id:    str
     status:     NodeStatus             # six-state
-    output:     AgentOutputBase | None
-    error:      AgentError | None
-    next_nodes: list[str]              # Orchestrator 用于推进 DAG
+    output:     AgentOutputBase | None = None
+    error:      AgentError | None = None
+    next_nodes: list[str] = []         # Orchestrator 用于推进 DAG
+    # 另含透传的 trace/span、started_at/ended_at、tokens、cost_usd、metadata 等计量字段
 ```
 
 ---
@@ -658,9 +719,13 @@ QA → 上游 Agent 的反馈通过统一的 `QAFeedback` 字段传递：
 ```python
 class QAFeedback(BaseModel):
     from_verdict_id: str
-    issues: list[QAIssue]
-    instructions: str                  # 具体改进指令
+    issues: list[QAIssue] = []
+    instructions: str = ""             # 具体改进指令
     must_address: list[str] = []       # 必须解决的 issue_id
+    revision: int = 0                  # 当前返工轮次，供 Reporter bump ReportDraft.version
+
+# 注入时序列化为 dict（各 Agent 输入的 qa_feedback 字段为 dict | None，避免 schemas 循环依赖）；
+# 消费侧用 validate_qa_feedback(payload) 在边界做 fail-soft 容错校验。
 ```
 
 每个 Agent 在接收 `qa_feedback` 时：
@@ -676,9 +741,10 @@ class QAFeedback(BaseModel):
 - 任何字段变更：major（删/改类型）、minor（新增可选）、patch（注释/校验）
 - 变更须走 PR + 架构窗口审查 + 通知所有 Agent 窗口
 
-当前版本：**v1.1.0**
+当前版本：**v1.1.0**（与 `backend/schemas/__init__.py:7` 的 `SCHEMA_VERSION` 一致）
 
-> v1.1.0（2026-05-29）：新增 `NodeExecutionRequest` / `NodeExecutionResult`
-> （docs/AGENTS.md § 8.2 早已声明，本次补入 `backend/schemas/orchestrator.py`），
-> 为 I 窗口 storage 层的 `EventBusProtocol` 提供消息载荷类型。Minor bump：纯增量，
-> 现有 Agent 输入输出 schema 不变。
+> v1.1.0：`Evidence` 新增可选 `source_published_at`（向后兼容，旧 JSON 默认 `None`）。
+> 见 `backend/schemas/__init__.py:8`。Minor bump：纯增量，现有 Agent 输入输出 schema 不变。
+>
+> `NodeExecutionRequest` / `NodeExecutionResult`（§ 8.2）也已在 `backend/schemas/orchestrator.py`
+> 落地，为 storage 层 `EventBusProtocol` 提供消息载荷类型。

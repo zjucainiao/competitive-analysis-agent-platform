@@ -1,6 +1,6 @@
 # 质检规则与反馈闭环
 
-> 本文档定义 QA Agent 的 6 维度检查规则、阈值、路由策略。QA 是平台可信度的最后一道闸。
+> 本文档定义 QA Agent 的 8 维度检查规则、阈值、路由策略。QA 是平台可信度的最后一道闸。
 
 ---
 
@@ -99,15 +99,17 @@ def check_entailment(text: str, evidences: list[Evidence]) -> EntailmentResult:
 **检查**：
 
 - 优先使用 Evidence.`source_published_at`（源文档发布/最后修改时间）
-- 退化路径：若 `source_published_at` 为 None（Collector 尚未识别），单条贡献**中性 0.7 分**，
-  避免把刚抓的旧文档误判为新鲜
+- 评分**只针对带日期的证据**：`source_published_at` 为 None 的证据**不计入评分**
+  （既不加分也不扣分，见 `checkers/freshness.py:133-138`），避免把刚抓的旧文档误判为新鲜
+- 若全部引用证据都无日期 → `score=1.0` 默认通过（freshness 不再 gating，见
+  `checkers/freshness.py:135-136`）；只有**确实带日期且过期**的证据才报警
 - 定价 / 版本号 / 功能等敏感字段引用的 Evidence 不能超过 `SENSITIVE_MAX_DAYS=90`
 - 一般字段不能超过 `GENERAL_MAX_DAYS=365`
 
 **routing**：
 - 关键字段引用 stale Evidence → 回 Collector（重新采集该 dimension）
 - 一般字段 stale → 仅在报告中标注"数据采集于 YYYY-MM"
-- 无 `source_published_at` 本身**不开 issue**，但会通过 0.7 中性分提醒补字段
+- 无 `source_published_at` 本身**不开 issue、不参与评分**（无日期 ≠ 过期）
 
 ### 3.6 expression（表达规范性）
 
@@ -244,10 +246,19 @@ QARouting(
 `QAInput.prior_verdicts` 累积历史质检结果。Orchestrator 维护：
 
 - 同一 issue（按 `dimension + location` 去重）出现次数计数
-- 同一 issue 出现 ≥ 3 次：
+- 同一 issue 出现 ≥ 3 次（`SAME_ISSUE_MAX_OCCURRENCES`，`qa/routing.py:29`）：
   - 该 issue 在新 verdict 中标记 `severity=minor`、`blocking=False`
   - 报告中对应段落自动追加注释 "[未完全验证]"
-- 整个项目 QA 循环次数上限 5 次，超出 → 强制发布并触发告警
+
+**循环上限（两条独立护栏）**：
+
+- **native 引擎（默认）**：QA 轮次上限 `max_rounds`（默认 3，`orchestrator/feedback_router.py:47`
+  `DEFAULT_MAX_ROUNDS = 3`）。判定见 `orchestrator/routing.py`：
+  - `qa_round+1 >= max_rounds` → 强制发布（best-round 兜底，`routing.py:98`）
+  - **无提升早停**：本轮 QA 分相比上一轮 `Δ < 0.01`（`_MIN_ROUND_IMPROVEMENT`，`routing.py:20,121`）
+    → 不再返工，强制发布
+- **legacy 引擎**：`MAX_RETRY_VERDICTS = 5`（`qa/routing.py:30`）是 `prior_verdicts` 累计次数
+  上限，超出 → 强制放行。
 
 ---
 
@@ -296,14 +307,17 @@ QA 直接产出以下 [METRICS.md](METRICS.md) 指标：
 ```
 backend/agents/qa/
 ├── agent.py
-├── checkers/
+├── checkers/                      # 8 个维度 checker（与 §2 表一一对应）
+│   ├── _base.py
 │   ├── fact_consistency.py
 │   ├── evidence_completeness.py
 │   ├── schema_completeness.py
 │   ├── logic_consistency.py
 │   ├── freshness.py
-│   └── expression.py
-├── routing.py            # ISSUE_TYPE → TARGET_AGENT 表 + 装配 payload
+│   ├── expression.py
+│   ├── coverage_density.py
+│   └── identity_consistency.py
+├── routing.py            # SEVERITY_WEIGHTS + 维度策略 + 判级 + 装配 payload
 ├── prompts/
 │   ├── entailment.md
 │   ├── contradiction.md
@@ -311,4 +325,4 @@ backend/agents/qa/
 └── tests/
 ```
 
-Q 窗口实现，M0 后开始，M2 时点完成 v1（至少 3 个维度），M3 完成 6 维度。
+Q 窗口实现，M0 后开始，M2 时点完成 v1（至少 3 个维度），M3 完成全部 8 维度。

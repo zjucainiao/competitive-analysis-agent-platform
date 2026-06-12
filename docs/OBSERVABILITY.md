@@ -1,362 +1,216 @@
 # 可观测性：Trace、Token、决策回放
 
 > 本文档定义全链路可观测设计。对应评分要点：「每个 Agent 的 Prompt、输入、输出、决策过程、Token 消耗均有日志 / Trace 可查」。
+>
+> **文档口径**：§ 1–12 区分「已实现」与「设计草案 / 未实现」。真正落地的两条链路是：
+> 1. **进程内环形缓冲**（`backend/observability/llm_call_log.py`）→ 前端 Trace tab 实时拉流水；
+> 2. **OPT-IN 的 OTLP tracer**（`backend/observability/tracer.py`）→ 配了 endpoint 才直连 Jaeger / Tempo，否则降级为 no-op。
+>
+> 唯一的 trace 持久化是 `llm_calls` 这张 **jsonb 表**（`backend/storage/sql.py:145-158`），由 `Orchestrator._persist_node_llm_calls`（`backend/orchestrator/orchestrator.py:621`）从环形缓冲落库。**没有** 关系型 `traces` / `spans` / `tool_calls` 表，**没有** LangSmith 双写，**没有** Redis-Stream 缓冲 / S3 大字段下沉。§ 13 的字段语义与 § 8 的决策回放 UI 是已落地内容，准确。
 
 ---
 
 ## 1. 目标
 
-- 任意 Agent 调用都能完整回放：system prompt + messages + LLM 响应 + 工具调用 + 输出
-- Token 消耗按 Agent / 任务 / 项目维度可聚合
-- 用户在前端可"时间旅行"：选任意时刻看 DAG 状态、查任意节点的完整执行细节
-- 错误诊断：失败时 trace 一键定位到出错的 LLM 调用 / 工具调用
+- 任意 Agent 调用都能回放：system prompt 预览 + LLM 响应预览 + token / 耗时 + finish_reason（详见 § 13 字段语义）
+- Token 消耗按 项目 / 节点 / Agent 维度可聚合（前端 Trace tab + `/api/metrics/aggregate`）
+- 用户在前端可查任意节点的执行细节（决策回放 UI，§ 8）
+- 错误诊断：失败节点在 DAG 上高亮，点击下钻到该节点的 LLM 调用流水
+
+> 注：早期设计稿曾提「完整时间旅行 / 任意时刻 DAG 快照回放」，**未实现**。当前是「按节点查最新流水」而非「按任意时间戳重建状态」。
 
 ---
 
-## 2. 三层模型
+## 2. 数据模型（实际）
+
+实际只有两层：
 
 ```
-Trace (项目级)
-  └── Span (Agent 调用级)
-        ├── LLM Call (单次 LLM 调用)
-        └── Tool Call (单次工具调用)
+Trace (项目级，trace_id = run 维度)
+  └── LLM Call (单次 LLM 调用，记录在环形缓冲 / llm_calls jsonb 表)
 ```
 
-- `trace_id`：一个项目从开始到结束共用一个 trace_id
-- `span_id`：每次 Agent 调用一个 span_id；feedback 重做也是新 span（不复用）
-- `call_id`：每次 LLM / 工具调用一个 call_id
+- `trace_id`：一次 run 共用，经 `ContextVar` 关联到每条 LLM 流水（`llm_call_log.py:22`）
+- `node_id` / `agent_name`：每条流水带节点与 Agent 归属，由 `BaseAgent.invoke` 入口 set / 出口 reset
+- 单条记录的字段见 `LLMCallRecord`（`llm_call_log.py:27-45`）：`timestamp / trace_id / span_id / node_id / agent_name / model / phase / tokens_input / tokens_output / duration_s / finish_reason / cost_usd / prompt_preview / response_preview`
+
+> **设计草案（未实现）**：早期稿设想的 `Trace → Span → LLM Call / Tool Call` 三层关系模型、独立 `span_id` 复用规则、`TraceRecord` / `LLMCallRecord` 关系表 schema 均**未落地**。OTLP tracer（§ 13）在导出到 Jaeger 时会构造 `agent.<name>` → `llm.chat` 的 span 树，但那是 OTel 内存中的 span，不入本地 PG。
 
 ---
 
-## 3. 数据模型
+## 3. 必须记录的字段（实际落地）
 
-完整定义见 [SCHEMA.md](SCHEMA.md) § 7。简要：
+每条 LLM 调用记录（`push_call`，`llm_call_log.py:84-114`）：
 
-```python
-class TraceRecord(BaseModel):
-    trace_id: str
-    span_id:  str
-    parent_span_id: str | None
+- `model`、`phase`（tool_call / json_mode / freeform / retry）
+- `tokens_input` / `tokens_output`、`cost_usd`、`finish_reason`
+- `duration_s`
+- `prompt_preview` / `response_preview`（**截断预览**，非完整原文）
 
-    agent_name: str
-    agent_version: str
-    node_id: str | None
-
-    started_at: datetime
-    ended_at:   datetime | None
-    status:     AgentStatus
-
-    llm_calls:  list[LLMCallRecord]
-    tool_calls: list[ToolCallRecord]
-
-    input_snapshot:  dict       # 脱敏后的输入
-    output_snapshot: dict       # 脱敏后的输出
-
-    tokens_input:  int
-    tokens_output: int
-    cost_usd:      float
-    duration_ms:   int
-
-    self_critique: str
-    confidence:    float
-```
+> **设计草案（未实现）**：早期稿要求「完整 system prompt + 完整 messages 历史 + 完整 response（含 tool_use blocks）+ temperature / max_tokens」全量入库。当前环形缓冲只存**预览**，不存全量 messages 历史；temperature / max_tokens 不记录。工具调用的独立记录链路（参数 + 完整返回 + error）也**未实现**——工具调用只在 OPT-IN 的 OTLP tracer 里作为 `tool.<name>` 子 span 导出（§ 13.2），不入环形缓冲 / `llm_calls` 表。
 
 ---
 
-## 4. 必须记录的字段
+## 4. Trace 注入机制（实际）
 
-任何 LLM 调用必须记录：
+`BaseAgent.invoke()`（`backend/agents/_base.py`）在入口 `set_trace_context(trace_id, span_id, node_id, agent_name)`，出口 `reset_trace_context`。`self.llm` 被 `_TrackingLLMWrapper` 包裹，每次 `chat()` 完成后：
 
-- **完整 system prompt**（外置文件 + 渲染后实际值都存）
-- **完整 messages**（含 user / assistant 历史）
-- **完整 response**（含 tool_use blocks）
-- 模型名、temperature、max_tokens
-- input_tokens / output_tokens
-- finish_reason
-- 调用耗时
+1. 累加 token，调 `backend.llm.pricing.estimate_cost()` 算 `cost_usd`；
+2. `push_call(...)` 写入进程内环形缓冲（自动从 `ContextVar` 读 trace 上下文，无需改 LLM 接口签名）；
+3. 若配置了 OTLP，同时 `span.add_llm_call(...)` 在当前 `agent.<name>` span 下开 `llm.chat` 子 span（§ 13.2）。
 
-任何工具调用必须记录：
+落库时机：`Orchestrator` 在节点完成后调 `_persist_node_llm_calls`（`orchestrator.py:365 / 580 / 621`），把该节点的流水写入 `llm_calls` jsonb 表。
 
-- 工具名 + 参数（如 search query）
-- 工具返回（完整）
-- 耗时 + error
+> **设计草案（未实现）**：早期稿的 `span.flush()` 同步「写 PG + 实时推送 WebSocket」**未实现**；环形缓冲是内存 `deque(maxlen=10000)`，前端**轮询** `/api/llm-calls` 拉取，不走 WebSocket 推送。
 
 ---
 
-## 5. Trace 注入机制
+## 5. 存储（实际）
 
-```python
-# BaseAgent.invoke()（伪代码）
-def invoke(self, inp, *, trace_id, span_id):
-    parent_span_id = current_span_id()
-    with self.tracer.span(
-        trace_id=trace_id,
-        span_id=span_id,
-        parent_span_id=parent_span_id,
-        agent_name=self.name,
-    ) as span:
-        try:
-            out = self._run(inp)
-            span.set_output(out)
-            span.set_status("success")
-        except Exception as e:
-            span.set_error(e)
-            span.set_status("failed")
-            raise
-        finally:
-            span.flush()  # 写 PG + 实时推送 WebSocket
-```
+### 5.1 进程内环形缓冲（前端 Trace tab 的实时源）
 
-所有 LLMProvider 调用、Tool 调用自动 attach 到当前 span。
+`backend/observability/llm_call_log.py`：`deque(maxlen=10000)`，**进程内、重启清空**。前端 Trace tab 经 `/api/llm-calls` / `/api/projects/{id}/llm-calls`（`backend/api/routes/meta.py`）拉流水。
 
----
+### 5.2 唯一的持久化：`llm_calls` jsonb 表
 
-## 6. 存储
-
-### 6.1 关系库
+`backend/storage/sql.py:145-158`：
 
 ```sql
-CREATE TABLE traces (
-  trace_id text PRIMARY KEY,
-  project_id text,
-  started_at timestamptz,
-  ended_at   timestamptz,
-  total_tokens_input  bigint,
-  total_tokens_output bigint,
-  total_cost_usd      numeric,
-  total_duration_ms   bigint
-);
-
-CREATE TABLE spans (
-  span_id text PRIMARY KEY,
-  trace_id text REFERENCES traces(trace_id),
-  parent_span_id text,
-  agent_name text,
-  agent_version text,
-  node_id text,
-  started_at timestamptz,
-  ended_at   timestamptz,
-  status text,
-  tokens_input  int,
-  tokens_output int,
-  cost_usd numeric,
-  duration_ms int,
-  self_critique text,
-  confidence real,
-  input_snapshot  jsonb,
-  output_snapshot jsonb
-);
-
-CREATE TABLE llm_calls (
-  call_id text PRIMARY KEY,
-  span_id text REFERENCES spans(span_id),
-  model text,
-  system_prompt text,
-  messages jsonb,
-  response jsonb,
-  tokens_input int,
-  tokens_output int,
-  finish_reason text,
-  duration_ms int,
-  created_at timestamptz
-);
-
-CREATE TABLE tool_calls (
-  call_id text PRIMARY KEY,
-  span_id text REFERENCES spans(span_id),
-  tool_name text,
-  arguments jsonb,
-  result jsonb,
-  duration_ms int,
-  error text,
-  created_at timestamptz
+CREATE TABLE IF NOT EXISTS llm_calls (
+    seq        bigserial PRIMARY KEY,
+    project_id text NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    node_id    text,
+    agent_name text,
+    ts         double precision NOT NULL DEFAULT 0,
+    payload    jsonb NOT NULL          -- 整条 LLMCallRecord 序列化
 );
 ```
 
-### 6.2 对象存储（可选）
+由 `Orchestrator._persist_node_llm_calls`（`orchestrator.py:621`）从环形缓冲落库。**这是全系统唯一的 trace 持久化。**
 
-特别大的 prompt / response（如长文本抓取后塞给 LLM 的 messages）超过 256KB 时落 S3 / 本地文件，PG 只存指针。
+> **设计草案（未实现）**：早期稿设想的关系型 `traces` / `spans` / `tool_calls` 三表、`span → llm_calls` 外键、`input_snapshot` / `output_snapshot` jsonb 列、`> 256KB` 大字段落 S3 / 本地文件再存指针——**均未实现**。I/O 快照另由 `backend/observability/io_snapshot.py` 处理，与上述关系模型无关。
 
-### 6.3 外部 Trace 系统
+### 5.3 外部 Trace 系统
 
-可选接入 LangSmith：
-- 通过环境变量 `LANGCHAIN_API_KEY` 启用
-- BaseAgent.invoke() 同时双写 LangSmith + 本地
-
-不强依赖外部，本地 trace 表是 source of truth。
+**无 LangSmith / LANGCHAIN_API_KEY 集成。** 早期稿提到的「双写 LangSmith + 本地」**不存在**，请勿据此配置。唯一的外部 trace 出口是 OPT-IN 的 OTLP exporter（§ 13），直连 Jaeger / Tempo，与 LangSmith 无关。
 
 ---
 
-## 7. Token 计量
+## 6. Token 计量
 
-### 7.1 多维度聚合
+### 6.1 聚合（实际）
 
-通过 SQL view / 计算字段提供：
+- 单节点 / 单 Agent / 单项目：前端 Trace tab 按 `node_id` / `agent_name` / `trace_id` 过滤环形缓冲流水（`list_calls`，`llm_call_log.py:120`）。
+- 项目级业务指标 `total_tokens` / `total_cost_usd`：由 `compute_project_metrics`（`backend/orchestrator/metrics.py`）汇总，落 `Project.metrics`，详见 [METRICS.md](METRICS.md)。
+- 跨项目：`/api/metrics/aggregate`（`backend/api/routes/meta.py`）在应用层遍历项目求和，**非** SQL view。
 
-| 视角 | 聚合 | 用途 |
-|---|---|---|
-| 单 span | sum(llm_calls.tokens) | 单次 Agent 调用消耗 |
-| 单 Agent | sum 全部该 agent 的 span | "Reporter Agent 平均消耗 X tokens" |
-| 单项目 | sum 项目下所有 span | 项目成本核算 |
-| 单模型 | sum 按 model 分组 | 切换模型对比 |
-| 时间窗 | sum 按天/周 | 业务运营 |
+> **设计草案（未实现）**：早期稿的「单模型 / 时间窗 SQL view 多维聚合」**未实现**。
 
-### 7.2 成本计算
+### 6.2 成本计算
 
-每个模型在 `LLMProvider` 注册其价格：
+每次 LLM 调用的 `cost_usd` 由 `backend.llm.pricing.estimate_cost()` 算出（`cost = tokens_input * P_in + tokens_output * P_out`，价目表见 `backend/llm/pricing.py`）。注意豆包 EP 走方舟控制台计费，此处估为 0。
 
-```python
-PRICING = {
-    "claude-opus-4-7":   {"input": 15/1e6, "output": 75/1e6},   # USD per token
-    "claude-sonnet-4-6": {"input": 3/1e6,  "output": 15/1e6},
-    "deepseek-chat":     {"input": 0.14/1e6, "output": 0.28/1e6},
-}
-```
+### 6.3 限额
 
-`cost_usd = tokens_input * P_in + tokens_output * P_out`。
+> **设计草案（未实现）**：早期稿的「项目级软 / 硬上限、超额暂停 / 中止」**未实现**。当前仅在单次 LLM 调用层面受 `max_tokens` 约束。
 
-### 7.3 限额
+---
 
-- 项目级软上限：超过 → 警告 + 暂停
-- 项目级硬上限：超过 → 中止
-- 单次调用上限：超过 max_tokens 即失败
+## 7. （原「性能」一节——设计草案，未实现）
+
+早期稿设想的「Trace 写入走 Redis Stream 缓冲、worker 异步落 PG、大字段单独落对象存储、前端游标分页」**均未实现**。实际写入是同步落环形缓冲（内存），节点完成后批量落 `llm_calls` 表；前端按 `limit`（默认 200）拉流水，无游标分页。
 
 ---
 
 ## 8. 决策回放 UI
 
-这是**前瞻性亮点之一**（详见 [INNOVATIONS.md](INNOVATIONS.md) § 3）。
+> 这是已落地的前瞻性亮点（前端 `frontend/src/components/trace/`：`trace-layout.tsx` / `trace-row.tsx` / `trace-summary.tsx` / `llm-call-detail.tsx` / `diff-sheet.tsx`，及节点详情抽屉 `frontend/src/components/dag/node-detail-sheet.tsx`）。
+>
+> **口径**：这是 **环形缓冲流水 + 持久化 `llm_calls` jsonb 表** 之上的 UI，**不是** § 2 设计草案里的 PG span 关系模型回放。展示的是每节点的 LLM 调用流水（含预览、token、耗时、finish_reason），以及返工轮次 v1 vs v2 的 diff。
 
-### 8.1 时间轴视图
+### 8.1 时间轴 / 节点列表视图
+
+按节点（含返工版本 reporter / reporter_v2 等）列出执行行，标注状态、耗时、token，QA 返工行展开 issue 与 routing：
 
 ```
 ┌────────────────────────────────────────────────────┐
 │ Project: 协作办公竞品 · trace abc123               │
 ├────────────────────────────────────────────────────┤
-│ 14:00  ┃ Collector(Notion)       success  4.2s    │
-│ 14:00  ┃ Collector(ClickUp)      success  3.8s    │
-│ 14:01  ┃ Collector(Asana)        success  5.1s    │
-│ 14:01  ┃ Extractor(Notion)       success  12.4s   │
+│ Collector(Notion)       success  4.2s              │
+│ Collector(ClickUp)      success  3.8s              │
+│ Extractor(Notion)       success  12.4s             │
 │ ...                                                │
-│ 14:03  ┃ Reporter                success  18.6s   │
-│ 14:04  ┃ QA                      revise   8.2s    │
-│        │   ↳ issues: missing_citation × 3         │
-│        │   ↳ routing: → Reporter                  │
-│ 14:04  ┃ Reporter_v2             success  9.1s    │
-│ 14:05  ┃ QA_v2                   pass     7.5s    │
+│ Reporter                success  18.6s             │
+│ QA                      revise   8.2s              │
+│   ↳ issues: missing_citation × 3                   │
+│   ↳ routing: → Reporter                            │
+│ Reporter_v2             success  9.1s              │
+│ QA_v2                   pass     7.5s              │
 └────────────────────────────────────────────────────┘
 ```
 
 ### 8.2 节点详情抽屉
 
-点击任一节点：
-
-```
-┌──────────────────────────────────────────────┐
-│ Reporter · span_xyz · v1                     │
-├──────────────────────────────────────────────┤
-│ [Overview] [LLM Calls] [Tool Calls] [I/O]    │
-│                                              │
-│ Overview                                     │
-│   Status:     success                        │
-│   Duration:   18.6s                          │
-│   Tokens:     8,432 in / 2,103 out           │
-│   Cost:       $0.32                          │
-│   Confidence: 0.84                           │
-│   Self-critique: "已为所有量化结论提供引用… "│
-│                                              │
-│ LLM Calls (5)                                │
-│   #1 sonnet-4-6  3.2s  1234/421 tokens      │
-│   #2 sonnet-4-6  4.1s  1789/512 tokens      │
-│   ...                                        │
-│                                              │
-│ Tool Calls (0)                               │
-│                                              │
-│ Input / Output (展开查看完整 JSON)            │
-└──────────────────────────────────────────────┘
-```
+点击任一节点（`node-detail-sheet.tsx`）展示该节点的 Overview（状态 / 耗时 / token / cost）+ 该节点下的 LLM 调用流水列表。
 
 ### 8.3 LLM 调用详情
 
-点击单次 LLM call：
+点击单次 LLM call（`llm-call-detail.tsx`）展示 `model` / `phase` / `finish_reason` / token / `cost_usd`，以及 **prompt / response 预览**（环形缓冲只存预览，非全量原文）。
 
-```
-┌──────────────────────────────────────────────┐
-│ LLM Call #1 · span_xyz                       │
-├──────────────────────────────────────────────┤
-│ Model:        claude-sonnet-4-6              │
-│ Temperature:  0.5                            │
-│ Max tokens:   4096                           │
-│ Finish reason: stop                          │
-│                                              │
-│ System prompt:                               │
-│   ┃ You are a competitive analysis report   │
-│   ┃ writer. Output strict JSON conforming…  │
-│                                              │
-│ Messages:                                    │
-│   user:    "Compose the pricing section..." │
-│   assistant: { ... structured output ... }  │
-│                                              │
-│ [复制 prompt] [作为 fixture 导出]            │
-└──────────────────────────────────────────────┘
-```
+### 8.4 返工 diff 视图
 
-### 8.4 可视化能力
+`diff-sheet.tsx`：v1 vs v2 的 prompt / output diff（QA 返工时对比改了什么）。
 
-- **DAG 节点颜色叠加 trace 状态**：DAG 图上每个节点带 token / 耗时小标
-- **错误高亮**：失败 span 红框，点击直接看 stack trace
-- **diff 视图**：v1 vs v2 prompt diff、output diff（QA 重做时特别有用）
+> **口径修正**：早期稿提的「DAG 节点叠加 token / 耗时小标」「失败 span 红框点击看完整 stack trace」是设计意向；当前实现以节点列表 + 抽屉 + diff 为主，未提供 OTel 级别的完整 stack trace 内嵌。
 
 ---
 
-## 9. 安全 / 脱敏
+## 9. 安全 / 脱敏与保留期
 
-- `input_snapshot` / `output_snapshot` 写库前过 `sanitize()`：去除手机号 / 邮箱 / API key
-- 用户上传内容默认不入 trace（除非显式同意）
-- Trace 数据保留 90 天默认，可配
-
----
-
-## 10. 性能
-
-- Trace 写入异步：不阻塞 Agent 执行（用 Redis Stream 缓冲，worker 落 PG）
-- 大字段（prompt / messages）单独落对象存储，PG 只存指针
-- 前端时间轴用游标分页，避免一次拉太多
+- **脱敏**：写入 OTLP attribute 的 prompt / response / tool args 都过 `backend/tools/sanitizer.py`（`sanitize`，`tracer.py:33,104`），去除邮箱 / 电话 / 身份证 / 信用卡 / API key / Bearer token，符合 [COMPLIANCE.md](COMPLIANCE.md) § 4.1。OTLP attribute 还会按 `_MAX_ATTR_LEN = 4000`（`tracer.py:79`）截断。
+- **保留期**：`.env.example` 与 `.env.prod.example` 设有 `TRACE_RETENTION_DAYS=7`，但**该变量当前未被任何代码消费**（无清理任务读取它），即 `llm_calls` 表实际**无自动过期 / 清理逻辑**。早期稿的「90 天默认保留」是过时设计，已被 7 天的占位变量取代，且仍未生效。
 
 ---
 
-## 11. 实现位置
+## 10. （原「实现位置」——已更新为真实文件树）
 
 ```
 backend/observability/
-├── __init__.py
-├── tracer.py             # Tracer 类，BaseAgent 用
-├── span.py               # Span 上下文管理
-├── llm_recorder.py       # LLMProvider 自动 attach
-├── tool_recorder.py
-├── sanitizer.py          # 脱敏
-├── exporter/
-│   ├── postgres.py
-│   ├── langsmith.py      # 可选
-│   └── stdout.py         # 开发时调试
+├── __init__.py            # 导出 build_tracer_from_env / NullTracer / OTLPTracer
+├── tracer.py              # NullTracer + OTLPTracer + build_tracer_from_env（OPT-IN OTLP）
+├── llm_call_log.py        # 进程内环形缓冲（deque），喂前端 Trace tab；唯一持久化经 orchestrator 落 llm_calls 表
+├── io_snapshot.py         # 节点 I/O 快照
+├── README.md
 └── tests/
+
+frontend/src/components/trace/   # 决策回放 UI（§ 8）
+frontend/src/components/dag/node-detail-sheet.tsx
 ```
 
----
-
-## 12. 跨文档关联
-
-- 每个 Agent 实现窗口：参考本文档实现 `BaseAgent.invoke()` 时的 Trace 注入
-- O 窗口：每个 DAGNode 执行前后开关 span
-- F 窗口：消费 trace 数据渲染时间轴 + 详情抽屉
+> **不存在以下文件**（早期稿曾列出，已删除）：`span.py`、`llm_recorder.py`、`tool_recorder.py`、`observability/sanitizer.py`（脱敏实际在 `backend/tools/sanitizer.py`）、`exporter/{postgres,langsmith,stdout}.py`。
 
 ---
 
-## 13. 实施落地（I 窗口产出，v1.0）
+## 11. 跨文档关联
+
+- Agent 实现：`BaseAgent.invoke()`（`backend/agents/_base.py`）入口 set / 出口 reset trace 上下文，`_TrackingLLMWrapper` 自动记流水。
+- Orchestrator：节点完成后 `_persist_node_llm_calls` 落 `llm_calls` 表（`orchestrator.py:621`）。
+- 前端：`frontend/src/components/trace/` + `node-detail-sheet.tsx` 消费流水渲染决策回放（§ 8）。
+- 指标：Token / 成本回流业务指标见 [METRICS.md](METRICS.md)。
+
+---
+
+## 12. （保留章节号占位）
+
+本节原为「跨文档关联」，已合并入 § 11。保留编号以免破坏外部锚点引用。
+
+---
+
+## 13. 实施落地（v1.0，已落地，准确）
 
 ### 13.1 已落地组件
 
-`backend/observability/` 提供两套 `TracerProtocol` 实现：
+`backend/observability/tracer.py` 提供两套 `TracerProtocol` 实现：
 
 | 实现 | 用途 | 何时返回 |
 |---|---|---|
@@ -371,18 +225,24 @@ tracer = build_tracer_from_env(service_name="competitive-analysis-agent")
 agent = Collector(llm=..., tools=..., tracer=tracer)
 ```
 
-无 OTel SDK / endpoint 不通时自动降级 `NullTracer`，**Agent 启动永远不被 trace 配置阻塞**。
+**OPT-IN**：无 `OTEL_EXPORTER_OTLP_ENDPOINT` / OTel SDK 不通时自动降级 `NullTracer`，**Agent 启动永远不被 trace 配置阻塞**。生产 `.env.prod.example` 默认把 `OTEL_EXPORTER_OTLP_ENDPOINT` 注释掉，即默认 NullTracer。
 
-### 13.2 自动 LLM 子 span
+### 13.2 自动 LLM / 工具子 span
 
 `BaseAgent` 用 `_TrackingLLMWrapper` 包 `self.llm`，每次 `chat()` 完成后：
 
-1. 累加 `tokens_input` / `tokens_output` 到本次 invoke 的 `_LLMUsageCounter`
-2. 调 `backend.llm.pricing.estimate_cost()` 算 `cost_usd` 也累加
-3. 在当前 span 上调 `add_llm_call(model, system_prompt, messages, response, ...)`，OTLPSpan 在父 span 下开 `llm.chat` 子 span
-4. `invoke()` 退出时：`AgentOutput.tokens_input/output/cost_usd` 如果子类没自填则自动回填
+1. 累加 `tokens_input` / `tokens_output` 到本次 invoke 的用量计数；
+2. 调 `backend.llm.pricing.estimate_cost()` 算 `cost_usd` 累加；
+3. 在当前 span 上 `add_llm_call(...)`，`OTLPSpan` 在父 span 下开 `llm.chat` 子 span（`tracer.py:161-181`）；工具调用类似，子 span 名 `tool.<tool_name>`（`tracer.py:203`）。
+4. `invoke()` 退出时回填 `AgentOutput.tokens_input/output/cost_usd`（子类未自填时）。
 
-效果：Jaeger UI 上一个 e2e 跑出来的 trace 树长这样：
+**span 名 / attribute（`tracer.py`）**：
+
+- 根 span `agent.<name>`：`agent.name` / `agent.version` / `app.trace_id` / `dag.node_id`（另含 `agent.status` / `agent.confidence` / `agent.tokens_input` / `agent.tokens_output` / `agent.cost_usd`）。
+- 子 span `llm.chat`：`llm.model` / `llm.tokens_input` / `llm.tokens_output` / `llm.cost_usd` / `llm.finish_reason`（外加截断脱敏后的 `llm.system_prompt`）。
+- 子 span `tool.<name>`：`tool.name` / `tool.arguments` / `tool.result` / `tool.duration_ms` / `tool.error`。
+
+Jaeger UI 上一个 e2e trace 树：
 
 ```
 agent.collector
@@ -396,8 +256,8 @@ agent.extractor
 
 ### 13.3 PII 脱敏
 
-所有写入 OTel attribute 的 prompt / response / tool args 都过 `backend.tools.sanitize`
-（邮箱 / 电话 / 身份证 / 信用卡 / API key / Bearer token），符合 docs/COMPLIANCE.md § 4.1。
+所有写入 OTel attribute 的 prompt / response / tool args 都过 `backend.tools.sanitize`（`tracer.py:33`）
+（邮箱 / 电话 / 身份证 / 信用卡 / API key / Bearer token），并按 `_MAX_ATTR_LEN = 4000` 截断，符合 [COMPLIANCE.md](COMPLIANCE.md) § 4.1。
 
 ### 13.4 dev infra
 
@@ -410,7 +270,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 export OTEL_SERVICE_NAME=competitive-analysis-agent
 
 # 跑 e2e
-pytest backend/agents/.../tests/test_e2e_real.py -k smoke
+pytest -m e2e backend/agents
 # 打开 UI 验收
 open http://localhost:16686
 ```
@@ -418,18 +278,14 @@ open http://localhost:16686
 支持的环境变量都是 OTel 标准：`OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_SERVICE_NAME` /
 `OTEL_RESOURCE_ATTRIBUTES` / `OTEL_TRACES_EXPORTER=none`（强制关闭）。
 
-### 13.5 给 O 窗口的迁移
+### 13.5 编排接线（已完成）
 
-`backend/orchestrator/tracing.py` 目前是 NullTracer 占位。完整切换时：
+> **状态更新**：早期稿写「`backend/orchestrator/tracing.py` 是 NullTracer 占位，待迁移」——**已过时**。`backend/orchestrator/tracing.py` **不存在**；tracer 已在 `AgentRegistry.from_env` 直接接线：
 
 ```python
-# backend/orchestrator/agent_registry.py（伪代码）
-from backend.observability import build_tracer_from_env
-
-def from_env():
-    tracer = build_tracer_from_env()  # 代替 NullTracer()
-    return Collector(llm=..., tools=..., tracer=tracer), ...
+# backend/orchestrator/agent_registry.py:159
+tracer = build_tracer_from_env(service_name=service_name)
+return cls(llm=llm, tracer=tracer, tools=tools, evidence_provider=evidence_provider)
 ```
 
-`backend.observability.NullTracer` 与 `orchestrator.tracing.NullTracer` 行为等价，
-零运行时风险。后续 v2 接 LangSmith 双写时只改 `OTLPTracer` 实现，不动调用方。
+即默认无 endpoint 时拿到 `NullTracer`，配了 endpoint 自动升级为 `OTLPTracer`，调用方无需改动。后续若接其他后端，只改 `tracer.py` 实现即可。（注：**无 LangSmith 双写计划**——早期稿提的「v2 接 LangSmith」非当前路线。）

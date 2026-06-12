@@ -8,7 +8,7 @@
     - Schema 变更时重跑本脚本即可重建 fixture
     - 演示场景：协作办公 SaaS · Notion vs ClickUp vs Asana
 
-输出目录结构见 docs/WORKBREAKDOWN.md § 4.1。
+输出到 fixtures/mock_data/ 下，供各 Agent 离线开发 / 测试使用。
 """
 
 from __future__ import annotations

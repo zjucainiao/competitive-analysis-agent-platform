@@ -18,11 +18,12 @@
 | dev infra | 本地一键起 PG 16 + Redis 7，提供 pytest fixture | `docker-compose.yml` + `tests/conftest.py` |
 
 边界（**storage 层不做的事**）：
-- 不直接持久化 `TraceRecord` —— 那是 `backend/observability/exporter/postgres.py` 的职责（共用 PG 实例即可）。
-- 不直接持久化 `Evidence` 全文 —— 那是 `backend/observability` 的对象存储 + Chroma 向量索引。
-- 不直接做 LLM cache —— 那是 `backend/llm/cache.py`（v2）。
+- 不直接持久化 OTLP trace —— 那走 `backend/observability/tracer.py` 的 OTLP exporter（Jaeger / 共用 PG）。
+- 不做 LLM 响应级缓存 —— 当前未实现（计划项，无对应代码）。
 
-存储层只管 Orchestrator 推进 DAG 所需的最小数据底座。
+> 注：本仓**没有**向量索引 / Chroma。`pyproject.toml` 声明了 `chromadb`，但全仓无 `import chroma*`（`grep -rn chromadb --include=*.py backend/` 无命中）。Evidence 不走向量库。
+
+存储层只管 Orchestrator 推进 DAG（及登录用户 / run 快照 / LLM 调用流水）所需的数据底座。
 
 ---
 
@@ -46,7 +47,7 @@ class CheckpointerProtocol(Protocol):
         metadata: CheckpointMetadata,
         new_versions: ChannelVersions,
     ) -> CheckpointConfig: ...
-    async def alist(
+    def alist(  # 注意：sync def 返回 AsyncIterator（与 langgraph 一致）
         self,
         config: CheckpointConfig | None,
         *,
@@ -59,7 +60,11 @@ class CheckpointerProtocol(Protocol):
         writes: Sequence[tuple[str, Any]],
         task_id: str,
     ) -> None: ...
+    async def close(self) -> None: ...
 ```
+
+> 实现见 `backend/storage/protocols.py:46`（`CheckpointerProtocol`）。`alist` 是普通
+> `def` 但返回 `AsyncIterator`（protocols.py:67），与 langgraph `BaseCheckpointSaver.alist` 形状一致。
 
 `CheckpointConfig` 是一个最小 dict 类型 `{"configurable": {"thread_id": str, "checkpoint_ns": str, "checkpoint_id": str | None}}`，
 与 langchain_core 的 `RunnableConfig` 的子集等价。
@@ -87,23 +92,27 @@ graph = builder.compile(checkpointer=saver)
 
 ### 2.4 PostgreSQL 表结构
 
-参考 langgraph 0.2 官方 PostgresSaver，简化为两张表（不做多 namespace）：
+参考 langgraph 官方 PostgresSaver，简化为两张表（不做多 namespace）。
+DDL 源在 `backend/storage/sql.py:12`（`CREATE_CHECKPOINTS` / `CREATE_CHECKPOINT_WRITES`），
+全部用 `CREATE TABLE IF NOT EXISTS`（见下文 § 3.4 关于 alembic）：
 
 ```sql
-CREATE TABLE checkpoints (
-    thread_id       text NOT NULL,
-    checkpoint_ns   text NOT NULL DEFAULT '',
-    checkpoint_id   text NOT NULL,
+CREATE TABLE IF NOT EXISTS checkpoints (
+    thread_id            text NOT NULL,
+    checkpoint_ns        text NOT NULL DEFAULT '',
+    checkpoint_id        text NOT NULL,
     parent_checkpoint_id text,
-    checkpoint      bytea NOT NULL,
-    metadata        jsonb NOT NULL DEFAULT '{}',
+    checkpoint           bytea NOT NULL,
+    metadata             jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at           timestamptz NOT NULL DEFAULT now(),   -- doc 此前漏列
     PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
 );
 
-CREATE INDEX idx_checkpoints_thread_created
-    ON checkpoints (thread_id, checkpoint_ns, checkpoint_id DESC);
+-- 注意排序键是 created_at DESC（不是 checkpoint_id DESC）
+CREATE INDEX IF NOT EXISTS idx_checkpoints_thread_created
+    ON checkpoints (thread_id, checkpoint_ns, created_at DESC);
 
-CREATE TABLE checkpoint_writes (
+CREATE TABLE IF NOT EXISTS checkpoint_writes (
     thread_id     text NOT NULL,
     checkpoint_ns text NOT NULL DEFAULT '',
     checkpoint_id text NOT NULL,
@@ -115,7 +124,7 @@ CREATE TABLE checkpoint_writes (
 );
 ```
 
-`checkpoint` / `value` 字段用 `pickle`（langgraph 默认 `JsonPlusSerializer` 也走 pickle bytes）落盘。
+`checkpoint` / `value` 字段序列化为 `pickle` bytes 落 `bytea`（见 `backend/storage/postgres.py`）。
 
 ---
 
@@ -126,11 +135,21 @@ CREATE TABLE checkpoint_writes (
 - Orchestrator 需要随时知道：当前 Project 状态、最新 DAGPlan、每个节点的输出、每轮 QAVerdict
 - 前端通过 API 拉这些做 DAG 可视化 + 报告查看
 - v1 阶段单进程内 Orchestrator + API 共享同一个 store 实例
+- 同时承载登录用户（User CRUD）、每次 run 的终态快照（RunSnapshot）、LLM 调用流水（llm_calls），
+  这些都挂在同一个 store 协议下（见 `backend/storage/protocols.py:95`）。
+- 多次运行同项目时按 `run_id` 隔离产出（P2-RUNSCOPE）：`list_*` 省略 `run_id` 时只返回**最新一次 run**。
 
 ### 3.2 接口
 
+实现见 `backend/storage/protocols.py:95`。完整签名：
+
 ```python
 class StateStoreProtocol(Protocol):
+    # User（登录态；email 经 lower+trim 规范化，库级唯一）
+    async def create_user(self, user: User) -> None: ...           # email 冲突抛 ValueError
+    async def get_user_by_email(self, email: str) -> User | None: ...
+    async def get_user_by_id(self, user_id: str) -> User | None: ...
+
     # Project
     async def save_project(self, project: Project) -> None: ...
     async def get_project(self, project_id: str) -> Project | None: ...
@@ -149,28 +168,61 @@ class StateStoreProtocol(Protocol):
         self, project_id: str, node_id: str, status: NodeStatus,
     ) -> None: ...
 
-    # NodeOutput
+    # NodeOutput（run_id 省略 → 作用域为「该项目最新一次 run」, P2-RUNSCOPE）
     async def save_node_output(
         self, project_id: str, node_id: str, output: AgentOutputBase,
+        *, run_id: str | None = None,
     ) -> None: ...
     async def get_node_output(
-        self, project_id: str, node_id: str,
+        self, project_id: str, node_id: str, *, run_id: str | None = None,
     ) -> AgentOutputBase | None: ...
     async def list_node_outputs(
-        self, project_id: str,
+        self, project_id: str, *, run_id: str | None = None,
     ) -> dict[str, AgentOutputBase]: ...
 
-    # QAVerdict
+    # QAVerdict（同样带 run_id kwarg）
     async def save_qa_verdict(
-        self, project_id: str, verdict: QAVerdict,
+        self, project_id: str, verdict: QAVerdict, *, run_id: str | None = None,
     ) -> None: ...
-    async def list_qa_verdicts(self, project_id: str) -> list[QAVerdict]: ...
+    async def list_qa_verdicts(
+        self, project_id: str, *, run_id: str | None = None,
+    ) -> list[QAVerdict]: ...
+
+    # LLM 调用流水（每节点完成后持久化，重启可查）
+    async def append_llm_calls(self, project_id: str, calls: list[dict]) -> None: ...
+    async def list_llm_calls(
+        self, project_id: str, *, node_id: str | None = None,
+        agent_name: str | None = None, limit: int = 200,
+    ) -> list[dict]: ...
+
+    # RunSnapshot（每次 run 终态时持久化整份 state）
+    async def save_run_snapshot(self, snapshot: RunSnapshot) -> None: ...
+    async def get_run_snapshot(
+        self, project_id: str, run_id: str,
+    ) -> RunSnapshot | None: ...
+    async def list_run_snapshots(self, project_id: str) -> list[RunSnapshot]: ...
+
+    async def close(self) -> None: ...
 ```
 
 ### 3.3 PostgreSQL 表结构
 
+DDL 全量见 `backend/storage/sql.py`（行号下标）。全部 `CREATE TABLE IF NOT EXISTS`：
+
 ```sql
-CREATE TABLE projects (
+-- sql.py:43 —— 登录用户（doc 此前漏列整张表）
+CREATE TABLE IF NOT EXISTS users (
+    user_id       text PRIMARY KEY,
+    email         text NOT NULL,
+    password_hash text NOT NULL,
+    display_name  text NOT NULL DEFAULT '',
+    created_at    timestamptz NOT NULL DEFAULT now()
+);
+-- email 大小写不敏感唯一（sql.py:54）
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users (lower(email));
+
+-- sql.py:59
+CREATE TABLE IF NOT EXISTS projects (
     project_id text PRIMARY KEY,
     owner      text NOT NULL,
     status     text NOT NULL,
@@ -178,19 +230,24 @@ CREATE TABLE projects (
     updated_at timestamptz NOT NULL DEFAULT now(),
     payload    jsonb NOT NULL              -- 完整 Project Pydantic dump
 );
-CREATE INDEX idx_projects_owner_status ON projects (owner, status, created_at DESC);
+-- 排序键是 updated_at DESC（不是 created_at）
+CREATE INDEX IF NOT EXISTS idx_projects_owner_status
+    ON projects (owner, status, updated_at DESC);
 
-CREATE TABLE dag_plans (
+-- sql.py:75
+CREATE TABLE IF NOT EXISTS dag_plans (
     plan_id    text PRIMARY KEY,
     project_id text NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
     created_at timestamptz NOT NULL DEFAULT now(),
     payload    jsonb NOT NULL
 );
-CREATE INDEX idx_dag_plans_project ON dag_plans (project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_dag_plans_project ON dag_plans (project_id, created_at DESC);
 
-CREATE TABLE node_outputs (
+-- sql.py:89 —— 注意有 run_id 列（doc 此前漏列）
+CREATE TABLE IF NOT EXISTS node_outputs (
     project_id text NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
     node_id    text NOT NULL,
+    run_id     text,                       -- P2-RUNSCOPE：产出归属哪次 run
     agent_name text NOT NULL,
     status     text NOT NULL,
     saved_at   timestamptz NOT NULL DEFAULT now(),
@@ -198,19 +255,55 @@ CREATE TABLE node_outputs (
     PRIMARY KEY (project_id, node_id)
 );
 
-CREATE TABLE qa_verdicts (
-    verdict_id text PRIMARY KEY,
-    project_id text NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+-- sql.py:102 —— 同样有 run_id 列
+CREATE TABLE IF NOT EXISTS qa_verdicts (
+    verdict_id     text PRIMARY KEY,
+    project_id     text NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    run_id         text,
     overall_status text NOT NULL,
-    blocking   boolean NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
+    blocking       boolean NOT NULL,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    payload        jsonb NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_qa_verdicts_project ON qa_verdicts (project_id, created_at DESC);
+
+-- sql.py:129 —— 每次 run 终态整份 state 快照（doc 此前漏列）
+CREATE TABLE IF NOT EXISTS run_snapshots (
+    project_id   text NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    run_id       text NOT NULL,
+    captured_at  timestamptz NOT NULL,
+    final_status text NOT NULL,
+    payload      jsonb NOT NULL,
+    PRIMARY KEY (project_id, run_id)
+);
+CREATE INDEX IF NOT EXISTS idx_run_snapshots_project_time
+    ON run_snapshots (project_id, captured_at DESC);
+
+-- sql.py:145 —— LLM 调用流水（doc 此前漏列）
+CREATE TABLE IF NOT EXISTS llm_calls (
+    seq        bigserial PRIMARY KEY,
+    project_id text NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    node_id    text,
+    agent_name text,
+    ts         double precision NOT NULL DEFAULT 0,
     payload    jsonb NOT NULL
 );
-CREATE INDEX idx_qa_verdicts_project ON qa_verdicts (project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_project_ts ON llm_calls (project_id, ts DESC, seq DESC);
 ```
 
-> `AgentOutputBase` 多态由 payload 内 `agent_name` 字段判别；
-> 重建时由 `backend/storage/serde.py` 的 `polymorphic_load_output()` 路由到具体子类。
+> `node_outputs.run_id` / `qa_verdicts.run_id` 对老库另有幂等 `ALTER TABLE ... ADD COLUMN
+> IF NOT EXISTS`（sql.py:117 / sql.py:120），老行 `run_id=NULL` 被视作一个历史 run。
+>
+> `AgentOutputBase` 多态由 payload 内 `agent_name` 字段判别；重建时由
+> `backend/storage/serde.py:40` 的 `load_output()` 按注册表路由到具体子类（未知 `agent_name` 抛 ValueError）。
+
+### 3.4 schema 初始化（无 alembic）
+
+v1 **不上 alembic**：`backend/storage/sql.py:183` 的 `init_schema(engine)` 跑一遍
+`ALL_STATEMENTS`（全是 `CREATE TABLE / INDEX IF NOT EXISTS` + 幂等 `ALTER`）即可建库，
+由 `backend/storage/__init__.py:131` 的 `init_storage(storage)` 在 postgres 模式下触发。
+`pyproject.toml` 虽声明了 `alembic>=1.13`，但仓内**无 migrations 目录**，`sql.py:3` 明确写
+「v1 阶段不上 alembic」。后续真上多人迁移再切。
 
 ---
 
@@ -259,7 +352,7 @@ def build_storage(
 ) -> Storage: ...
 ```
 
-返回的 `Storage` 是个轻量 dataclass：
+返回的 `Storage` 是个轻量 dataclass（`backend/storage/__init__.py:45`）：
 
 ```python
 @dataclass
@@ -267,12 +360,17 @@ class Storage:
     checkpointer: CheckpointerProtocol
     state_store:  StateStoreProtocol
     event_bus:    EventBusProtocol
-    async def close(self) -> None: ...
+    mode: Literal["memory", "postgres"] = "memory"   # doc 此前漏列
+    async def close(self) -> None: ...               # bus → store → checkpointer 顺序关
 ```
 
 - `mode="memory"`：三套 InMemory 实现，单进程内可用，pytest 默认走这条
-- `mode="postgres"`：Checkpointer + StateStore 走 PG，EventBus 走 Redis；缺哪个就报错
-- 配置可从环境变量自动拉：`POSTGRES_DSN`、`REDIS_URL`
+- `mode="postgres"`：Checkpointer + StateStore 走 PG（SQLAlchemy 2.0 async + asyncpg），
+  EventBus 走 Redis pub/sub；`pg_dsn` / `redis_url` 缺省读 `POSTGRES_DSN` / `REDIS_URL`，
+  任一缺失抛 `ValueError`。postgres 模式实际返回 `_PostgresStorage`（带 engine 句柄，close 时
+  `engine.dispose()`）。
+- DSN 形如 `postgresql+asyncpg://app:app@localhost:5432/app`。
+- 建表用 `init_storage(storage)`（postgres 模式有效，memory 模式 no-op）。
 
 ---
 

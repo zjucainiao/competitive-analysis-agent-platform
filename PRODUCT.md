@@ -1,6 +1,6 @@
 # PRODUCT.md
 
-> 前端设计的上下文锚。Frontend impeccable skill 会在每次启动时加载本文。
+> 前端设计的上下文锚。与 DESIGN.md 一起构成前端设计契约。
 
 ---
 
@@ -115,9 +115,9 @@
 
 - **审美轴**：Luxury（克制 / 专业 / 严肃工程美感）+ **清爽靓丽 + 不 AI 化**
 - **关键反思**：dark + monochrome 在 2026 已经被 AI 圈占有（Anthropic / OpenAI / Linear / Vercel / Cursor），底色一旦是 dark 第一眼就还是"AI 工具"。所以 v1 改为 **light-first**。
-- **主题**：**Light-first**（v2 再考虑 dark mode）。Scene：「PM 在自然光办公室、9–6 工作时段、经常投屏给老板/客户」——强制 light + 高饱和状态色 + 暖色调中性色。
+- **主题**：**Light-first**，并已实现完整 dark mode（用户可手动 toggle，主推 light）。Scene：「PM 在自然光办公室、9–6 工作时段、经常投屏给老板/客户」——强制 light 主推 + 高饱和状态色 + 淡紫中性背景。
 - **色彩策略**：Committed（不是 Restrained）——accent 在 UI 中占 15–20%，明显但不装饰。
-- **Accent**：**朱漆橙** `oklch(64% 0.20 38)`——高端中式现代气质，不撞任何 AI 产品，中文用户契合度高。
+- **Accent**：**紫罗兰** `oklch(58% 0.22 285)`——明亮 ToB 数据工具气质（Similarweb 风），在浅紫中性背景上清晰可辨。
 - **完整 token 体系** 见 [DESIGN.md](DESIGN.md)。
 
 ---
@@ -126,15 +126,15 @@
 
 v1 必交付的前端 surface（按优先级）：
 
-| # | Surface | 评分项命中 | 优先级 |
-|---|---|---|---|
-| 1 | DAG 实时监控页 | 任务流转可视化、可追溯 | P0 |
-| 2 | Report 查看 + 证据溯源页 | 报告查看、溯源跳转 | P0 |
-| 3 | Agent 决策回放（节点详情抽屉） | Trace、Token、决策回放 | P0 |
-| 4 | Project 创建配置页 | 完整产品闭环 | P0 |
-| 5 | 业务指标仪表盘 | 准确率 / 覆盖率 / 人工修正率 | P1 |
-| 6 | Evidence 库浏览 | 信息溯源 | P1 |
-| 7 | Project 列表 / 历史 | 产品完整感 | P2 |
-| 8 | 全局命令面板（⌘K） | 键盘优先 | P2 |
+| # | Surface | 优先级 |
+|---|---|---|
+| 1 | DAG 实时监控页 | P0 |
+| 2 | Report 查看 + 证据溯源页 | P0 |
+| 3 | Agent 决策回放（节点详情抽屉） | P0 |
+| 4 | Project 创建配置页 | P0 |
+| 5 | 业务指标仪表盘 | P1 |
+| 6 | Evidence 库浏览 | P1 |
+| 7 | Project 列表 / 历史 | P2 |
+| 8 | 全局命令面板（⌘K） | P2 |
 
 后两个移动端不优化（只 graceful degrade 到可读）。
