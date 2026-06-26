@@ -441,6 +441,13 @@ def test_logic_consistency_flags_price_conflict() -> None:
     ]
     assert lc_issues, "expected logic_consistency issue for price conflict"
     assert any("Notion" in i.problem and "Plus" in i.problem for i in lc_issues)
+    # WI-3：同 product+plan 出现 ≥2 个不同价格是**确定性**子发现（正则/数值比对，非 LLM），
+    # 可定位、可复核 → 标 hard_block，使其在「LLM 维度默认 advisory」后仍能 gate 控制流。
+    price_issue = next(
+        (i for i in lc_issues if i.issue_id.startswith("iss_lc_price_")), None
+    )
+    assert price_issue is not None, "expected deterministic price-conflict issue"
+    assert price_issue.required_inputs.get("hard_block") is True
 
 
 # ---------- 8. routing ----------
@@ -565,8 +572,11 @@ def test_aggregate_verdict_pass_when_no_issues() -> None:
 
 
 def test_aggregate_verdict_reject_when_many_criticals() -> None:
+    # WI-3：判级权重只计确定性维度 issue（+ hard_block）。原用 FACT_CONSISTENCY
+    # （LLM-advisory，改后非 hard_block 不进判级），改用确定性维度 EVIDENCE_COMPLETENESS
+    # 表达「多 critical → reject」的原意（≥2 critical → REJECT）。
     issues = [
-        _mk_issue(f"iss_c_{i}", QADimension.FACT_CONSISTENCY, "critical", "reporter")
+        _mk_issue(f"iss_c_{i}", QADimension.EVIDENCE_COMPLETENESS, "critical", "reporter")
         for i in range(2)
     ]
     res = aggregate_verdict(issues, prior_count=0)
@@ -836,6 +846,50 @@ def test_hard_block_not_forced_after_max_retry() -> None:
     )
     res = aggregate_verdict([issue], prior_count=MAX_RETRY_VERDICTS)
     assert res.blocking is False
+
+
+# ---------- WI-3: 只有确定性信号 gate 控制流；LLM 维度非 hard_block → advisory ----------
+
+
+def test_llm_advisory_criticals_do_not_block_without_hard_block() -> None:
+    """LLM 维度(logic_consistency)的 critical issue 若非 hard_block → 只 advisory 不阻塞。
+
+    WI-3：LLM-as-judge 的严重度/连续分有噪声，不应单独 gate 控制流。只有确定性维度的
+    issue、或被显式标 hard_block 的确定性子发现，才进判级权重。本测试构造两条 LLM 维度
+    的 critical（无 hard_block、无核心维不及格）：旧逻辑权重 40 → REJECT/blocking；
+    WI-3 后这些移出判级 → 不阻塞，仅浮出供展示。
+    """
+    issues = [
+        _mk_issue(f"iss_lc_{i}", QADimension.LOGIC_CONSISTENCY, "critical", "reporter")
+        for i in range(2)
+    ]
+    res = aggregate_verdict(issues, prior_count=0)
+    assert res.blocking is False, "LLM 维度非 hard_block 的 critical 不应触发阻塞返工"
+
+
+def test_deterministic_criticals_still_block() -> None:
+    """对照（回归保住）：确定性维度(evidence_completeness)的 critical 仍进判级 → 阻塞。"""
+    issues = [
+        _mk_issue("iss_ec_crit", QADimension.EVIDENCE_COMPLETENESS, "critical", "reporter")
+    ]
+    res = aggregate_verdict(issues, prior_count=0)
+    assert res.blocking is True
+
+
+def test_llm_advisory_hard_block_still_blocks() -> None:
+    """对照（回归保住）：LLM 维度但标了 hard_block 的确定性子发现仍阻塞（=792 行同源）。"""
+    issue = QAIssue(
+        issue_id="iss_fc_contra_y",
+        dimension=QADimension.FACT_CONSISTENCY,
+        severity="major",
+        location="report.sections[0].paragraphs[0]",
+        problem="数字与证据失配",
+        suggested_fix="改写",
+        target_agent="reporter",
+        required_inputs={"hard_block": True},
+    )
+    res = aggregate_verdict([issue], prior_count=0)
+    assert res.blocking is True
 
 
 # ---------- C: QA 消费 source_authority（evidence_completeness 非阻塞提示）----------

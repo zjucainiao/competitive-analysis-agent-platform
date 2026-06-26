@@ -60,6 +60,37 @@ DIMENSION_POLICY: dict[QADimension, tuple[str, bool]] = {
 }
 CORE_DIMENSIONS = frozenset(d for d, (_, core) in DIMENSION_POLICY.items() if core)
 
+# ----- WI-3：确定性信号 gate 控制流；LLM 维度默认 advisory -----
+#
+# LLM-as-judge 驱动的维度（蕴含/矛盾/表达由 LLM 打分）其连续分与严重度天然有噪声，
+# 把它们的整体严重度直接喂进 blocking 判级，会让控制流被不可信信号 gate（典型：
+# fact_consistency 阈值 0.95 现实达不到、每轮空转）。WI-3 约束：
+#   - **确定性维度**（evidence/schema/identity/coverage_density/freshness）的 issue
+#     正常进判级权重——它们可定位、可复核、返工能真修。
+#   - **LLM-advisory 维度**（fact/logic/expression）的 issue **默认只 advisory**：仍在
+#     verdict.issues / routing 里浮出供展示与 trace，但**不进 blocking 判级权重**——
+#     除非该 issue 被显式标 ``hard_block``（已降维成一个确定性、可定位、可复核的子发现，
+#     如 fact 的 contradicted 段落 / 数字字面失配），此时仍保留一票阻塞（见
+#     ``_has_hard_block_issue`` + ``aggregate_verdict``）。
+LLM_ADVISORY_DIMENSIONS = frozenset(
+    {
+        QADimension.FACT_CONSISTENCY,
+        QADimension.LOGIC_CONSISTENCY,
+        QADimension.EXPRESSION,
+    }
+)
+
+
+def _gates_control_flow(issue: QAIssue) -> bool:
+    """该 issue 是否有资格进入 blocking 判级权重（``_base_verdict``）。
+
+    确定性维度 → 是。LLM-advisory 维度 → 仅当标了 ``hard_block``（确定性子发现）才是；
+    否则只 advisory（浮出但不 gate）。
+    """
+    if issue.dimension not in LLM_ADVISORY_DIMENSIONS:
+        return True
+    return issue.required_inputs.get("hard_block") is True
+
 _DIMENSION_FIX_HINT: dict[QADimension, str] = {
     QADimension.FACT_CONSISTENCY: "复核相关段落，确保每条事实可由引用证据字面推出",
     QADimension.EVIDENCE_COMPLETENESS: "为缺引用的事实段落补齐 evidence_ids",
@@ -251,9 +282,16 @@ def aggregate_verdict(
 
 
 def _base_verdict(issues: list[QAIssue], prior_count: int) -> OverallVerdict:
-    """纯 issue-权重判级（A1 之前的原逻辑）。"""
-    crit = sum(1 for i in issues if i.severity == "critical")
-    total_weight = sum(SEVERITY_WEIGHTS[i.severity] for i in issues)
+    """纯 issue-权重判级（A1 之前的原逻辑）。
+
+    WI-3：只有「确定性维度的 issue + 任意 hard_block 子发现」进判级权重（``_gates_control_flow``）。
+    LLM-advisory 维度(fact/logic/expression)的非 hard_block issue 移出权重，仅作展示——
+    仍在 verdict.issues / routing 里浮出，但不 gate 控制流。``total_weight`` 反映的是
+    **进入判级的权重**（advisory 不计入）。
+    """
+    gating = [i for i in issues if _gates_control_flow(i)]
+    crit = sum(1 for i in gating if i.severity == "critical")
+    total_weight = sum(SEVERITY_WEIGHTS[i.severity] for i in gating)
 
     max_retry_reached = prior_count >= MAX_RETRY_VERDICTS
 
@@ -507,6 +545,7 @@ def max_retry_error(prior_count: int) -> AgentError:
 __all__ = [
     "CORE_DIMENSIONS",
     "DIMENSION_POLICY",
+    "LLM_ADVISORY_DIMENSIONS",
     "MAX_RETRY_VERDICTS",
     "OverallVerdict",
     "SAME_ISSUE_MAX_OCCURRENCES",
