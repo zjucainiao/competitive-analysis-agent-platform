@@ -1542,6 +1542,11 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
             identity_confidence=src.identity_confidence,
             identity_status=src.identity_status,
             source_class=src.source_class,
+            # 不可信内容 / 注入标记从源文档继承（WI-1），让下游 QA 据 tainted 提权、
+            # Reporter/QA 的 judge prompt 对 tainted 引文做数据区隔离。
+            trust_level=src.trust_level,
+            tainted=src.tainted,
+            taint_reasons=list(src.taint_reasons),
         )
 
     # ----- 失败兜底 -----

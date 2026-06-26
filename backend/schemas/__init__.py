@@ -4,7 +4,9 @@
 任何字段变更必须 bump SCHEMA_VERSION 并经过架构窗口 review。
 """
 
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.2.0"
+# 1.2.0: Evidence / RawSourceDoc 增加 trust_level / tainted / taint_reasons
+#        （间接 prompt injection 防御，WI-1；向后兼容，旧 JSON 默认 untrusted/False/[]）
 # 1.1.0: Evidence 增加可选 source_published_at（向后兼容，旧 JSON 默认 None）
 
 # Agent IO base

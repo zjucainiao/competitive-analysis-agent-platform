@@ -34,6 +34,7 @@ from backend.agents._base import (
 )
 from backend.agents._authority import authority_for
 from backend.agents._progress import emit_collect_progress
+from backend.tools.injection_guard import scan as _scan_injection
 from backend.schemas import (
     AgentError,
     AgentStatus,
@@ -1324,6 +1325,7 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
                 source_id = "src_" + hashlib.sha1(
                     f"{inp.product_name}|reviews|{src.url}|{inp.task_id}".encode()
                 ).hexdigest()[:12]
+                _taint = _scan_injection(text)
                 doc = RawSourceDoc(
                     source_id=source_id,
                     product_name=inp.product_name,
@@ -1351,6 +1353,9 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
                     identity_confidence=0.85,
                     identity_status="confirmed",
                     source_class="review",
+                    trust_level="untrusted",
+                    tainted=_taint.tainted,
+                    taint_reasons=_taint.matched_patterns,
                 )
                 docs.append(doc)
             except ValidationError:
@@ -1400,6 +1405,7 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             f"{inp.product_name}|{dimension.value}|{url}|{inp.task_id}".encode()
         ).hexdigest()[:12]
         outdated = scrape.detected_outdated
+        taint = _scan_injection(scrape.text)
         return RawSourceDoc(
             source_id=source_id,
             product_name=inp.product_name,
@@ -1427,6 +1433,9 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             identity_confidence=identity_confidence,
             identity_status=identity_status,
             source_class=_source_class(url, inp.product_name, inp.official_url),
+            trust_level="untrusted",
+            tainted=taint.tainted,
+            taint_reasons=taint.matched_patterns,
         )
 
     # ----- 收尾：confidence / critique / coverage -----
