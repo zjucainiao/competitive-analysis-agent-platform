@@ -106,7 +106,11 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml logs -f backend
 # 1) 健康检查（经 Caddy，应是 200 + HTTPS 证书有效）
 curl -i https://yourdomain.com/health
 
-# 2) 浏览器打开 https://yourdomain.com —— 进前端工作台
+# 2) 版本自报（确认线上是你刚部署的 git SHA / release tag）
+curl -s https://yourdomain.com/version
+#   -> {"version":"v1.2.0","git_sha":"95e9a9e","schema_version":"1.2.0"}
+
+# 3) 浏览器打开 https://yourdomain.com —— 进前端工作台
 ```
 
 **首次使用要先注册账号**：项目接口都要登录（owner 取自 JWT）。
@@ -138,12 +142,35 @@ $C exec postgres psql -U app -d app -c '\dt'
 $C exec postgres pg_dump -U app app > backup_$(date +%F).sql
 ```
 
-### 更新版本
+### 版本管理 / 部署 / 回滚
+
+**服务器是「同一个仓库的部署检出」**（见 §2 的 `git clone`），不是散文件拷贝——
+这样 `git rev-parse HEAD` 永远能答「线上是哪一版」，绝不和 GitHub 分叉。
+**永远不在服务器上改代码 / commit**，只拉 GitHub 上定好的版本。
+
+用 `scripts/deploy.sh` 一键部署（它会切版本、把 git SHA / release tag 烤进镜像、
+重建、并从容器内自检 `/version` 确认新容器真的换上了）：
+
 ```bash
-git pull
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+scripts/deploy.sh            # 部署当前 checkout
+scripts/deploy.sh v1.2.0     # 部署某个 release tag（推荐：上线打 tag）
+scripts/deploy.sh main       # 部署 main 最新
+scripts/deploy.sh v1.1.0     # 回滚 = 重新部署上一个 tag
 ```
-> 改了 `DOMAIN` 必须 `--build`：前端把 `NEXT_PUBLIC_API_BASE` 烘焙进了产物。
+
+发版流程：本地 PR 合进 `main` → 打 tag（`git tag v1.2.0 && git push --tags`，
+版本号对齐 `SCHEMA_VERSION`）→ 服务器 `scripts/deploy.sh v1.2.0`。
+
+**确认线上版本**（不用再猜文件 mtime）：
+
+```bash
+C="docker compose --env-file .env.prod -f docker-compose.prod.yml"
+$C exec backend curl -fsS http://localhost:8000/version
+# -> {"version":"v1.2.0","git_sha":"95e9a9e","schema_version":"1.2.0"}
+```
+
+> 改了 `DOMAIN` 必须 `--build`：前端把 `NEXT_PUBLIC_API_BASE` 烘焙进了产物
+> （`deploy.sh` 始终带 `--build`，无需操心）。
 
 ---
 

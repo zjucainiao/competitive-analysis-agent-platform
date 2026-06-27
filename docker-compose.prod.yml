@@ -38,6 +38,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.backend
+      args:
+        # 由 scripts/deploy.sh export 进来；直接 compose build 时回退 unknown/dev
+        GIT_SHA: ${GIT_SHA:-unknown}
+        APP_VERSION: ${APP_VERSION:-dev}
     restart: unless-stopped
     # .env.prod 里的 LLM/搜索 key、JWT_SECRET、CORS_ORIGINS 等整体注入容器
     env_file:
