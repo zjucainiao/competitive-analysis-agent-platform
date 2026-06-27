@@ -94,6 +94,10 @@ def check_entailment(text: str, evidences: list[Evidence]) -> EntailmentResult:
 - 矛盾点定位明确 → 回 Reporter（让它重写涉及段落）
 - 矛盾源头在 Analyst → 回 Analyst
 
+**gate 资格（见 § 5.1）**：本维度属 LLM-advisory——LLM 判定的段落两两矛盾**默认只 advisory**
+（浮出不阻塞）；唯有「同 product+plan 出现 ≥2 个不同价格」这条**确定性**子发现（正则/数值
+比对，非 LLM）标 `hard_block=True`，保留一票阻塞。
+
 ### 3.5 freshness（时效性）
 
 **检查**：
@@ -201,13 +205,38 @@ class QAVerdict:
 有 critical issues      → overall = reject, blocking = true
 ```
 
+### 5.1 只有确定性信号 gate 控制流
+
+判级权重**不是**对所有 issue 求和，而是只计「有资格 gate 控制流」的 issue
+（`_gates_control_flow`，`qa/routing.py`）：
+
+- **确定性维度**（evidence_completeness / schema_completeness / identity_consistency /
+  coverage_density / freshness）的 issue → 进判级权重。它们可定位、可复核、返工能真修。
+- **LLM-advisory 维度**（`LLM_ADVISORY_DIMENSIONS` = fact_consistency / logic_consistency /
+  expression，由 LLM-as-judge 打分，连续分与严重度天然有噪声）的 issue → **默认只 advisory**：
+  仍在 `verdict.issues` / `routing` 里浮出供展示与 trace，但**不进判级权重、不 gate 控制流**——
+  **除非**该 issue 被显式标 `hard_block=True`，即已降维成一个**确定性、可定位、可复核**的
+  子发现（如 fact 的 contradicted 段落 / 数字字面失配、logic 的「同 plan ≥2 个不同价」），
+  此时仍保留一票阻塞。
+
 ```python
 severity_weights = {"minor": 1, "major": 5, "critical": 20}
-total_weight = sum(w[i.severity] for i in issues)
-if total_weight == 0: status = pass
-elif total_weight <= 10: status = needs_revision (non-blocking)
-else: status = needs_revision (blocking) or reject
+# 只有确定性维度的 issue + 任意 hard_block 子发现进判级；LLM 维度其余 issue 只 advisory
+gating = [i for i in issues
+          if i.dimension not in LLM_ADVISORY_DIMENSIONS
+          or i.required_inputs.get("hard_block")]
+total_weight = sum(severity_weights[i.severity] for i in gating)
+if total_weight == 0:     status = pass
+elif total_weight <= 10:  status = needs_revision (non-blocking)
+else:                     status = needs_revision (blocking) / reject（>25 或 crit≥2）
 ```
+
+此外两条**确定性 force-block**（`aggregate_verdict`）独立于权重，各保留一票阻塞：
+
+- 核心维度（evidence / schema / identity）不及格 → 强制阻塞一轮（每维度仅一次机会，
+  复发后由 `_core_dims_failed_before` 豁免，避免空转）；
+- 任意 `hard_block` 子发现 → 强制阻塞一轮（复发降级 / `max_rounds` / `MAX_RETRY_VERDICTS`
+  共同保证终止，改不掉的硬伤最终落 best-round 发布）。
 
 ---
 

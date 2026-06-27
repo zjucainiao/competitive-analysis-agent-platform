@@ -149,6 +149,11 @@ class LogicConsistencyChecker(BaseChecker):
                             "product": product,
                             "plan": plan,
                             "paragraph_ids": pids,
+                            # WI-3：同 plan 出现 ≥2 个不同价格是**确定性**子发现（正则/数值
+                            # 比对，非 LLM），可定位、可复核 → 标 hard_block，使其在
+                            # 「LLM 维度默认 advisory」后仍保留一票阻塞（见 routing._gates_control_flow）。
+                            # LLM 判矛盾对 / SWOT 同义反复仍 advisory（不标），交确定性信号 gate。
+                            "hard_block": True,
                         },
                     )
                 )
