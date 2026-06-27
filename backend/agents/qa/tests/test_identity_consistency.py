@@ -95,3 +95,34 @@ def test_qa_mismatch_blocks_and_routes_to_collector() -> None:
     assert any(
         i.dimension is QADimension.IDENTITY_CONSISTENCY for i in verdict.issues
     )
+
+
+# ---------- WI-1：被引用证据 tainted（疑似注入）→ 提权浮出 + 回 collector ----------
+
+
+def test_identity_flags_tainted_cited_evidence() -> None:
+    """被引用证据 tainted=True → major issue、回 collector、带 taint URLs + reasons。"""
+    db = load_evidence_db()
+    eid = _one_cited_id(db)
+    db[eid] = db[eid].model_copy(
+        update={"tainted": True, "taint_reasons": ["override_instructions_en"]}
+    )
+    result = IdentityConsistencyChecker().run(_ctx_with_db(db))
+    taint_issues = [i for i in result.issues if "tainted" in i.issue_id]
+    assert taint_issues, "tainted 证据应产 issue"
+    iss = taint_issues[0]
+    assert iss.severity == "major"
+    assert iss.target_agent == "collector"
+    assert iss.dimension is QADimension.IDENTITY_CONSISTENCY
+    assert str(db[eid].source_url) in iss.required_inputs["taint_source_urls"]
+    assert "override_instructions_en" in iss.required_inputs["taint_reasons"]
+
+
+def test_identity_taint_alone_does_not_fail_dimension() -> None:
+    """纯 taint（无 mismatch）不让 identity 核心维失败——injection_guard 是启发式，
+    避免误杀正常评测文本而强制返工；只浮出 + 进权重判级，交 QA 整体裁决。"""
+    db = load_evidence_db()
+    eid = _one_cited_id(db)
+    db[eid] = db[eid].model_copy(update={"tainted": True, "taint_reasons": ["x"]})
+    result = IdentityConsistencyChecker().run(_ctx_with_db(db))
+    assert result.pass_ is True

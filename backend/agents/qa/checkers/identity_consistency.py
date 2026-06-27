@@ -96,6 +96,37 @@ class IdentityConsistencyChecker(BaseChecker):
                 )
             )
 
+        # tainted：被引用证据命中疑似 prompt injection（injection_guard）→ major，回 collector，
+        # 提权浮出。**不计入 score、不让核心维失败**：injection_guard 是启发式，避免误杀正常
+        # 含敏感词的评测文本而强制返工；只浮出 + 进 QA 整体权重判级，交裁决（WI-1）。
+        tainted = [e for e in cited if getattr(e, "tainted", False)]
+        for product, evs in _group_by_product(tainted).items():
+            urls = sorted({str(e.source_url) for e in evs})
+            reasons = sorted({r for e in evs for r in (e.taint_reasons or [])})
+            issues.append(
+                QAIssue(
+                    issue_id=f"iss_identity_tainted_{_slug(product)}",
+                    dimension=self.dimension,
+                    severity="major",
+                    location=f"evidence[product={product}]",
+                    problem=(
+                        f"产品 {product!r} 引用了 {len(evs)} 条**疑似含 prompt injection** 的来源"
+                        + (f"（命中模式：{', '.join(reasons)}）" if reasons else "")
+                        + "，可能是被注入的不可信内容。"
+                    ),
+                    suggested_fix=(
+                        "Collector 重采该产品来源，排除下列疑似注入 URL，优先官方/直接来源。"
+                    ),
+                    target_agent="collector",
+                    required_inputs={
+                        "product": product,
+                        "taint_source_urls": urls,
+                        "taint_reasons": reasons,
+                        "evidence_ids": sorted(e.evidence_id for e in evs),
+                    },
+                )
+            )
+
         # ---- 评分 ----
         if total == 0:
             score = 1.0
@@ -107,7 +138,8 @@ class IdentityConsistencyChecker(BaseChecker):
         pass_ = len(mismatch) == 0 and score >= self.OVERALL_PASS_THRESHOLD
 
         notes = (
-            f"被引用证据 {total} 条；mismatch {len(mismatch)}、ambiguous {len(ambiguous)}。"
+            f"被引用证据 {total} 条；mismatch {len(mismatch)}、"
+            f"ambiguous {len(ambiguous)}、tainted {len(tainted)}。"
         )
         return CheckerResult(
             dimension=self.dimension,

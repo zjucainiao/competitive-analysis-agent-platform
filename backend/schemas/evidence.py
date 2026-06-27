@@ -25,6 +25,11 @@ IdentityStatus = Literal["unvalidated", "confirmed", "mismatch", "ambiguous"]
 # Collector 抓取时按 URL 判定并填入；None=未判定（旧数据/mock）→ 下游不做跨维度校正。
 SourceClass = Literal["official", "review", "other"]
 
+# 信任级别（WI-1）：抓取的外部内容默认 untrusted（可能含间接 prompt injection）；
+# trusted 预留给非外部来源（系统生成 / 人工录入，目前未使用）。配合 injection_guard
+# 的 tainted 标记，让下游对不可信内容做数据区隔离 + QA 据此提权。
+TrustLevel = Literal["trusted", "untrusted"]
+
 
 class CollectDimension(str, Enum):
     """采集维度。Collector 按此粒度抓取。"""
@@ -114,6 +119,20 @@ class Evidence(BaseModel):
         ),
     )
 
+    # ---- 不可信内容 / 间接注入标记（从 RawSourceDoc 继承；WI-1）----
+    trust_level: TrustLevel = Field(
+        default="untrusted",
+        description="证据原文信任级别；源自抓取的外部内容默认 untrusted",
+    )
+    tainted: bool = Field(
+        default=False,
+        description="injection_guard 在源文本中检出疑似 prompt injection 模式",
+    )
+    taint_reasons: list[str] = Field(
+        default_factory=list,
+        description="命中的注入模式名（injection_guard 的 matched_patterns）",
+    )
+
 
 class RawSourceDoc(BaseModel):
     """Collector 输出的单个原始来源文档。Extractor 的输入。"""
@@ -168,4 +187,19 @@ class RawSourceDoc(BaseModel):
             "来源类型粗分类（official/review/other），Collector 按 URL 判定。"
             "Extractor 透传到 Evidence，供 QA 跨维度权威度校正；None=未判定。"
         ),
+    )
+
+    # ---- 不可信内容 / 间接注入标记（Collector 抓取后用 injection_guard 标，
+    # Extractor 继承到 Evidence；WI-1）----
+    trust_level: TrustLevel = Field(
+        default="untrusted",
+        description="抓取的外部内容默认 untrusted（可能含间接 prompt injection）",
+    )
+    tainted: bool = Field(
+        default=False,
+        description="injection_guard 在 raw_text 中检出疑似注入模式",
+    )
+    taint_reasons: list[str] = Field(
+        default_factory=list,
+        description="命中的注入模式名",
     )
