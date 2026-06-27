@@ -20,6 +20,8 @@ from backend.orchestrator import AgentRegistry, Orchestrator
 from backend.schemas import SCHEMA_VERSION
 from backend.storage import build_storage, init_storage
 
+from .version import build_version_info
+
 from .routes import (
     auth,
     discovery,
@@ -130,9 +132,19 @@ def create_app(
         return {
             "status": "ok",
             "schema_version": SCHEMA_VERSION,
+            "git_sha": build_version_info()["git_sha"],
             "agent_mode": "real",
             "storage_mode": mode,
         }
+
+    @app.get("/version", tags=["meta"])
+    async def version() -> dict[str, str]:
+        """部署版本自报：release tag + git SHA + schema 版本。
+
+        构建期由 Dockerfile 注入 ``APP_VERSION`` / ``APP_GIT_SHA``；
+        本地直接跑时回退 dev/unknown。``curl /version`` 即可确认线上版本。
+        """
+        return build_version_info()
 
     app.include_router(auth.router, prefix="/api")
     app.include_router(projects.router, prefix="/api")

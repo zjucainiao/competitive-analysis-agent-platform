@@ -36,6 +36,12 @@ COPY backend ./backend
 COPY fixtures ./fixtures
 COPY pyproject.toml README.md ./
 
+# 版本身份：构建期注入 git SHA / release tag，供 /version 与 /health 自报。
+# 放在末尾——SHA 每次构建都变，置后才不会让上面的重依赖层缓存失效。
+ARG GIT_SHA=unknown
+ARG APP_VERSION=dev
+ENV APP_GIT_SHA=$GIT_SHA APP_VERSION=$APP_VERSION
+
 USER app
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \
