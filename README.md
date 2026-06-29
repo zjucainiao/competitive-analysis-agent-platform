@@ -17,8 +17,8 @@
 | **3 · 撰写** | Reporter | 结构化报告生成 + 引用强制校验 + 反幻觉自修复 |
 | **4 · 质检** | QA | 多维度自动审查，不合格触发反馈环、定向打回上游重做 |
 
-更完整的技术说明（技术栈 / AI 能力 / 工程难点 / 评测体系）见
-[docs/PROJECT_SUBMISSION.md](docs/PROJECT_SUBMISSION.md)。
+更完整的技术说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)（系统架构）与
+[docs/AGENTS.md](docs/AGENTS.md)（Agent 接口契约）。
 
 ---
 
@@ -201,7 +201,6 @@ RUN_REAL_LLM_TESTS=1 pytest backend/api/tests/test_real_full_chain.py -v -s
 
 | 主题 | 文档 |
 |---|---|
-| 技术总览 | [docs/PROJECT_SUBMISSION.md](docs/PROJECT_SUBMISSION.md) |
 | 系统架构 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Agent 接口契约 | [docs/AGENTS.md](docs/AGENTS.md) |
 | 竞品知识 Schema | [docs/SCHEMA.md](docs/SCHEMA.md) |
@@ -213,7 +212,6 @@ RUN_REAL_LLM_TESTS=1 pytest backend/api/tests/test_real_full_chain.py -v -s
 | 业务指标 | [docs/METRICS.md](docs/METRICS.md) |
 | 存储层契约 | [docs/STORAGE.md](docs/STORAGE.md) |
 | 合规与数据安全 | [docs/COMPLIANCE.md](docs/COMPLIANCE.md) |
-| 技术亮点 | [docs/INNOVATIONS.md](docs/INNOVATIONS.md) |
 | 生产部署 Runbook | [docs/DEPLOY_PROD.md](docs/DEPLOY_PROD.md) |
 | 前端设计系统 / 产品语境 | [DESIGN.md](DESIGN.md) · [PRODUCT.md](PRODUCT.md) |
 

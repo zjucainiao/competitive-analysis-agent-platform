@@ -1,6 +1,6 @@
 # 业务闭环指标体系
 
-> 本文档定义平台的业务指标体系。对应评分要点：「设计了清晰的业务闭环（含关键指标如**准确率、覆盖率、人工修正率**），支持后续运营迭代」。
+> 本文档定义平台的业务指标体系：如何量化报告质量（准确率、覆盖率、人工修正率），并把这些数字回流到运营决策。
 >
 > **文档口径**：本文区分「已实现的 v1 公式」与「设计草案 / 未实现」。真实实现在 `backend/orchestrator/metrics.py`（计算）+ `backend/schemas/project.py`（`ProjectMetrics` 字段）+ `backend/api/routes/meta.py`（跨项目聚合）。指标以 **jsonb 落在 `Project.metrics`**，**没有** 独立 `project_metrics` 表，**没有** 物化视图，**没有** Redis-Stream 事件总线，**没有** 告警表。
 
@@ -10,7 +10,7 @@
 
 让平台不止能"生成报告"，而是能**量化它生成报告的质量**，并把这些数字回流到运营决策：
 
-- 用户能在仪表盘上一眼看到「这个项目 / 这次答辩演示」的质量
+- 用户能在仪表盘上一眼看到「这个项目」的质量
 - 横向对比：换 LLM / 换 prompt / 换工具 → 指标是涨了还是跌了
 - 纵向对比（跨返工轮）：返工后准确率是否真有改善（`per_round_accuracy` / `round_delta`）
 
@@ -103,21 +103,7 @@ edit_rate = min(manual_edits / total_paragraphs, 1.0)
 
 ---
 
-## 4. 效率提升量化（vs 传统人工）—— 答辩叙事，非系统计算
-
-> 以下是答辩材料中的**对比叙事**，**不是**系统自动计算的指标，请勿当作运行时数据：
-
-| 维度 | 人工基线 | 平台 | 提升 |
-|---|---|---|---|
-| **时间** | 1 分析师 × 3 竞品 × 5 维度 ≈ 8 小时 | 端到端 < 15 分钟 | ~30× |
-| **信息源覆盖** | 平均 3-5 源 / 竞品 | 8-15 源 / 竞品 | ~3× |
-| **结构化输出** | Word/PPT 自由格式 | JSON Schema 100% 一致 | 1 → ∞ |
-| **可溯源** | 偶尔附 URL | 每个 claim 绑 evidence | 完整 |
-| **可重复** | 难复现 | 同 query 可复现 | — |
-
----
-
-## 5. 指标采集、持久化与聚合（实际）
+## 4. 指标采集、持久化与聚合（实际）
 
 ### 5.1 采集时机
 
@@ -140,7 +126,7 @@ edit_rate = min(manual_edits / total_paragraphs, 1.0)
 
 ---
 
-## 6. 指标仪表盘 UI
+## 5. 指标仪表盘 UI
 
 仪表盘消费 `/api/metrics/aggregate`（全局）与 `Project.metrics`（单项目）渲染准确率 / 覆盖率 / 修正率、成本、状态 / 行业分布，单项目可下钻到决策回放（见 [OBSERVABILITY.md](OBSERVABILITY.md) § 8）。
 
@@ -161,7 +147,7 @@ edit_rate = min(manual_edits / total_paragraphs, 1.0)
 
 ---
 
-## 7. 告警 —— 未实现（设计草案）
+## 6. 告警 —— 未实现（设计草案）
 
 > 早期稿设想的阈值告警（accuracy < 0.8 置红 / 单日下跌 > 5% 邮件 IM / cost 超限中止 / 真实抓取失败率 > 30% 切 mock）**均未实现**。**没有** 告警表、**没有** 告警链路。保留此节作为后续设计参考。
 
@@ -174,18 +160,7 @@ edit_rate = min(manual_edits / total_paragraphs, 1.0)
 
 ---
 
-## 8. 用于答辩的指标快照
-
-答辩材料中至少展示：
-
-- 演示项目的 `accuracy` / `coverage` / `edit_rate`（带证据）
-- vs 人工基线的提升叙事（§ 4）
-- 一个完整的决策回放截图（[OBSERVABILITY.md](OBSERVABILITY.md) § 8）
-- 一次真实的 QA 反馈闭环（QA 失败 → routing → 重做 → 通过 → `per_round_accuracy` / `round_delta` 变化）
-
----
-
-## 9. 实现位置（真实路径）
+## 7. 实现位置（真实路径）
 
 ```
 backend/orchestrator/metrics.py     # compute_project_metrics（v1 公式）+ best_round_reporter_key（择优）

@@ -99,7 +99,7 @@ backend/agents/analyst/
 
 ## 8. 已知限制 / TODO
 
-- v1 不消费 `qa_feedback` 内的具体 issue 指导，等 M3 闭环时联调 Q 窗口。
-- v1 不接 RAG（`evidence_store_handle` 透传不使用），等 I 窗口提供 Evidence store 后切换。
-- LLM 路径目前没有 JSON-schema 重试，靠启发式 fallback 兜底；下一轮接入 LLMProvider 后补 2 次重试 + 错误注入。
-- 自一致性（self-consistency）目前未启用，关键维度（SWOT / DIFFERENTIATION）可在 P2 加入 N=3 采样。
+- v1 不消费 `qa_feedback` 内的具体 issue 指导。
+- v1 不接 RAG（`evidence_store_handle` 透传不使用）。
+- LLM 路径目前没有 JSON-schema 重试，靠启发式 fallback 兜底；后续可补 2 次重试 + 错误注入。
+- 自一致性（self-consistency）目前未启用，关键维度（SWOT / DIFFERENTIATION）后续可加入 N=3 采样。

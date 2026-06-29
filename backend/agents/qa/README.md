@@ -56,11 +56,11 @@ backend/agents/qa/
 - 直接贡献：accuracy / coverage / qa_pass_rate
 - 所有 verdict 完整持久化，用于 trace 回放
 
-## 实现状态（2026-05-29）
+## 实现状态
 
-- v1 已落地，6 维度全部覆盖（M3 目标），LLM 不可用时所有 checker 都有规则路径降级。
+- v1 已落地，6 维度全部覆盖，LLM 不可用时所有 checker 都有规则路径降级。
 - Mock 模式按 `inp.draft.version` 切 fixture：v1 → `needs_revision`，v2 → `pass`，
-  专供 Orchestrator M3 闭环演示。
+  专供 Orchestrator 反馈闭环演示。
 - 严重度权重：minor=1 / major=5 / critical=20；`total_weight` 0→pass、≤10→
   needs_revision 非阻塞、>10→阻塞、>25 或 ≥2 critical → reject。
 - 防死循环：同 `dimension+location` 累计出现 ≥ 3 次自动降级 minor；
@@ -79,7 +79,3 @@ pytest backend/agents/qa/
 - v1：`logic_consistency` 规则路径仅覆盖价格冲突 + SWOT 同义反复，复杂语义矛盾依赖 LLM
 - v1：fixture profile 的 `industry_extension` 填充率偏低，schema_completeness 会
   对此报警；后续可视情况调整阈值或补齐 fixture
-
-## 责任窗口
-
-**架构窗口**（2026-05-29 调整自 Q 窗口）。M3 已完成 v1。

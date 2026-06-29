@@ -1,4 +1,4 @@
-# `backend/observability` · I 窗口产出
+# `backend/observability`
 
 OTLP / Jaeger Tracer 实现，满足 [`backend.agents._base.TracerProtocol`](../agents/_base.py)。
 
@@ -39,7 +39,7 @@ agent.extractor
 
 详细字段语义见 [docs/OBSERVABILITY.md](../../docs/OBSERVABILITY.md) § 13。
 
-## 跟其他 I 窗口产出的协作
+## 协作模块
 
 - `backend/agents/_base.py` `_TrackingLLMWrapper`：每次 `self.llm.chat()` 自动调 `span.add_llm_call(...)`
 - `backend/llm/pricing.py`：算 `cost_usd`，落 OTel attribute `llm.cost_usd`

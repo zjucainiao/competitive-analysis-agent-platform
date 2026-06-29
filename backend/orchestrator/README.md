@@ -121,7 +121,7 @@ LangGraph 的 checkpointer 通过 `backend.storage.langgraph_adapter.to_langgrap
 |---|---|---|---|---|---|---|
 | `mock` | mock | mock | mock | mock | mock | 单测 / 演示链路 |
 | `hybrid` | 真实采集 | mock | mock | mock | mock | demo（已有 Collector v1 真采） |
-| `real` | 真实 | 真实 | 真实 | 真实 | 真实 | 等 I 窗口 LLMProvider 落地后开启 |
+| `real` | 真实 | 真实 | 真实 | 真实 | 真实 | LLMProvider 落地后开启 |
 
 mode 由 `AgentRegistry(mode=...)` 决定；`Project.mode` 仅用于 Collector 降级开关。
 
@@ -137,9 +137,8 @@ pytest backend/orchestrator/tests/
 - FeedbackRouter（17）：单轮 / 多轮版本递增 / collector per-product / max_rounds 上限 / qa_feedback payload
 - E2E mock（4）：完整链路 + QA 反馈闭环 + storage 落盘 + WS 事件流
 
-## 责任窗口
+## 后续计划
 
-**O 窗口**（本窗口）。下一步（v2 / M5）：
 - `AdaptiveLLMPlanner`（取代 YAML 模板加载）
 - 真实 LLMProvider / Tracer 接入（real 模式）
 - `CONDITIONAL` 节点支持

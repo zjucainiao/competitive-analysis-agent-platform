@@ -1,6 +1,6 @@
 # 合规与数据安全
 
-> 本文档定义平台的合规策略。对应评分要点：「信息采集合规：遵守目标站点 robots.txt 与服务条款，对外部数据来源有明确授权或公开声明 / 数据隐私与安全：用户访谈、问卷数据脱敏处理，无敏感信息泄露」。
+> 本文档定义平台的合规策略：信息采集合规（遵守目标站点 robots.txt 与服务条款、对外部数据来源有明确声明）与数据隐私安全（敏感信息脱敏处理）。
 >
 > **状态标注约定**：每条控制项明确区分
 > **[已实现]**（代码已落地，附 `file:line`）与 **[计划]**（仅设计/未实现，无对应代码）。
@@ -233,22 +233,9 @@ class Sanitizer:
 
 ---
 
-## 8. 答辩材料合规清单
+## 8. 实现位置
 
-提交前必须检查：
-
-- [ ] 演示项目使用的所有竞品对象信息均为公开
-- [ ] 报告附数据来源声明
-- [ ] 演示视频中不出现真实联系方式 / API key
-- [ ] 代码仓库不含真实 `.env` 文件
-- [ ] 答辩 PPT 引用第三方品牌 / Logo 注明来源
-- [ ] 工具与模型使用符合「工具与资源使用规范」
-
----
-
-## 9. 实现位置
-
-> 【锚点保留：backend/tools/README.md:35 引用本节】实际落地位置（**已修正为真实路径**）：
+> 实际落地位置（真实路径）：
 
 ```
 backend/
@@ -276,5 +263,4 @@ backend/
   无 `backend/tools/pii_sanitizer.py`、无 `backend/observability/sanitizer.py`、
   无 `backend/api/middleware/`（robots/限速/脱敏的真实位置见上）。
 - 无 `LICENSES.md`、无 `SECURITY.md`（计划补全，当前未创建）。
-- `backend/tools/README.md` 把 `robots_checker` / `rate_limiter` 的「迁到 `backend/tools/`」
-  列为计划项，与本节一致。
+- `robots_checker` / `rate_limiter` / `pii_sanitizer` 当前在 collector 内自给，未抽到 `backend/tools/`（真实位置见上）。

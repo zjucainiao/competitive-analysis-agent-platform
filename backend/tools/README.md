@@ -1,6 +1,6 @@
-# `backend/tools` · I 窗口产出
+# `backend/tools`
 
-Agent 间共享的工具能力。详细落地清单见 docs/COMPLIANCE.md § 4 / § 9。
+Agent 间共享的工具能力。详细落地清单见 docs/COMPLIANCE.md § 4 / § 8。
 
 ## 已落地
 
@@ -29,15 +29,3 @@ s.sanitize("a@b.com")     # "[REDACTED:EMAIL]"
 调用点：
 - `backend/observability/tracer.py`：OTLPSpan 写 attribute 前过 sanitize
 - 推荐 Reporter / API 用户上传链路写库前调用
-
-## 计划落地（其他窗口/迁移）
-
-按 docs/COMPLIANCE.md § 9：
-
-| 模块 | 当前位置 | 计划 |
-|---|---|---|
-| `robots_checker` | `backend/agents/collector/tools.py` | 迁到 `backend/tools/compliance.py` |
-| `rate_limiter` | `backend/agents/collector/tools.py` | 同上 |
-| `JSONSchemaValidator` | — | 落 `backend/tools/validator.py` |
-| `CitationParser` | — | 落 `backend/tools/citation.py` |
-| `EvidenceRetriever` | — | 落 `backend/tools/retriever.py`（Chroma） |
