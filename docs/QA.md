@@ -323,11 +323,11 @@ USER:
 
 ## 10. 业务指标贡献
 
-QA 直接产出以下 [METRICS.md](METRICS.md) 指标：
+QA 的 verdict 直接喂给 [METRICS.md](METRICS.md) 的核心指标：
 
-- **准确率** = `fact_consistency.score`
-- **覆盖率** = `evidence_completeness.score + schema_completeness.score / 2`
-- **质检通过率** = `pass / total_verdicts`（单项目层面）
+- **准确率** = 最新一份 `QAVerdict` **所有维度分数的算术均值**（不只 `fact_consistency`）
+- **覆盖率** = `schema_completeness` 维度分
+- **跨轮质量** = 各轮 verdict 的维度均分序列（`per_round_accuracy` / `round_delta` / `best_round`），支撑 best-round 择优发布
 
 ---
 
@@ -353,5 +353,3 @@ backend/agents/qa/
 │   └── expression.md
 └── tests/
 ```
-
-Q 窗口实现，M0 后开始，M2 时点完成 v1（至少 3 个维度），M3 完成全部 8 维度。

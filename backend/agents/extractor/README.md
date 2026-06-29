@@ -110,7 +110,7 @@ pytest backend/agents/extractor/tests/ -q
 
 - v1：仅 `collaboration_saas_v1` 行业扩展真抽，其他 industry 返回 warn 错误码
 - v1：长文本 chunk 后取前 6 段塞进 LLM，没接真正的 RAG。token 预算紧时可裁剪
-- v1：Evidence 仅挂在 output 上返回，没写向量库 / 关系库——等 I 窗口的 `backend/storage` 集成
+- v1：Evidence 仅挂在 output 上返回，没写向量库 / 关系库
 - v1：跨源冲突仅按 `field_path == field_path` 简单比较，复杂结构（plans 同名不同价）已专门处理，其他列表字段未做细粒度对齐
 - v1：`qa_feedback` 仅作为字符串透传进 prompt，未做结构化解析
 - v1.1：consolidation pass 全文上限 12k char，超过会截断。Notion+Asana 双产品当前没触发，更长来源（changelog/help）可能需调
@@ -123,7 +123,3 @@ pytest backend/agents/extractor/tests/ -q
   - 标量合并路径统一收敛到 `_resolve_scalar`：所有 scalar 字段在跨源给出不同值时一律标 `field_status=conflicting`，但 best-confidence 的值始终保留（绝不丢空）
   - 触发器：QA `schema_completeness=0.47`（阈值 0.80）的回归
 - **v1.0.0（2026-05-29）**：首版，per-source 抽取 + evidence binding + collab_saas 扩展
-
-## 责任窗口
-
-**E 窗口**。M0 后开始，M1 已完成 v1.1。

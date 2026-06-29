@@ -1,7 +1,7 @@
 # 存储层（backend/storage）
 
-> 本文档是 **I 窗口 → O 窗口** 的硬契约。
-> 任何对 `backend/storage/*` Protocol 形状或语义的破坏性变更必须走 PR + 通知 O 窗口。
+> 本文档是存储层（`backend/storage`）对编排器 / API 的硬契约。
+> 任何对 `backend/storage/*` Protocol 形状或语义的破坏性变更必须走 PR review。
 > 配套 schema：`backend/schemas/orchestrator.py`（`NodeExecutionRequest` / `NodeExecutionResult`）。
 
 ---
@@ -392,7 +392,7 @@ pytest backend/storage/tests -m e2e
 
 ---
 
-## 7. 给 O 窗口的接入示例
+## 7. 接入示例
 
 ```python
 from backend.storage import build_storage
@@ -423,5 +423,5 @@ async def run_project(project: Project) -> None:
 
 ## 8. 版本
 
-- v1.0.0（2026-05-29 由 I 窗口落地）
+- v1.0.0（2026-05-29）
 - 兼容 schemas v1.1.0+（依赖 `NodeExecutionRequest` / `NodeExecutionResult`）

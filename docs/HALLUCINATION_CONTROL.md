@@ -1,6 +1,6 @@
 # 幻觉抑制策略
 
-> 本文档定义平台抑制大模型幻觉的分层策略。对应评分要点：「上下文管理、错误恢复、幻觉抑制有明确策略（如引用强制、超长上下文分片、结构化输出约束）」。
+> 本文档定义平台抑制大模型幻觉的分层策略：引用强制、超长上下文分片、结构化输出约束、错误恢复等。
 >
 > **本文档严格对齐已落地代码**：每条策略均给出实现位置（file:line）。未实现/规划中的能力（如自一致性采样）明确标注为「未启用 / P2 候选」，不计入当前防线。
 
@@ -266,8 +266,6 @@ def _enforce_self_critique(self, out):
 （QA 据 `upstream_statuses` 把自评不达标 Agent 名下的 minor 升 major，见
 `backend/schemas/qa.py:149`）。
 
-这是**前瞻性亮点之二**，详见 [INNOVATIONS.md](INNOVATIONS.md) § 2。
-
 ---
 
 ## 8. 错误恢复策略
@@ -310,17 +308,3 @@ backend/orchestrator/feedback_router.py       # 返工轮次上限 DEFAULT_MAX_R
   对应错误码（`INSUFFICIENT_EVIDENCE` / `UNVERIFIED_QUANTITY` / `UNVERIFIED_INFERENCE`）。
 - 自评强制：低 confidence + 空 self_critique 断言抛 `SELF_CRITIQUE_REQUIRED`。
 - 结构化输出三层兜底：模拟 provider 不支持 tool_call，断言落到 json_mode / 修复重试。
-
----
-
-## 11. 评分映射
-
-| 评分要点 | 本文档落地 |
-|---|---|
-| 引用强制 | § 4 Reporter（`_post_validate`） |
-| 结构化输出 | § 3（三层兜底） |
-| 长文本切片 | § 2.1（`TextChunker`） |
-| 错误恢复 | § 8 |
-| 自评估 | § 7（`SELF_CRITIQUE_THRESHOLD`） |
-| QA 多维兜底 | § 5（8 维度 + 返工路由） |
-| 自一致性 | § 6 —— **未启用 / P2 候选** |

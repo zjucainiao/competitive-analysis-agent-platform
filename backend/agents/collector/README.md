@@ -253,19 +253,7 @@ httpx 38 字 → crawl4ai 9120 字，约 **240× 提升**。这是接入 Crawl4A
 
 ## 已知限制 / TODO
 
-### v1 范围内
 - 语言：仅 `en` / `zh` 自动识别（按 raw_text 前 200 字符 ASCII 比例）
 - 不解析 PDF（部分官方文档是 PDF），落到 unsupported
 - `_render` 用极简 Jinja2 子集，复杂 prompt 模板需迁移到真正的 Jinja2
-
-### 给架构窗口的 follow-up（建议下次同步时讨论）
-
-1. **`BaseAgent` 在非 mock 模式强制 `llm` 与 `tracer` 不为 None**：但按 [AGENTS.md § 3.5](../../../docs/AGENTS.md#35-prompt-设计要点)，Collector 的 LLM 是"可选优化项"，启发式 fallback 是一等公民。当前测试通过注入 `NullLLM` / `NullTracer` 绕过，建议把这两个改成 `None` 时退化处理，或者由我提供官方的 `Null*` stub 暴露在 `_base.py`。
-2. **`RawSourceDoc.fetch_method` Literal 建议加 `"httpx"`**：`HttpxScraper` 已接入主链，目前归到 `"manual"` 是 contract-safe 临时方案；Crawl4AI 走 `"playwright"` 已经完全干净。把 httpx 这条单独标出来更便于 trace 分析。
-3. **`robots_checker` / `domain_rate_limiter` / `pii_sanitizer` 当前在 collector 内自给**：等 I 窗口（基础设施）`backend/tools/` 落地后，统一迁过去，Collector 改为 `from backend.tools import RobotsChecker` 即可。
-4. **ruff 中文标点告警**：当前 `RUF001 / RUF002 / RUF003` 触发 103 次（中文项目正常），建议在 `pyproject.toml [tool.ruff.lint] ignore` 里加这三项。
-5. **`backend/llm/` 还是空目录**：Collector 真实模式跑 LLM 路径暂时用 `NullLLM` 占位，等 I 窗口 `LLMProvider` 落地接入。
-
-## 责任窗口
-
-C 窗口（本窗口）。v1 已交付：mock 闭环 + 真实模式抓取链（Tavily/Serper/DDG 搜索 + Firecrawl/Crawl4AI/httpx 抓取 + 豆包/DeepSeek LLM）+ **REVIEWS 维度走 LLM 内置联网搜索独立路径** + 合规过滤 + 自评估 + **15 个测试用例全绿**（11 单元 + 4 e2e，含豆包真采 G2/Capterra 评分）。
+- `robots_checker` / `domain_rate_limiter` / `pii_sanitizer` 当前在 collector 内自给，后续可统一迁到共享的 `backend/tools/`

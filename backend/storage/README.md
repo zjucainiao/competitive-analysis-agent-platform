@@ -1,4 +1,4 @@
-# `backend/storage` · I 窗口产出
+# `backend/storage`
 
 Storage 层给 Orchestrator 和 API 提供三件底座：
 
@@ -80,7 +80,7 @@ backend/storage/
     └── test_redis_e2e.py
 ```
 
-## 给 O 窗口的接入清单
+## 接入
 
 1. 调 `build_storage(mode=...)` 拿到 `Storage`，三件实例都是注入式
 2. `to_langgraph_saver(storage.checkpointer)` 喂给 `StateGraph.compile()`
@@ -89,4 +89,4 @@ backend/storage/
 5. API/WS handler 订阅同一 channel：`async for msg in storage.event_bus.subscribe(channel)`
 6. 进程退出 `await storage.close()`
 
-任何 Protocol 形状变更必须走 PR + 通知 O 窗口（docs/STORAGE.md § 8 是版本号承载点）。
+任何 Protocol 形状变更必须走 PR review（docs/STORAGE.md § 8 是版本号承载点）。

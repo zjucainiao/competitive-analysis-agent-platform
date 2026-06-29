@@ -1,6 +1,6 @@
 # Agent 接口契约
 
-> **这是各 Agent 实现窗口最重要的依据。**所有 Agent 的输入输出、工具、prompt 约定、错误处理都在本文档定义。任何对契约的偏离都会破坏跨窗口协作。
+> **这是各 Agent 实现最重要的依据。**所有 Agent 的输入输出、工具、prompt 约定、错误处理都在本文档定义。任何对契约的偏离都会破坏 Agent 间协作。
 
 ---
 
@@ -36,7 +36,7 @@
 - 自评估字段强制要求
 
 ```python
-# backend/agents/_base.py（架构窗口提供）
+# backend/agents/_base.py
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 from pydantic import BaseModel
@@ -697,7 +697,7 @@ class NodeExecutionResult(BaseModel):
 
 ## 9. 各 Agent 实现 Checklist
 
-每个 Agent 实现窗口完成后必须满足（架构窗口逐项审查）：
+每个 Agent 实现完成后必须满足：
 
 - [ ] 目录结构：`backend/agents/<name>/{__init__.py, agent.py, prompts/, tools.py, README.md}`
 - [ ] 继承 `BaseAgent`，正确声明 `input_model` / `output_model`
@@ -739,7 +739,7 @@ class QAFeedback(BaseModel):
 
 - 本文档与 `backend/schemas/__init__.py` 中的 `SCHEMA_VERSION` 同步
 - 任何字段变更：major（删/改类型）、minor（新增可选）、patch（注释/校验）
-- 变更须走 PR + 架构窗口审查 + 通知所有 Agent 窗口
+- 变更须走 PR review + 同步所有 Agent 实现
 
 当前版本：**v1.2.0**（与 `backend/schemas/__init__.py:7` 的 `SCHEMA_VERSION` 一致）
 

@@ -170,7 +170,7 @@ ReportDraft 装配，进入 _post_validate（此时段落已干净）
 
 - mock 模式：默认 `FixtureEvidenceProvider`，从
   `fixtures/mock_data/evidences/evidence_db.jsonl` 加载
-- 真实模式：由 Orchestrator / I 窗口注入实现；**未注入时数字校验自动跳过**
+- 真实模式：由 Orchestrator 注入实现；**未注入时数字校验自动跳过**
   （不污染置信、不报 warn），等同于 `is_quantitative` 段落只走 `evidence_ids`
   非空校验
 
@@ -194,10 +194,6 @@ class EvidenceProvider(Protocol):
 - v1：不支持 docx / PDF 输出
 - v1：图表数据由 Analyst 的 `comparison_matrix` 提供，本 Agent 不再产图
 - v2：多模板风格学习、用户自定义模板的运行时注册接口
-
-## 责任窗口
-
-**架构窗口 + R 窗口（合并）**，M0 后开始，M1 完成 v1。
 
 ## 运行 / 验证
 

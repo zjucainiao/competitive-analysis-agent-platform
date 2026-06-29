@@ -260,6 +260,6 @@ v1 阶段 Orchestrator + Agents 可以同进程跑，后期分进程通过 Redis
 2. **结构化优先**：Agent 间永远走 Pydantic 模型，自然语言只出现在 LLM prompt 内部
 3. **证据先行**：任何分析结论都必须可追溯到 Evidence；引用强制在生成阶段，不靠 QA 兜底
 4. **可观测优于可解释**：每一步都留痕（prompt / input / output / token），用户随时可回放
-5. **Schema 即契约**：Schema 变更必须走 PR + 版本号，不允许各窗口私下扩字段
+5. **Schema 即契约**：Schema 变更必须走 PR + 版本号，不允许私下扩字段
 6. **降级优于失败**：关键节点失败时优先返回部分结果（标注 partial），而非整个流程崩溃
 7. **真实数据 + Mock 兜底**：Demo 演示时真实采集，网络异常自动 fallback 到预置数据

@@ -6,13 +6,13 @@
 
 ## 1. 总览
 
-| Schema 族 | 包含 | 维护者 |
-|---|---|---|
-| **业务 Schema** | CompetitorProfile（通用 + 行业扩展）、AnalysisResult、ReportDraft | 架构窗口 |
-| **基础设施 Schema** | Evidence、TraceRecord、AgentInput/Output、DAGNode | 架构窗口 |
-| **行业扩展** | collaboration_saas / crm_saas / cross_border_ecommerce_saas / edu_saas | 架构窗口 + 各 Agent 窗口提需求 |
+| Schema 族 | 包含 |
+|---|---|
+| **业务 Schema** | CompetitorProfile（通用 + 行业扩展）、AnalysisResult、ReportDraft |
+| **基础设施 Schema** | Evidence、TraceRecord、AgentInput/Output、DAGNode |
+| **行业扩展** | collaboration_saas / crm_saas / cross_border_ecommerce_saas / edu_saas |
 
-**版本号**：当前 v1.1.0，存放于 `backend/schemas/__init__.py:7`。1.1.0 相对 1.0.0 新增可选字段 `Evidence.source_published_at`（向后兼容，旧 JSON 默认 None）。
+**版本号**：当前 v1.2.0，存放于 `backend/schemas/__init__.py:7`。1.2.0 相对 1.1.0 给 `Evidence` / `RawSourceDoc` 新增 `trust_level` / `tainted` / `taint_reasons`（间接 prompt injection 防御，向后兼容）；1.1.0 相对 1.0.0 新增可选 `Evidence.source_published_at`（向后兼容，旧 JSON 默认 None）。
 
 **变更原则**：
 - 字段删除 / 类型变更 → major bump，必须走 PR
@@ -583,8 +583,6 @@ backend/schemas/
 ├── dag.py                 # DAGNode, DAGEdge, DAGPlan, DAGState, NodeType, NodeStatus
 └── project.py             # Project, ProjectMetrics, AnalysisMode, ProjectStatus
 ```
-
-**架构窗口承诺**：M0 时点这些文件全部成型，其他窗口直接 import 即可。
 
 ---
 

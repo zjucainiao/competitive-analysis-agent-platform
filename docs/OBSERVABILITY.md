@@ -1,6 +1,6 @@
 # 可观测性：Trace、Token、决策回放
 
-> 本文档定义全链路可观测设计。对应评分要点：「每个 Agent 的 Prompt、输入、输出、决策过程、Token 消耗均有日志 / Trace 可查」。
+> 本文档定义全链路可观测设计：每个 Agent 的 Prompt、输入、输出、决策过程、Token 消耗均有日志 / Trace 可查。
 >
 > **文档口径**：§ 1–12 区分「已实现」与「设计草案 / 未实现」。真正落地的两条链路是：
 > 1. **进程内环形缓冲**（`backend/observability/llm_call_log.py`）→ 前端 Trace tab 实时拉流水；
@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS llm_calls (
 
 ## 8. 决策回放 UI
 
-> 这是已落地的前瞻性亮点（前端 `frontend/src/components/trace/`：`trace-layout.tsx` / `trace-row.tsx` / `trace-summary.tsx` / `llm-call-detail.tsx` / `diff-sheet.tsx`，及节点详情抽屉 `frontend/src/components/dag/node-detail-sheet.tsx`）。
+> 已落地（前端 `frontend/src/components/trace/`：`trace-layout.tsx` / `trace-row.tsx` / `trace-summary.tsx` / `llm-call-detail.tsx` / `diff-sheet.tsx`，及节点详情抽屉 `frontend/src/components/dag/node-detail-sheet.tsx`）。
 >
 > **口径**：这是 **环形缓冲流水 + 持久化 `llm_calls` jsonb 表** 之上的 UI，**不是** § 2 设计草案里的 PG span 关系模型回放。展示的是每节点的 LLM 调用流水（含预览、token、耗时、finish_reason），以及返工轮次 v1 vs v2 的 diff。
 

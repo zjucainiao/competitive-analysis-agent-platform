@@ -12,7 +12,7 @@ Schema 变更时重跑即可。
 
 ## 用途
 
-让各 Agent 窗口**不必等彼此**就能开始开发：每个 Agent 都能直接 `json.load()` 自己的上游 mock 输入。
+让各 Agent **不必等彼此**就能开始开发：每个 Agent 都能直接 `json.load()` 自己的上游 mock 输入。
 
 ## 目录
 
@@ -58,7 +58,7 @@ mock_data/
 
 ## 使用示例
 
-### Extractor 窗口
+### Extractor
 
 ```python
 import json
@@ -71,7 +71,7 @@ doc = RawSourceDoc.model_validate(raw)
 # 用 doc.raw_text 作为 LLM 输入进行抽取测试
 ```
 
-### Analyst 窗口
+### Analyst
 
 ```python
 from backend.schemas import CompetitorProfile
@@ -84,7 +84,7 @@ profiles = {
 }
 ```
 
-### Reporter / QA 窗口
+### Reporter / QA
 
 类似上面，加载 `analysis_results/analysis_full.json` 或 `report_drafts/draft_v1.json`。
 
