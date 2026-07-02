@@ -20,6 +20,7 @@ from backend.orchestrator import AgentRegistry, Orchestrator
 from backend.schemas import SCHEMA_VERSION
 from backend.storage import build_storage, init_storage
 
+from .security import ensure_jwt_secret
 from .version import build_version_info
 
 from .routes import (
@@ -72,6 +73,12 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # 启动硬闸门：生产形态（postgres）缺 JWT_SECRET 直接拒启，
+        # 不给"打个 warning 继续跑弱密钥"的机会（详见 security.ensure_jwt_secret）。
+        # 放 lifespan 而非构造期：模块 import（默认 app 实例）不炸，行为与
+        # AgentRegistry.from_env 的"无 key 启动报错"一致。
+        ensure_jwt_secret(mode)
+
         storage = build_storage(mode=mode, pg_dsn=pg_dsn, redis_url=redis_url)
         await init_storage(storage)
 

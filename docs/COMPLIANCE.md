@@ -225,7 +225,9 @@ class Sanitizer:
     `sub`=user_id 与 `exp`）
   - 受保护路由依赖：`backend/api/deps.py:37` 的 `get_current_user`（解析
     `Authorization: Bearer <jwt>`，失败 401）
-  - JWT 密钥从 `JWT_SECRET` 读，缺省给本地弱默认值并告警（security.py:6）
+  - JWT 密钥从 `JWT_SECRET` 读：postgres 形态（生产判据）缺失时启动直接拒绝
+    （`security.py` 的 `ensure_jwt_secret`，可用 `JWT_ALLOW_INSECURE_DEV=1` 显式豁免）；
+    memory 形态回退开发默认值并告警
   - 注意：是 JWT，**不是 Session**；仓内**无** `backend/api/middleware/` 目录。
 - **[计划]** 数据库密码、模型 key 使用 secret manager（v2）。
 - **[部分已实现]** SQL injection / XSS：后端用 SQLAlchemy 参数化 + Pydantic 校验输入
