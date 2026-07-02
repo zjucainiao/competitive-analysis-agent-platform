@@ -254,7 +254,8 @@ export interface RawSourceDoc {
   summary: string | null;
   language: string;
   collected_at: string;
-  fetch_method: "search" | "firecrawl" | "playwright" | "mock" | "manual";
+  // llm_synthesis = LLM 合成文本（REVIEWS 维度联网搜索路径），非真实抓取
+  fetch_method: "search" | "firecrawl" | "playwright" | "mock" | "manual" | "llm_synthesis";
   http_status: number | null;
   robots_allowed: boolean;
   source_authority: number;

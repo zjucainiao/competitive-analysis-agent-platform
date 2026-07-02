@@ -33,7 +33,10 @@ nodes:
     agent: collector
     for_each: products
     depends_on: [start]
-    timeout_ms: 180000
+    # 300s / 240s / 180s 是「节点超时连锁失败」事故后精调的下限
+    # （backend/orchestrator/plan_directives.py NODE_TIMEOUT_FLOOR_MS）；
+    # native 引擎消费 plan 超时后，模板值不得低于该表，否则直接回归旧的过小超时。
+    timeout_ms: 300000
     max_retries: 2
 
   - id: extract.{product}
@@ -53,7 +56,7 @@ nodes:
     type: agent_call
     agent: analyst
     depends_on: [join_extract]
-    timeout_ms: 120000
+    timeout_ms: 240000
     max_retries: 2
 
   - id: reporter
@@ -67,7 +70,7 @@ nodes:
     type: agent_call
     agent: qa
     depends_on: [reporter]
-    timeout_ms: 60000
+    timeout_ms: 180000
     max_retries: 2
 
   - id: end

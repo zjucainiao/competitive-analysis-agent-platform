@@ -336,7 +336,7 @@ def test_reviews_via_llm_emits_one_doc_per_source(make_registry) -> None:
     # 来源平台名 + 主题词也要落进 raw_text，便于下游 evidence 锁定
     assert "G2" in g2.raw_text
     assert "AI" in g2.raw_text or "易上手" in g2.raw_text
-    assert g2.fetch_method == "search"  # LLM 联网搜索归到 search literal
+    assert g2.fetch_method == "llm_synthesis"  # LLM 合成产物用独立值，与真实抓取区分（H1）
     assert g2.source_type == "user_reviews"
 
     # LLM 路径成功后，应跳过传统 search + scrape 链；coverage 来自 reviews_finding_to_docs
@@ -564,8 +564,11 @@ def test_authority_is_relative_to_dimension() -> None:
     assert _heuristic_authority(url=g2, dimension=CollectDimension.PRICING, **kw) == 0.6
 
 
-def test_reviews_llm_path_uses_relative_authority() -> None:
-    """LLM 评论路径的 doc 权威度走相对矩阵（review×reviews=0.92），不再硬编 0.75。"""
+def test_reviews_llm_path_uses_synthesis_authority() -> None:
+    """LLM 评论路径的 doc 是**合成文本**，权威度用显著低值（H1），不再按
+    评论站正典矩阵值（review×reviews=0.92）高企——那是给真实抓取的。"""
+    from backend.agents.collector.agent import LLM_SYNTHESIS_AUTHORITY
+
     finding = _ReviewsFinding(
         overall_rating=4.5,
         sources=[
@@ -580,7 +583,7 @@ def test_reviews_llm_path_uses_relative_authority() -> None:
     inp = make_collector_input(product_name="Notion", dimensions=[CollectDimension.REVIEWS])
     docs = agent._reviews_finding_to_docs(inp=inp, finding=finding)
     assert docs
-    assert all(d.source_authority == 0.92 for d in docs)
+    assert all(d.source_authority == LLM_SYNTHESIS_AUTHORITY for d in docs)
 
 
 def _review_scrape(url: str, *, paywall: bool = False, text: str = "x") -> ScrapeResult:

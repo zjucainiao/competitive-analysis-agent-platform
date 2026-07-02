@@ -38,9 +38,11 @@ nodes:
     agent: collector
     for_each: products
     depends_on: [start]
-    # 5 dimension（含 user_reviews 走豆包联网搜索）单次跑 80-120s，
-    # 60s 太紧，重试 3 次全超时 → fail。拉到 3 分钟。
-    timeout_ms: 180000
+    # 5 dimension（含 user_reviews 走豆包联网搜索）+ 每页 page_type 分类 / 身份校验
+    # LLM，第三方噪音多的产品可达 100+ 次调用。300s 是「节点超时连锁失败」事故后
+    # 精调的下限（backend/orchestrator/plan_directives.py NODE_TIMEOUT_FLOOR_MS），
+    # 模板值不得低于该表——native 引擎消费 plan 超时后，过小的值会直接造成回归。
+    timeout_ms: 300000
     max_retries: 2
 
   - id: extract.{product}
@@ -63,7 +65,8 @@ nodes:
     type: agent_call
     agent: analyst
     depends_on: [join_extract]
-    timeout_ms: 120000
+    # 6 维度并行 ~20s，freeform 兜底单次可达 55s；240s 为事故后精调下限，不得调低
+    timeout_ms: 240000
     max_retries: 2
 
   - id: reporter
@@ -77,7 +80,8 @@ nodes:
     type: agent_call
     agent: qa
     depends_on: [reporter]
-    timeout_ms: 60000
+    # 7 维度检查含逐段 entailment；180s 为事故后精调下限，不得调低
+    timeout_ms: 180000
     max_retries: 2
 
   - id: end

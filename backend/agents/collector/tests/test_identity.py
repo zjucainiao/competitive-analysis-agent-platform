@@ -18,6 +18,7 @@ from backend.agents.collector.agent import (
     _domain_label,
     _identity_aliases,
     _IdentityCheck,
+    _is_official,
 )
 from backend.agents.collector.tools import ScrapeResult, SearchHit
 from backend.schemas import AgentStatus, CollectDimension, RawSourceDoc
@@ -39,6 +40,50 @@ def test_domain_label_strips_www_and_tld() -> None:
     assert _domain_label("dingtalk.com") == "dingtalk"
     assert _domain_label("feishu.cn") == "feishu"
     assert _domain_label("notion.so") == "notion"
+
+
+def test_domain_label_handles_common_double_suffixes() -> None:
+    """H3：常见二级公共后缀（com.cn / co.uk）也要剥掉，取到真正的注册域主标签。"""
+    assert _domain_label("dingtalk.com.cn") == "dingtalk"
+    assert _domain_label("www.example.co.uk") == "example"
+
+
+# ---------- H3：_is_official 伪冒域名防护 ----------
+
+
+def test_is_official_rejects_lookalike_domains() -> None:
+    """H3：产品名只是 host 主标签的**子串**（notion-fans.xyz / mynotion.com）
+    绝不能判官方——过去的子串匹配会让伪冒域名直通 confirmed 0.9 + authority 0.95。"""
+    assert _is_official("https://notion-fans.xyz/pricing", "Notion", None) is False
+    assert _is_official("https://mynotion.com/", "Notion", None) is False
+    assert _is_official("https://notionvsasana.blogspot.com/post", "Notion", None) is False
+
+
+def test_is_official_rejects_endswith_bypass_on_official_url() -> None:
+    """H3：evilnotion.so 以官方域 notion.so 字面结尾，老的 host.endswith 判定会放行。"""
+    assert _is_official("https://evilnotion.so/", "Notion", "https://notion.so/") is False
+
+
+def test_is_official_accepts_exact_label_and_subdomains() -> None:
+    """合法官方域（含子域）不受收紧影响：注册域主标签精确等值即官方。"""
+    assert _is_official("https://www.notion.so/pricing", "Notion", "https://www.notion.so/") is True
+    assert _is_official("https://help.notion.so/docs", "Notion", "https://www.notion.so/") is True
+    # 无 official_url 时按产品名 slug 精确等值
+    assert _is_official("https://asana.com/features", "Asana", None) is True
+    # official_url 带常见双后缀也能等值匹配
+    assert _is_official("https://www.dingtalk.com.cn/x", "钉钉", "https://dingtalk.com.cn") is True
+
+
+def test_lookalike_domain_not_confirmed_by_heuristic_gate() -> None:
+    """H3 端到端：伪冒域名不再让启发式直通 confirmed，稀疏正文下停在 ambiguous 交 LLM。"""
+    status, _conf, _detected, decided = _assess_identity_heuristic(
+        text="Buy cheap templates for your favorite workspace here!",
+        title="Notion fan site",
+        url="https://notion-fans.xyz/",
+        product_name="Notion",
+        official_url="https://notion.so/",
+    )
+    assert (status, decided) == ("ambiguous", False)
 
 
 def test_identity_aliases_includes_name_and_domain_label() -> None:

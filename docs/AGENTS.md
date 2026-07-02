@@ -250,7 +250,8 @@ class RawSourceDoc(BaseModel):
     language:     str = "en"           # "en" / "zh"
 
     collected_at:        datetime
-    fetch_method:        Literal["search", "firecrawl", "playwright", "mock", "manual"]
+    fetch_method:        Literal["search", "firecrawl", "playwright", "mock", "manual",
+                                 "llm_synthesis"]  # llm_synthesis=LLM 合成文本，非真实抓取
     http_status:         int | None = None
     robots_allowed:      bool = True
     source_authority:    float = Field(ge=0, le=1, default=0.7)  # 官方页 0.95，UGC 0.6

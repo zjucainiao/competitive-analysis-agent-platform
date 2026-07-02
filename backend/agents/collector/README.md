@@ -31,7 +31,9 @@
 REVIEWS 维度（独立路径，依赖 LLM 内置联网搜索）：
    ├ L1：LLM 联网搜索（豆包 Seed EP / OpenAI web_search / Claude web_search）
    │     → _ReviewsFinding（overall_rating + themes + sample_quotes + sources）
-   │     → 每个 source 一条 fetch_method='search' 的 RawSourceDoc
+   │     → 每个 source 一条 fetch_method='llm_synthesis' 的 RawSourceDoc
+   │       （合成文本：identity=ambiguous、authority=0.4；无引用 URL 时
+   │        用 .invalid 标记 URI，不伪造 G2 等真实站点 URL）
    └ L2 兜底：_seed_review_hosts（G2/Capterra/TrustRadius slug 拼接）→ 走通用 scrape 链
 ```
 

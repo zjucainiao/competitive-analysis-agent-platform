@@ -978,6 +978,53 @@ def test_low_authority_quant_is_non_blocking() -> None:
     assert aggregate_verdict([issue], prior_count=0).blocking is False
 
 
+def test_synthesis_low_stored_authority_not_masked_by_correction() -> None:
+    """H1：LLM 合成证据（采集时被显式压低 source_authority=0.4、source_class=review）
+    用于口碑段落时，跨维度校正矩阵值（review×reviews=0.92）不得把它「抬回」高权威——
+    校正取 min(矩阵值, 存值) → 0.4 < 0.7 → 作为唯一支撑的量化段落浮出弱源 issue。"""
+    CheckerContext, EvidenceCompletenessChecker = _ec_checker()  # noqa: N806
+    inp = load_demo_input()
+    db = load_evidence_db()
+    eid = next(iter(db))
+    mod_db = dict(db)
+    mod_db[eid] = Evidence.model_validate(
+        {**db[eid].model_dump(mode="json"), "source_class": "review", "source_authority": 0.4}
+    )
+    inp.draft = inp.draft.model_copy(deep=True)
+    inp.draft.sections.append(
+        ReportSection(
+            section_id="sec_user_feedback",
+            title="用户口碑",
+            order=99,
+            paragraphs=[
+                ReportParagraph(
+                    paragraph_id="p_uf_synth",
+                    text="G2 综合评分 4.5/5。",
+                    claim_ids=[],
+                    evidence_ids=[eid],
+                    is_quantitative=True,
+                    is_soft_conclusion=False,
+                )
+            ],
+        )
+    )
+    res = EvidenceCompletenessChecker().run(
+        CheckerContext(
+            draft=inp.draft,
+            analysis=inp.analysis,
+            profiles=inp.profiles,
+            evidence_db=mod_db,
+        )
+    )
+    flagged = [
+        pid
+        for i in res.issues
+        if i.issue_id in ("iss_ec_low_authority", "iss_ec_low_authority_key")
+        for pid in i.required_inputs.get("paragraph_ids", [])
+    ]
+    assert "p_uf_synth" in flagged, "被压低权威的合成证据不应被跨维度校正抬回矩阵高值"
+
+
 # ---------- 10. _post_validate ----------
 
 

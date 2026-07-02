@@ -190,42 +190,58 @@ def _host_of(url: str) -> str:
 
 
 def _is_official(url: str, product_name: str, official_url: str | None) -> bool:
-    host = _host_of(url)
+    """URL 是否官方域。只做**注册域主标签的精确等值**匹配，不做子串包含。
+
+    动机（H3）：过去「产品名子串 in host」+「host.endswith(官方域)」两条模糊路径，
+    会让 notion-fans.xyz / evilnotion.so 这类伪冒域名直通官方判定
+    （→ identity confirmed 0.9 + authority 0.95），污染整条证据链。现在：
+    - 有 official_url：其注册域主标签与 URL 主标签精确相等才算官方
+      （help.notion.so 与 notion.so 同标签 'notion'，子域仍放行）；
+    - 兜底：URL 主标签与产品名 slug（去空格 / 连字符两种变体）精确相等。
+    """
+    label = _domain_label(_host_of(url))
+    if not label:
+        return False
     if official_url:
-        official_host = _host_of(official_url)
-        if official_host and host.endswith(official_host):
+        official_label = _domain_label(_host_of(official_url))
+        if official_label and label == official_label:
             return True
-    # 模糊匹配：产品名出现在 host 内
-    needle = product_name.lower().replace(" ", "")
-    return bool(needle) and needle in host.replace(".", "")
+    pn = (product_name or "").strip().lower()
+    if not pn:
+        return False
+    return label in {pn.replace(" ", ""), pn.replace(" ", "-")}
 
 
 # ---------- 产品身份校验（启发式 gate） ----------
 
-# 常见公共后缀，取域名主标签时跳过（无需引 tldextract 这种重依赖）。
-_COMMON_TLDS = frozenset(
-    {"com", "cn", "net", "org", "io", "co", "ai", "app", "dev", "so", "me", "xyz"}
-)
+# 常见二级公共后缀（co.uk / com.cn / ac.jp / gov.uk …），取注册域主标签时再剥一层。
+# 启发式局限：不引 tldextract，覆盖不了完整 PSL（如少见的多级公共后缀 / 私有后缀），
+# 但对「官方域等值判定」足够——漏剥只会让判定更严（误判非官方），不会放行伪冒域。
+_SECOND_LEVEL_SUFFIXES = frozenset({"co", "com", "net", "org", "gov", "ac", "edu"})
 # 启发式「确属目标产品」所需的正文别名命中次数下限。
 _IDENTITY_MIN_BODY_HITS = 2
 
 
 def _domain_label(host: str) -> str:
-    """取域名的可注册主标签：www.dingtalk.com / dingtalk.com → 'dingtalk'。
+    """取域名的可注册主标签：www.dingtalk.com → 'dingtalk'、
+    notion-fans.xyz → 'notion-fans'、example.co.uk → 'example'。
 
-    简化实现：去掉 www. 前缀，从右往左跳过公共后缀，返回第一个非后缀段。
+    简化实现（不依赖 PSL）：去 userinfo/端口 与 www. 前缀 → 去最右段（必是 TLD）→
+    若剩余最右段是常见二级公共后缀再剥一层 → 取剩余最右段。
     """
-    host = (host or "").lower().strip().lstrip(".")
+    host = (host or "").lower().strip().strip(".")
+    host = host.rsplit("@", 1)[-1].split(":", 1)[0]  # 去 userinfo / 端口
     if host.startswith("www."):
         host = host[4:]
     parts = [p for p in host.split(".") if p]
     if not parts:
         return ""
-    # 从右往左找第一个不是公共后缀的段
-    for p in reversed(parts):
-        if p not in _COMMON_TLDS:
-            return p
-    return parts[0]
+    if len(parts) == 1:
+        return parts[0]
+    parts = parts[:-1]  # 最右段必是 TLD
+    if len(parts) >= 2 and parts[-1] in _SECOND_LEVEL_SUFFIXES:
+        parts = parts[:-1]  # 常见双后缀：com.cn / co.uk / ac.jp …
+    return parts[-1]
 
 
 def _identity_aliases(product_name: str, official_url: str | None) -> set[str]:
@@ -354,6 +370,22 @@ def _short_text(text: str) -> bool:
 def _product_slug(product_name: str) -> str:
     """简易 slug：lowercase + 空白转连字符。G2 等评论站常用此约定。"""
     return product_name.strip().lower().replace(" ", "-")
+
+
+# LLM 合成证据的权威度（H1）：内容出自模型生成而非真实抓取，未经独立验证
+# （provider 无联网能力时可能整条是参数记忆幻觉）。显著低于 QA 的弱源阈值 0.7，
+# 保证合成证据作为数字/事实唯一支撑时被 evidence_completeness 浮出。
+LLM_SYNTHESIS_AUTHORITY = 0.4
+
+
+def _synthesis_marker_url(product_name: str) -> str:
+    """LLM 未给引用 URL 时的合成标记 URI（H1）。
+
+    用 RFC 2606 保留的 .invalid 顶级域，保证永不指向真实站点——禁止再伪造
+    G2 等真实站点 URL 冒充可溯源来源（伪造 URL 会让下游把合成文本当真实抓取）。
+    """
+    slug = _product_slug(product_name) or "unknown"
+    return f"https://llm-synthesis.invalid/user-reviews/{slug}"
 
 
 def _seed_review_hosts(product_name: str) -> list[SearchHit]:
@@ -1273,10 +1305,13 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
     ) -> list[RawSourceDoc]:
         """把 LLM 的 _ReviewsFinding 转成 RawSourceDoc 列表。
 
-        - 有 sources：每个 source 一条 RawSourceDoc，raw_text 含该来源摘要 +
-          全局 themes/quotes/rating。
-        - 没 sources 但有 overall_rating：造一条聚合 doc，source_url 用第一个
-          可用的 review host（G2）作为代表，标记 fetch_method='search'。
+        产物是**LLM 合成文本**而非真实抓取（H1），契约上必须可区分、可降权：
+        - 有 sources：每个 source 一条 RawSourceDoc，保留 LLM 报告的真实引用 URL
+          （provider 真联网时保持可溯源），raw_text 含该来源摘要 + 全局
+          themes/quotes/rating；
+        - 没 sources 但有 overall_rating：造一条聚合 doc，source_url 用 .invalid
+          合成标记 URI——**不伪造** G2 等真实站点 URL；
+        - 两种情况都标 fetch_method='llm_synthesis'、identity ambiguous、低权威。
         """
         docs: list[RawSourceDoc] = []
         common_lines: list[str] = []
@@ -1294,10 +1329,14 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             )
         common_text = "\n".join(common_lines)
 
+        # 区分「LLM 报告了引用 URL」与「完全无来源的纯聚合合成」：
+        # 前者保留 URL 与按 URL 判定的 source_class；后者用 .invalid 标记 URI、
+        # source_class=None（没有可验证的来源类型）、身份置信更低。
+        has_cited_sources = bool(finding.sources)
         sources_to_emit = finding.sources or [
             _ReviewSource(
-                name="aggregated",
-                url=f"https://www.g2.com/products/{_product_slug(inp.product_name)}/reviews",
+                name="llm_synthesis",
+                url=_synthesis_marker_url(inp.product_name),
                 excerpt="LLM-synthesized aggregate; no individual source URL provided.",
             )
         ]
@@ -1331,21 +1370,28 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
                     summary=None,
                     language="en",
                     collected_at=datetime.now(tz=UTC),
-                    # LLM 联网搜索的产物归类为 "search"：契约层面与 Tavily / Serper
-                    # 等"搜索引擎候选 URL"一致语义。
-                    fetch_method="search",
+                    # 独立值 "llm_synthesis"（H1）：这是模型合成文本，不是搜索引擎
+                    # 候选 URL 的真实抓取，下游必须能区分。
+                    fetch_method="llm_synthesis",
                     http_status=None,
                     robots_allowed=True,
-                    # 相对语义：评论站在 user_reviews 维度是**正典源**（高权威），
-                    # 不再沿用「评论站一律低于官方页」的绝对标量。
-                    source_authority=authority_for("review", CollectDimension.REVIEWS),
+                    # 合成内容未经独立验证 → 权威度显著低于任何真实来源（H1）。
+                    # 不再按「评论站×reviews=0.92」正典值高企——那是给真实抓取的。
+                    source_authority=LLM_SYNTHESIS_AUTHORITY,
                     detected_paywall=False,
                     detected_outdated=False,
-                    # LLM 联网搜索是按「{product} reviews」定向找的，身份默认成立
-                    detected_product_name=inp.product_name,
-                    identity_confidence=0.85,
-                    identity_status="confirmed",
-                    source_class="review",
+                    # 身份不硬编码 confirmed（H1）：在合成文本上跑身份校验是循环
+                    # 论证——文本由同一个 LLM 按「{product} reviews」生成、必然提到
+                    # 目标产品。保守停在 ambiguous（QA identity_consistency 会浮出
+                    # 为 minor，不强返工）；带引用 URL 的置信略高于纯聚合合成。
+                    detected_product_name=None,
+                    identity_confidence=0.5 if has_cited_sources else 0.3,
+                    identity_status="ambiguous",
+                    source_class=(
+                        _source_class(src.url, inp.product_name, inp.official_url)
+                        if has_cited_sources
+                        else None
+                    ),
                     trust_level="untrusted",
                     tainted=_taint.tainted,
                     taint_reasons=_taint.matched_patterns,

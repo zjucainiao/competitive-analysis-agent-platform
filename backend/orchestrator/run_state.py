@@ -124,6 +124,12 @@ class RunState(BaseModel):
     # ``reporter`` / ``qa``。值为用户改写的 prompt 文本，native 节点取出后作为
     # ``user_prompt_override`` 传给 run_agent_node（其会注入 ContextVar→system prompt）。
     prompt_override_by_node: dict[str, str] = Field(default_factory=dict)
+    # Planner 产物指令集（P1-PLANCONSUME）：_run_native 从 DAGPlan 经
+    # extract_plan_directives 提取后写入（last-write-wins，无 reducer）。形如
+    # {"products": {显示名: {"official_url", "collect_dims"}}, "nodes": {agent: {"timeout_ms",
+    # "max_retries"}}}，纯 dict/str/int/list —— 经得起 checkpoint serde 往返。
+    # 旧 checkpoint 无此键 → 默认空 dict，消费方回退现状（向后兼容）。
+    plan_directives: dict = Field(default_factory=dict)
     aborted: bool = False
     abort_reason: str = ""
 

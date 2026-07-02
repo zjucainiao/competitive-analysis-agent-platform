@@ -154,7 +154,10 @@ class RawSourceDoc(BaseModel):
     language: str = "en"
 
     collected_at: datetime
-    fetch_method: Literal["search", "firecrawl", "playwright", "mock", "manual"]
+    # fetch_method 语义：search/firecrawl/playwright/manual=真实抓取链；mock=测试夹具；
+    # llm_synthesis=LLM 合成文本（REVIEWS 维度联网搜索路径的产物，**非真实抓取**，
+    # 下游必须区别消费：低权威、身份不作 confirmed）。
+    fetch_method: Literal["search", "firecrawl", "playwright", "mock", "manual", "llm_synthesis"]
     http_status: int | None = None
     robots_allowed: bool = True
     source_authority: float = Field(ge=0, le=1, default=0.7)

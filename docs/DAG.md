@@ -21,7 +21,9 @@
 | 并行加速 | `collect_dispatch` / `extract_dispatch` 经 `Send` 对每个竞品并行扇出（互不阻塞） |
 
 > 行业适配靠**固定模板选择**（§4.2 `industry_id → 模板`），不是运行时动态生成节点。自适应 LLM
-> Planner（§5）仅存在于 legacy 体系且非默认路径。
+> Planner（§5）非默认路径。native 引擎不改变拓扑，但**消费** `DAGPlan` 的节点元数据：官网种子
+> `official_url`、采集维度、每节点超时/重试经 `extract_plan_directives`
+> （`backend/orchestrator/plan_directives.py`）折叠进 `RunState.plan_directives`，由各节点消费（§6.3）。
 
 ---
 
@@ -126,7 +128,10 @@ native 图对每个竞品产品**并行**采集→抽取，再汇聚到全局 an
 ```
 
 > analyst 是**单个全局节点**（聚合全部 profile 做多维对比），不是「每维度一个 analyst 节点」。采集维度
-> 由 `nodes.py:64` 的 `_DEFAULT_COLLECT_DIMS`（homepage/features/pricing/help_docs/user_reviews）固定。
+> 优先取 plan 的 `collect_dimensions`（经 `RunState.plan_directives`，由 `collect_dispatch` 打进 Send
+> payload——Send-target 看不到全局 state）；plan 缺省时回退 `nodes.py` 的 `_DEFAULT_COLLECT_DIMS`
+> （homepage/features/pricing/help_docs/user_reviews）。官网种子 `official_url` 同路径流入 collector
+> input（命中即免搜索兜底）。
 
 ### 4.2 行业模板（industry_id → 模板）
 
@@ -149,15 +154,18 @@ backend/orchestrator/templates/
 ```
 
 > native 引擎按选定 industry 装配固定拓扑；YAML 模板（含 `for_each`/`depends_on` 展开、`NodeType`
-> 节点）由 **legacy** `Planner._expand`（`planner.py:135`）消费成 `DAGPlan`。两者共享 industry→模板映射。
+> 节点）由 `Planner._expand`（`planner.py:135`）消费成 `DAGPlan`。native 引擎不用 `DAGPlan` 定拓扑，
+> 但会经 `extract_plan_directives` 消费其节点元数据（模板 `product_urls` 官网种子 /
+> `collect_dimensions` / 超时重试）。两者共享 industry→模板映射。
 
 ---
 
-## 5. 自适应 Planner（仅 legacy，非默认）
+## 5. 自适应 Planner（非默认）
 
-> 仅在 legacy 体系存在，且**不是默认路径**。native 引擎不调用它。
+> **不是默认路径**（默认 `mode="template"`）。native 引擎不直接调用 Planner，但两种模式产出的
+> `DAGPlan` 元数据都会被 native 经 `extract_plan_directives` 消费（§4.2、§6.3）。
 
-legacy `Planner` 支持 `mode="adaptive"`（`backend/orchestrator/planner.py:74`，`AdaptivePlanner`，需在
+`Planner` 支持 `mode="adaptive"`（`backend/orchestrator/planner.py:74`，`AdaptivePlanner`，需在
 `__init__` 传 `llm`），用 LLM 推断 URL + 维度，输出仍是 `DAGPlan`。`mode="auto"` 先试 adaptive 失败回退
 template；默认 `mode="template"`。
 
@@ -171,17 +179,24 @@ template；默认 `mode="template"`。
 - 并发上限由 LangGraph 运行时与各 Agent 内部约束（如 collector 的 `constraints.timeout_seconds` 与抓取
   上限）决定，编排层不再单设固定并发数。
 
-### 6.2 失败处理（无 native 节点级重试循环）
+### 6.2 失败处理
 
-- native 节点**不**做指数退避重试。`build_*_input` 因上游缺失抛 `BuildInputError` 时 fail-soft：
+- 重试发生在 `run_agent_node` 内部（指数退避）：普通失败按 `max_retries` 重试——优先取 plan 的
+  `max_retries`（经 `plan_directives`），plan 缺省时为 3；**超时不重试**（`TimeoutError` 直接
+  FAILED，`code=LLM_TIMEOUT`——同步 invoke 无协作式取消，重试会与僵尸线程并发烧配额）。
+  图层面无节点级重试循环。
+- `build_*_input` 因上游缺失抛 `BuildInputError` 时 fail-soft：
   返回一条 `status="failed"` 的 `NodeRun`（`_build_failed_run`，`nodes.py:104`），不崩图。
 - reporter/qa 见上游 `None` 时早退，最终 `qa` 节点统一标 `aborted`（`nodes.py:408`）优雅收尾。
 
 ### 6.3 超时
 
-节点级超时由 `_NODE_TIMEOUT_MS`（`backend/orchestrator/nodes.py:50`）定义，喂给 `run_agent_node`：
+节点级超时**优先取 plan**：planner 精调的 `timeout_ms` 经 `extract_plan_directives` 进
+`RunState.plan_directives`（Send worker 由 dispatch 打进 payload），喂给 `run_agent_node`。
+plan 缺省时回退下限表 `NODE_TIMEOUT_FLOOR_MS`（`backend/orchestrator/plan_directives.py`）；
+低于下限的 plan 值会在提取时被钳到下限（该表是「节点超时连锁失败」事故后精调的下限）：
 
-| 节点 | 超时 |
+| 节点 | 超时下限 |
 |---|---|
 | collector | 300s |
 | extractor | 300s |
@@ -190,7 +205,8 @@ template；默认 `mode="template"`。
 | qa | 180s |
 
 > 真实采集一个产品可触发 100+ 次 LLM 调用（search + 多页抓取 + page_type 分类 + 身份校验），
-> 故 collector/extractor 给到 300s；过短会撞超时→节点 failed→下游连锁「upstream output missing」。
+> 故 collector/extractor 下限 300s；过短会撞超时→节点 failed→下游连锁「upstream output missing」。
+> 高于下限的 plan 值保留（如 adaptive planner 给 reporter 的 600s）。
 
 ### 6.4 降级
 
@@ -276,7 +292,8 @@ dispatch-loop。
 ```python
 class Orchestrator:
     def plan(self, project, *, template_id=None) -> DAGPlan:
-        """加载 YAML 模板 → DAGPlan（legacy 形状；native 投影另算）。"""
+        """加载 YAML 模板 → DAGPlan（legacy 形状；native 投影另算，
+        但其元数据经 extract_plan_directives 被 native 消费）。"""
 
     async def run(self, plan, project, *, run_id=None, seed_state=None) -> AsyncIterator[NodeExecutionResult]:
         """ORCH_ENGINE=native（默认）→ _run_native；=legacy → dispatch-loop。"""
@@ -297,15 +314,16 @@ class Orchestrator:
 
 ```
 backend/orchestrator/
-├── graph.py          # build_native_graph：装配 StateGraph(RunState)
-├── nodes.py          # make_nodes：7 个节点函数 + _NODE_TIMEOUT_MS
-├── routing.py        # decide_qa_route：QA verdict → (goto, state_update)
-├── run_state.py      # RunState / NodeRun / reducer / versioned_ref / latest_output
-├── inputs.py         # build_*_input：组装各 Agent 输入（fail-soft）
-├── run_agent.py      # run_agent_node：跑单个 Agent + 超时
-├── projection.py     # outputs/history → 前端 DAGPlan 投影
-├── orchestrator.py   # Orchestrator.run 分流 + _run_native / _resume_native
-└── templates/        # 行业 YAML 模板（industry→模板，§4.2）
+├── graph.py            # build_native_graph：装配 StateGraph(RunState)
+├── nodes.py            # make_nodes：7 个节点函数（消费 plan_directives）
+├── plan_directives.py  # extract_plan_directives / resolve_node_limits / NODE_TIMEOUT_FLOOR_MS
+├── routing.py          # decide_qa_route：QA verdict → (goto, state_update)
+├── run_state.py        # RunState / NodeRun / reducer / versioned_ref / latest_output
+├── inputs.py           # build_*_input：组装各 Agent 输入（fail-soft）
+├── run_agent.py        # run_agent_node：跑单个 Agent + 重试/超时
+├── projection.py       # outputs/history → 前端 DAGPlan 投影
+├── orchestrator.py     # Orchestrator.run 分流 + _run_native / _resume_native
+└── templates/          # 行业 YAML 模板（industry→模板，§4.2）
 ```
 
 **legacy 引擎（`ORCH_ENGINE=legacy`）**：`orchestrator.py`（dispatch-loop）、`state.py`

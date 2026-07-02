@@ -273,8 +273,12 @@ class EvidenceCompletenessChecker(BaseChecker):
                 classes = {e.source_class for e in evs if e.source_class is not None}
                 if len(classes) >= 2:
                     continue  # 多来源类型互证 → 豁免
+                # 校正取 min(矩阵值, 存值)：正常抓取证据的存值本就出自同一矩阵，min 不
+                # 改变其结果；但 LLM 合成证据在采集时被**显式压低** source_authority
+                # （< 矩阵值），跨维度校正不得把它「抬回」高权威——否则合成文本会以
+                # 评论站正典权威（0.92）冒充数字/事实的可信支撑（H1）。
                 corrected = [
-                    authority_for(e.source_class, collect_dim)
+                    min(authority_for(e.source_class, collect_dim), e.source_authority)
                     if (e.source_class is not None and collect_dim is not None)
                     else e.source_authority
                     for e in evs

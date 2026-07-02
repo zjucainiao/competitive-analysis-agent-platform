@@ -506,8 +506,11 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
                 tokens_input += t_in
                 tokens_output += t_out
                 if cons_claims:
-                    # consolidation 的 source 没有单一归属，挂在 raw_sources[0] 上仅用于
-                    # 元组占位（EvidenceLinker 仍按 source_quote 反查命中哪一篇）。
+                    # 【隐式依赖，勿破坏】consolidation 的 claim 没有单一 source 归属，
+                    # 这里挂 raw_sources[0] 仅作元组占位。下游 _bind_and_assemble 会用
+                    # EvidenceLinker 对全部 raw_sources 反查 source_quote 真实命中哪一篇，
+                    # 证据的 source_id / content / location 全部以 link 结果为准；
+                    # 占位 source 不参与任何证据归属或装配决策。
                     placeholder = inp.raw_sources[0]
                     for cc in cons_claims:
                         all_claims.append((cc, placeholder))
@@ -937,23 +940,30 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         bucket: dict[str, list[tuple[_RawClaim, RawSourceDoc, LinkResult]]] = defaultdict(list)
         # 用 content_hash 去重 evidence，命中同一片文本只入一次
         evidence_by_hash: dict[str, Evidence] = {}
+        # 装配阶段按 claim.source_quote 反查 evidence_id 的表：
+        # fuzzy 命中后 Evidence.content 是原文窗口（≠ LLM 的 source_quote），
+        # 因此必须同时登记 quote hash 与 content hash 两个键。
+        ev_by_quote: dict[str, str] = {}
 
         for claim, source in claims:
+            # 注意：这里对**全部** raw_sources 反查，而非只查元组里的 source——
+            # consolidation 补漏的 claims 挂的是 raw_sources[0] 占位（见 _run），
+            # 证据归属一律以 link.source_id（linker 真实命中的 source）为准。
             link = self.linker.link(claim.source_quote, inp.raw_sources)
             if not link.matched and claim.source_quote.strip():
                 unmatched_quotes.append(claim.source_quote.strip())
             bucket[claim.field_path].append((claim, source, link))
             if link.matched and link.source_id is not None:
-                content = (
-                    link.matched_text
-                    if link.matched_text and link.confidence >= 0.9
-                    else claim.source_quote
-                )
-                content = content.strip()
+                # 证据原文承诺：content 一律取 linker 定位到的原文切片
+                # （精确命中=原文 quote 区间；fuzzy 命中=原文相似窗口），
+                # 绝不落 LLM 的 source_quote——fuzzy 时后者可能是转述。
+                content = (link.matched_text or "").strip()
                 if not content:
                     continue
                 h = content_hash_for(content)
+                quote_h = content_hash_for(claim.source_quote.strip())
                 if h in evidence_by_hash:
+                    ev_by_quote.setdefault(quote_h, evidence_by_hash[h].evidence_id)
                     continue
                 ev = self._mint_evidence(
                     inp=inp,
@@ -962,13 +972,19 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
                     tag=claim.field_path,
                 )
                 evidence_by_hash[h] = ev
+                ev_by_quote[h] = ev.evidence_id
+                ev_by_quote.setdefault(quote_h, ev.evidence_id)
                 evidences.append(ev)
 
         # 装配各 section
-        basic_info, bi_conf, bi_status, bi_refs = self._assemble_basic_info(inp, bucket, evidences)
-        features, ft_conf, ft_status, ft_refs = self._assemble_features(bucket, evidences)
-        pricing, pr_conf, pr_status, pr_refs = self._assemble_pricing(bucket, evidences)
-        user_feedback, uf_conf, uf_status, uf_refs = self._assemble_user_feedback(bucket, evidences)
+        basic_info, bi_conf, bi_status, bi_refs = self._assemble_basic_info(
+            inp, bucket, ev_by_quote
+        )
+        features, ft_conf, ft_status, ft_refs = self._assemble_features(bucket, ev_by_quote)
+        pricing, pr_conf, pr_status, pr_refs = self._assemble_pricing(bucket, ev_by_quote)
+        user_feedback, uf_conf, uf_status, uf_refs = self._assemble_user_feedback(
+            bucket, ev_by_quote
+        )
 
         # 套回 evidence_refs（落在子模型内）
         basic_info = basic_info.model_copy(update={"evidence_refs": bi_refs})
@@ -1010,14 +1026,13 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         self,
         inp: ExtractorInput,
         bucket: dict[str, list[tuple[_RawClaim, RawSourceDoc, LinkResult]]],
-        evidences: list[Evidence],
+        ev_by_quote: dict[str, str],
     ) -> tuple[
         ProductBasicInfo,
         dict[str, float],
         dict[str, FieldStatus],
         dict[str, list[str]],
     ]:
-        ev_by_quote = self._evidence_lookup_table(evidences)
         conf: dict[str, float] = {}
         status: dict[str, FieldStatus] = {}
         refs: dict[str, list[str]] = defaultdict(list)
@@ -1097,9 +1112,8 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
     def _assemble_features(
         self,
         bucket: dict[str, list[tuple[_RawClaim, RawSourceDoc, LinkResult]]],
-        evidences: list[Evidence],
+        ev_by_quote: dict[str, str],
     ) -> tuple[FeatureProfile, dict[str, float], dict[str, FieldStatus], dict[str, list[str]]]:
-        ev_by_quote = self._evidence_lookup_table(evidences)
         conf: dict[str, float] = {}
         status: dict[str, FieldStatus] = {}
         refs: dict[str, list[str]] = defaultdict(list)
@@ -1172,9 +1186,8 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
     def _assemble_pricing(
         self,
         bucket: dict[str, list[tuple[_RawClaim, RawSourceDoc, LinkResult]]],
-        evidences: list[Evidence],
+        ev_by_quote: dict[str, str],
     ) -> tuple[PricingProfile, dict[str, float], dict[str, FieldStatus], dict[str, list[str]]]:
-        ev_by_quote = self._evidence_lookup_table(evidences)
         conf: dict[str, float] = {}
         status: dict[str, FieldStatus] = {}
         refs: dict[str, list[str]] = defaultdict(list)
@@ -1277,14 +1290,13 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
     def _assemble_user_feedback(
         self,
         bucket: dict[str, list[tuple[_RawClaim, RawSourceDoc, LinkResult]]],
-        evidences: list[Evidence],
+        ev_by_quote: dict[str, str],
     ) -> tuple[
         UserFeedbackProfile,
         dict[str, float],
         dict[str, FieldStatus],
         dict[str, list[str]],
     ]:
-        ev_by_quote = self._evidence_lookup_table(evidences)
         conf: dict[str, float] = {}
         status: dict[str, FieldStatus] = {}
         refs: dict[str, list[str]] = defaultdict(list)
@@ -1384,7 +1396,14 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         ev_by_quote: dict[str, str],
     ) -> None:
         claim, _src, link = best
-        conf[path] = float(claim.confidence)
+        # 置信分级诚实：字段置信不得高于其证据链路置信——fuzzy 命中
+        # （link.confidence 被 FUZZY_CONFIDENCE_CAP 封顶）会拉低字段置信，
+        # 精确命中（link.confidence=1.0）不受影响；未命中沿用 claim 自评。
+        conf[path] = (
+            min(float(claim.confidence), float(link.confidence))
+            if link.matched
+            else float(claim.confidence)
+        )
         status[path] = FieldStatus.VERIFIED if link.matched else FieldStatus.UNVERIFIED
         if link.matched:
             ev_ids = self._ev_ids_for(claim.source_quote, ev_by_quote)
@@ -1434,10 +1453,6 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         return [ev_id] if ev_id else []
 
     @staticmethod
-    def _evidence_lookup_table(evidences: list[Evidence]) -> dict[str, str]:
-        return {ev.content_hash: ev.evidence_id for ev in evidences}
-
-    @staticmethod
     def _stringify(v: Any) -> str:
         if isinstance(v, (str, int, float, bool)):
             return str(v).strip().lower()
@@ -1458,7 +1473,9 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
             (s for s in inp.raw_sources if s.source_id == link.source_id),
             inp.raw_sources[0],
         )
-        content = quote.strip()
+        # 证据原文承诺：命中时 content 一律取 linker 的原文切片（matched_text），
+        # quote 仅在无 matched_text 的极端情况兜底——fuzzy 命中的 LLM 转述绝不落库。
+        content = (link.matched_text or quote).strip() if link.matched else quote.strip()
         return Evidence(
             evidence_id=evidence_id_for(content, src.source_id, salt=tag),
             source_id=src.source_id,

@@ -15,7 +15,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel
 
@@ -128,19 +128,58 @@ class TextChunker:
 
 @dataclass
 class LinkResult:
-    """source_quote 反向定位的结果。"""
+    """source_quote 反向定位的结果。
+
+    matched=True 时 ``matched_text`` **必须**是源文档 raw_text 的逐字切片
+    （证据原文承诺），且 ``location.char_start/char_end`` 与之精确对应。
+    ``match_type`` 区分命中级别：exact（规范化后逐字命中）/ fuzzy（n-gram
+    相似窗口命中）/ none（未命中）。
+    """
 
     source_id: str | None
     matched_text: str | None
     location: EvidenceLocation
     confidence: float
     matched: bool
+    match_type: str = "none"  # "exact" | "fuzzy" | "none"
+
+
+_QUOTE_TRANSLATION = {"“": '"', "”": '"', "’": "'"}
+
+
+def _normalize_with_map(s: str) -> tuple[str, list[int]]:
+    """规范化文本并返回「规范化位置 → 原文位置」映射。
+
+    规范化规则与 :func:`_normalize_for_match` 完全一致（单一实现来源）：
+    统一引号、连续空白折叠成单空格、去首尾空白。
+    ``mapping[i]`` 是规范化文本第 i 个字符在原文中的下标，用于把规范化
+    坐标精确映射回原文，替代旧的 12 字符锚点近似（空白不一致时会切错）。
+    """
+    out_chars: list[str] = []
+    mapping: list[int] = []
+    prev_space = True  # 视作开头已有空白 → 直接吞掉前导空白（等价 lstrip）
+    for i, ch in enumerate(s):
+        ch = _QUOTE_TRANSLATION.get(ch, ch)
+        if ch.isspace():
+            if prev_space:
+                continue
+            out_chars.append(" ")
+            mapping.append(i)
+            prev_space = True
+        else:
+            out_chars.append(ch)
+            mapping.append(i)
+            prev_space = False
+    # 等价 rstrip：去掉折叠后残留的尾部单空格
+    if out_chars and out_chars[-1] == " ":
+        out_chars.pop()
+        mapping.pop()
+    return "".join(out_chars), mapping
 
 
 def _normalize_for_match(s: str) -> str:
     """规范化文本：去多余空白、统一引号。仅用于匹配，不用于落库。"""
-    s = s.replace("“", '"').replace("”", '"').replace("’", "'")
-    return re.sub(r"\s+", " ", s).strip()
+    return _normalize_with_map(s)[0]
 
 
 def _ngrams(s: str, n: int = 3) -> set[str]:
@@ -162,13 +201,19 @@ class EvidenceLinker:
     """把 LLM 给出的 source_quote 反向定位到 raw_source 文本中。
 
     匹配链路（按优先级）：
-    1. **精确 substring**（norm 后比对，对应原始 raw_text 的位置仍按 lower 命中）
+    1. **精确 substring**（规范化后比对；用规范化映射把命中区间精确映射回原文）
     2. **Sliding-window n-gram Jaccard**（≥ ``fuzzy_threshold`` 视为命中）
     3. 都不命中 → matched=False，调用方需把 source_quote 加入 unmatched_quotes
 
-    返回 ``LinkResult.location`` 总是带原文 char_start / char_end（精确命中才有）。
-    fuzzy 命中时 location 标 page_section 但不带精确偏移，避免给出错误位置。
+    「证据原文逐字」不变量：只要 matched=True，``matched_text`` 一定是原文
+    raw_text 的逐字切片，``location.char_start/char_end`` 与之精确对应——
+    fuzzy 命中返回的是命中的**原文窗口**（LLM 的转述 quote 绝不透出），
+    且 confidence 被 :attr:`FUZZY_CONFIDENCE_CAP` 封顶，诚实低于精确命中的 1.0。
     """
+
+    # fuzzy 命中的置信上限：n-gram 集合相同但语序不同也可能打满 Jaccard，
+    # 但它终究不是逐字定位到 quote 本身，置信必须与精确命中（1.0）拉开差距。
+    FUZZY_CONFIDENCE_CAP: ClassVar[float] = 0.85
 
     def __init__(
         self,
@@ -191,77 +236,77 @@ class EvidenceLinker:
                 matched=False,
             )
         norm_quote = _normalize_for_match(quote)
-        # 1. 精确 substring
+        # 每个 source 的规范化文本 + 位置映射只算一次，精确/模糊两阶段共用
+        normalized: list[tuple[RawSourceDoc, str, str, list[int]]] = []
         for src in sources:
             text = src.raw_text or ""
-            norm_text = _normalize_for_match(text)
+            norm_text, mapping = _normalize_with_map(text)
+            normalized.append((src, text, norm_text, mapping))
+
+        # 1. 精确 substring：规范化命中后用映射取回原文精确区间
+        for src, text, norm_text, mapping in normalized:
             idx = norm_text.lower().find(norm_quote.lower())
-            if idx >= 0:
-                # 回到原文找 substring：用 norm_quote 在 lower 上找一次
-                raw_idx = self._original_index(text, norm_quote)
-                if raw_idx is not None:
-                    return LinkResult(
-                        source_id=src.source_id,
-                        matched_text=text[raw_idx : raw_idx + len(norm_quote)],
-                        location=EvidenceLocation(
-                            char_start=raw_idx,
-                            char_end=raw_idx + len(norm_quote),
-                        ),
-                        confidence=1.0,
-                        matched=True,
-                    )
+            if idx < 0:
+                continue
+            start, end = self._map_to_original(mapping, idx, idx + len(norm_quote))
+            return LinkResult(
+                source_id=src.source_id,
+                matched_text=text[start:end],
+                location=EvidenceLocation(char_start=start, char_end=end),
+                confidence=1.0,
+                matched=True,
+                match_type="exact",
+            )
+
         # 2. fuzzy（n-gram Jaccard sliding window）
         quote_grams = _ngrams(norm_quote)
-        best: tuple[float, RawSourceDoc | None, str | None] = (0.0, None, None)
+        best_score = 0.0
+        best_hit: tuple[RawSourceDoc, str, str, list[int], int] | None = None
         win_size = max(len(norm_quote), 40)
-        for src in sources:
-            text = src.raw_text or ""
-            norm_text = _normalize_for_match(text)
+        for src, text, norm_text, mapping in normalized:
             for i in range(0, max(1, len(norm_text) - win_size + 1), self.window_step):
                 window = norm_text[i : i + win_size]
                 score = _jaccard(quote_grams, _ngrams(window))
-                if score > best[0]:
-                    best = (score, src, window)
-        if best[0] >= self.fuzzy_threshold and best[1] is not None:
+                if score > best_score:
+                    best_score = score
+                    best_hit = (src, text, norm_text, mapping, i)
+        if best_score >= self.fuzzy_threshold and best_hit is not None:
+            src, text, norm_text, mapping, win_start = best_hit
+            win_end = min(win_start + win_size, len(norm_text))
+            # 掐掉窗口两端的空格再映射，保证原文切片首尾都是实字符
+            while win_start < win_end and norm_text[win_start] == " ":
+                win_start += 1
+            while win_end > win_start and norm_text[win_end - 1] == " ":
+                win_end -= 1
+            start, end = self._map_to_original(mapping, win_start, win_end)
+            # 证据内容 = 命中的原文窗口（逐字），绝不是 LLM 的 source_quote
             return LinkResult(
-                source_id=best[1].source_id,
-                matched_text=best[2],
-                location=EvidenceLocation(page_section=None),
-                confidence=best[0],
+                source_id=src.source_id,
+                matched_text=text[start:end],
+                location=EvidenceLocation(char_start=start, char_end=end),
+                confidence=min(best_score, self.FUZZY_CONFIDENCE_CAP),
                 matched=True,
+                match_type="fuzzy",
             )
         return LinkResult(
             source_id=None,
             matched_text=None,
             location=EvidenceLocation(),
-            confidence=best[0],
+            confidence=best_score,
             matched=False,
         )
 
     @staticmethod
-    def _original_index(text: str, norm_needle: str) -> int | None:
-        """在原文中找 norm_needle 第一次出现的位置。
+    def _map_to_original(mapping: list[int], norm_start: int, norm_end: int) -> tuple[int, int]:
+        """把规范化区间 [norm_start, norm_end) 映射回原文区间 [start, end)。
 
-        norm_needle 已经按 _normalize_for_match 处理；原文可能有多余空白 / 大小写差异。
-        策略：先按 needle 中第一个非空 token 在 text 中检索锚点，
-        然后用 normalized 比较窗口。简单可靠优于完美。
+        mapping[i] 是规范化第 i 个字符的原文下标；区间末字符取其原文下标 +1。
+        调用方保证区间非空且首尾是非空白字符（规范化 quote 已 strip、
+        fuzzy 窗口已掐边），因此切片首尾必为原文实字符。
         """
-        if not norm_needle:
-            return None
-        # 锚点：needle 前 12 个非空白 char 在 text 中的位置
-        anchor = norm_needle[: min(len(norm_needle), 12)]
-        # 在原文中按 lower 模糊匹配
-        text_lower = text.lower()
-        idx = text_lower.find(anchor.lower())
-        if idx >= 0:
-            return idx
-        # 再试 needle 中间的 12 char（避开开头被换行打断）
-        mid = len(norm_needle) // 2
-        anchor2 = norm_needle[mid : mid + 12]
-        idx = text_lower.find(anchor2.lower())
-        if idx >= 0:
-            return max(0, idx - mid)
-        return None
+        start = mapping[norm_start]
+        end = mapping[norm_end - 1] + 1
+        return start, end
 
 
 # ---------- Prompt 渲染（极简 Jinja2 子集，与 collector 同款，但本地化） ----------

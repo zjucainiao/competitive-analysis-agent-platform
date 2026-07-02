@@ -77,7 +77,9 @@ FastAPI 提供 REST API + WebSocket（DAG 实时进度推送）。**关键资源
 - **NATIVE（默认）**：`backend/orchestrator/graph.py` 装配 `StateGraph(RunState)`，节点为
   collect_dispatch / collect_one / extract_dispatch / extract_one / analyst / reporter / qa
   （`backend/orchestrator/nodes.py`）。拓扑固定；并行采集/抽取经 `Command(goto=[Send(...)])` 扇出，
-  QA 经 `Command(goto=...)` 回环重做或 END。
+  QA 经 `Command(goto=...)` 回环重做或 END。Planner 产物（官网种子 / 采集维度 / 每节点超时重试）经
+  `extract_plan_directives`（`backend/orchestrator/plan_directives.py`）折叠进
+  `RunState.plan_directives` 被节点消费；plan 缺省时回退默认维度与超时下限表（fail-soft）。
 - **LEGACY（`ORCH_ENGINE=legacy`）**：`backend/orchestrator/orchestrator.py` 的 dispatch 循环引擎
   （`StateGraph(OrchestratorState)`），保留向后兼容。
 
@@ -147,8 +149,8 @@ QA         → ReportDraft → QAVerdict + 路由决策
 [API] 持久化 Project，触发 Orchestrator
    │  enqueue(project_id)
    ▼
-[Orchestrator] native 图按行业模板装配（拓扑固定）
-   │  collect_dispatch 对每个产品扇出一个 collect_one（Send）
+[Orchestrator] native 图按行业模板装配（拓扑固定），plan 元数据折叠进 RunState.plan_directives
+   │  collect_dispatch 对每个产品扇出一个 collect_one（Send，payload 自带官网种子/维度/超时）
    ▼
 [Collector × N] 并行采集（collect_one）
    │  调用 Tavily 搜索 → Firecrawl 抓取 → 原始来源进 RunState/PG（不另存对象存储）
