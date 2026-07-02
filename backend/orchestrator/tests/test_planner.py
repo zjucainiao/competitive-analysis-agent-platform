@@ -182,13 +182,15 @@ def test_plan_node_timeout_and_retries() -> None:
     plan = Planner().plan(project)
     by_id = {n.node_id: n for n in plan.nodes}
 
-    # 真实 LLM 跑很慢，节点超时根据实测调高了：
-    # collector 180s（含豆包联网搜索 5 维度），extractor 600s（consolidation pass）
-    assert by_id["collect.notion"].timeout_ms == 180000
+    # 真实 LLM 跑很慢，节点超时根据实测调高，且模板值不得低于事故后精调的下限表
+    # （plan_directives.NODE_TIMEOUT_FLOOR_MS）——native 引擎消费 plan 超时后，
+    # 过小的模板值会直接造成回归：
+    # collector 300s（含豆包联网搜索 5 维度 + 身份校验），extractor 600s（consolidation pass）
+    assert by_id["collect.notion"].timeout_ms == 300000
     assert by_id["collect.notion"].max_retries == 2
     assert by_id["extract.notion"].timeout_ms == 600000
-    # analyst/reporter 是 120s，max_retries=2
-    assert by_id["analyst"].timeout_ms == 120000
+    # analyst 是 240s，max_retries=2
+    assert by_id["analyst"].timeout_ms == 240000
     assert by_id["analyst"].max_retries == 2
 
 

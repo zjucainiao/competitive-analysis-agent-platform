@@ -35,6 +35,7 @@ from backend.orchestrator.inputs import (
     build_reporter_input,
     new_span_id,
 )
+from backend.orchestrator.plan_directives import resolve_node_limits
 from backend.orchestrator.routing import decide_qa_route
 from backend.orchestrator.run_agent import AgentRunResult, run_agent_node
 from backend.orchestrator.run_state import NodeRun, latest_output, versioned_ref
@@ -44,18 +45,10 @@ from backend.schemas.evidence import CollectDimension
 # QA 路由轮次上限(与 decide_qa_route 的 max_rounds 一致)
 _MAX_QA_ROUNDS = 3
 
-# 各节点单次执行超时(ms)。run_agent_node 默认 60s，对**真实采集/抽取**远远不够：
-# collector 一个产品要 search + 抓多页 + 每页 page_type 分类 LLM + 身份校验 LLM
-# （第三方噪音多的产品如 Figma 可达 100+ 次 LLM 调用），60s 必然撞超时 → 节点 failed
-# → 下游全 "upstream output missing" 连锁失败。给足超时（仍受 collector 内部
-# constraints.timeout_seconds 与抓取上限约束，不会真跑到上限）。
-_NODE_TIMEOUT_MS: dict[str, int] = {
-    "collector": 300_000,
-    "extractor": 300_000,
-    "analyst": 240_000,
-    "reporter": 240_000,
-    "qa": 180_000,
-}
+# 各节点超时/重试：P1-PLANCONSUME 后优先消费 state.plan_directives 里 planner
+# 精调的值（Send worker 经 dispatch 打进 payload），plan 缺省时经
+# resolve_node_limits 回退 plan_directives.NODE_TIMEOUT_FLOOR_MS 下限表
+# （那边记录了「节点超时连锁失败」事故背景）。
 
 # Collector 默认采集维度。
 # 注意:**不能**用 project.analysis_dimensions —— 那是 analyst 级枚举
@@ -127,6 +120,26 @@ def _build_failed_run(*, node: str, agent: str, product: str | None, round_: int
     }
 
 
+def _limits_from_payload(payload: dict, agent: str) -> tuple[int, int]:
+    """从 Send payload 解析该 worker 的 (timeout_ms, max_retries)。
+
+    dispatch 已把 plan_directives 里 planner 精调的值打进 payload(Send-target
+    看不到全局 state);旧 checkpoint 在途 Send 的 payload 缺这些键/值非法时,
+    复用 resolve_node_limits 的回退语义(下限表超时 + 缺省重试)。
+    """
+    return resolve_node_limits(
+        {
+            "nodes": {
+                agent: {
+                    "timeout_ms": payload.get("timeout_ms"),
+                    "max_retries": payload.get("max_retries"),
+                }
+            }
+        },
+        agent,
+    )
+
+
 def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
     """构造原生图的节点闭包字典。
 
@@ -148,44 +161,55 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
         targets = rework_products(返工时) or products(首跑)。
         round = qa_round + 1(首跑 qa_round=0 → round=1)。
 
-        worker 看不到全局 state,故把该产品对应的 qa_feedback(若返工有)打包进
+        worker 看不到全局 state,故把该产品对应的 qa_feedback(若返工有)与
+        plan_directives 里的官网种子/采集维度/超时重试(P1-PLANCONSUME)一并打包进
         Send payload(键 ``collect.{product}``,见 routing.decide_qa_route 文档)。
+        plan 缺该产品/无指令集时 payload 带回退值(None URL / None dims →
+        worker 用 _DEFAULT_COLLECT_DIMS / 下限表超时)。
         """
         targets = state.rework_products or state.products
         round_ = state.qa_round + 1
         fb = state.qa_feedback_by_node
         ov = state.prompt_override_by_node
-        return Command(
-            goto=[
-                Send(
-                    "collect_one",
-                    {
-                        "product": p,
-                        "round": round_,
-                        "qa_feedback": fb.get(f"collect.{p}"),
-                        # worker 看不到全局 state，节点级 prompt 覆盖随 payload 带过去
-                        "prompt_override": ov.get(f"collect.{p}"),
-                    },
-                )
-                for p in targets
-            ]
-        )
+        directives = state.plan_directives or {}
+        plan_products = directives.get("products") or {}
+        timeout_ms, max_retries = resolve_node_limits(directives, "collector")
+
+        def _payload(p: str) -> dict:
+            prod_cfg = plan_products.get(p) or {}
+            return {
+                "product": p,
+                "round": round_,
+                "qa_feedback": fb.get(f"collect.{p}"),
+                # worker 看不到全局 state，节点级 prompt 覆盖随 payload 带过去
+                "prompt_override": ov.get(f"collect.{p}"),
+                # planner 推断/模板种子的官网 URL 与维度子集（缺省回退 None）
+                "official_url": prod_cfg.get("official_url"),
+                "collect_dims": prod_cfg.get("collect_dims") or None,
+                "timeout_ms": timeout_ms,
+                "max_retries": max_retries,
+            }
+
+        return Command(goto=[Send("collect_one", _payload(p)) for p in targets])
 
     async def collect_one(payload: dict) -> dict:
         """Send-target:**入参是原始 dict**,看不到全局 state。
 
-        从 payload 取 product / round,跑 collector,产出 outputs + history。
-        collector 不依赖上游 evidence,故 outputs={} 传 run_agent_node 即可。
+        从 payload 取 product / round / plan 元数据,跑 collector,产出 outputs +
+        history。collector 不依赖上游 evidence,故 outputs={} 传 run_agent_node 即可。
+        官网种子/维度/超时均以 payload 为准(dispatch 已从 plan_directives 解析)；
+        旧 payload(resume 自旧 checkpoint 的在途 Send)缺这些键 → 回退现状。
         """
         product = payload["product"]
         round_ = payload.get("round", 1)
+        timeout_ms, max_retries = _limits_from_payload(payload, "collector")
         try:
             inp = build_collector_input(
                 project,
                 trace_id=trace_id,
                 product=product,
-                official_url=None,
-                dims=dims,
+                official_url=payload.get("official_url"),
+                dims=payload.get("collect_dims") or dims,
                 qa_feedback=payload.get("qa_feedback"),
             )
         except BuildInputError:
@@ -201,7 +225,8 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
             trace_id=trace_id,
             node_id=ref,
             user_prompt_override=payload.get("prompt_override"),
-            timeout_ms=_NODE_TIMEOUT_MS["collector"],
+            timeout_ms=timeout_ms,
+            max_retries=max_retries,
         )
         return {
             "outputs": {ref: res.output} if res.output is not None else {},
@@ -222,12 +247,14 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
     def extract_dispatch(state) -> Command:
         """normal 节点:把对应 collector output 打包进 Send,扇出 extract_one。
 
-        worker 读不到全局 state,所以 collector_output 必须随 payload 一起带过去。
+        worker 读不到全局 state,所以 collector_output(以及 plan_directives 里
+        extractor 的超时/重试,P1-PLANCONSUME)必须随 payload 一起带过去。
         """
         targets = state.rework_products or state.products
         round_ = state.qa_round + 1
         fb = state.qa_feedback_by_node
         ov = state.prompt_override_by_node
+        timeout_ms, max_retries = resolve_node_limits(state.plan_directives, "extractor")
         return Command(
             goto=[
                 Send(
@@ -239,6 +266,8 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
                         "round": round_,
                         "qa_feedback": fb.get(f"extract.{p}"),
                         "prompt_override": ov.get(f"extract.{p}"),
+                        "timeout_ms": timeout_ms,
+                        "max_retries": max_retries,
                     },
                 )
                 for p in targets
@@ -249,6 +278,7 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
         """Send-target:从 payload 取 product + collector_output,跑 extractor。"""
         product = payload["product"]
         round_ = payload.get("round", 1)
+        timeout_ms, max_retries = _limits_from_payload(payload, "extractor")
         try:
             inp = build_extractor_input(
                 project,
@@ -271,7 +301,8 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
             trace_id=trace_id,
             node_id=ref,
             user_prompt_override=payload.get("prompt_override"),
-            timeout_ms=_NODE_TIMEOUT_MS["extractor"],
+            timeout_ms=timeout_ms,
+            max_retries=max_retries,
         )
         return {
             "outputs": {ref: res.output} if res.output is not None else {},
@@ -290,8 +321,13 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
     # ---------- analyst / reporter / qa(全局 normal 节点) ----------
 
     async def analyst(state) -> dict:
-        """normal 节点:聚合所有 extract.* profile 跑 analyst。"""
+        """normal 节点:聚合所有 extract.* profile 跑 analyst。
+
+        normal 节点看得到全局 state,超时/重试直接从 state.plan_directives 解析
+        (plan 缺省回退下限表,P1-PLANCONSUME)。
+        """
         round_ = state.qa_round + 1
+        timeout_ms, max_retries = resolve_node_limits(state.plan_directives, "analyst")
         try:
             inp = build_analyst_input(
                 project,
@@ -312,7 +348,8 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
             trace_id=trace_id,
             node_id=ref,
             user_prompt_override=state.prompt_override_by_node.get("analyst"),
-            timeout_ms=_NODE_TIMEOUT_MS["analyst"],
+            timeout_ms=timeout_ms,
+            max_retries=max_retries,
         )
         return {
             "outputs": {ref: res.output} if res.output is not None else {},
@@ -335,6 +372,7 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
         NodeRun(无 outputs),让 qa 节点接力判断并优雅终止。
         """
         round_ = state.qa_round + 1
+        timeout_ms, max_retries = resolve_node_limits(state.plan_directives, "reporter")
         analyst_output = latest_output(state.outputs, "analyst")
         if analyst_output is None:
             return {
@@ -370,7 +408,8 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
             trace_id=trace_id,
             node_id=ref,
             user_prompt_override=state.prompt_override_by_node.get("reporter"),
-            timeout_ms=_NODE_TIMEOUT_MS["reporter"],
+            timeout_ms=timeout_ms,
+            max_retries=max_retries,
         )
         return {
             "outputs": {ref: res.output} if res.output is not None else {},
@@ -394,6 +433,7 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
           reporter;route_update 含 qa_round / rework_* / aborted 等。
         """
         round_ = state.qa_round + 1
+        timeout_ms, max_retries = resolve_node_limits(state.plan_directives, "qa")
         reporter_output = latest_output(state.outputs, "reporter")
         analyst_output = latest_output(state.outputs, "analyst")
         # fail-soft:上游 reporter / analyst 任一缺失(上游失败)→ 直接 END,
@@ -435,7 +475,8 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
             trace_id=trace_id,
             node_id=ref,
             user_prompt_override=state.prompt_override_by_node.get("qa"),
-            timeout_ms=_NODE_TIMEOUT_MS["qa"],
+            timeout_ms=timeout_ms,
+            max_retries=max_retries,
         )
         update: dict[str, Any] = {
             "outputs": {ref: res.output} if res.output is not None else {},

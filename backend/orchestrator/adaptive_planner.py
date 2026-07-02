@@ -227,7 +227,9 @@ class AdaptivePlanner:
                     agent_name="collector",
                     status=NodeStatus.PENDING,
                     input_refs=["start"],
-                    timeout_ms=180000,
+                    # 300s 是「节点超时连锁失败」事故后精调的下限（plan_directives.py
+                    # NODE_TIMEOUT_FLOOR_MS）；native 消费 plan 超时后此处不得低于该表。
+                    timeout_ms=300000,
                     max_retries=2,
                     metadata={
                         "product": p["name"],

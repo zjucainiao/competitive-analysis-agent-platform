@@ -8,7 +8,7 @@
 ## 当前状态
 
 - 线上版本：**v1.2.0**（at1as.tech，`deploy.sh <tag>` 部署，`/version` 可查）
-- 当前分支：`fix/evidence-chain-integrity`（H1/H3/H4 证据链修复，工作区未提交）
+- 当前分支：`fix/native-consumes-plan`（native 引擎消费 Planner 产物，工作区未提交）
 
 ## 进行中
 
@@ -28,7 +28,7 @@ _（无）_
 
 ### P1 — 架构一致性 / 证据链可信度
 
-- [ ] native 引擎不消费 Planner 产物：AdaptivePlanner 白烧 LLM、官网种子/维度/超时配置全部静默失效（`orchestrator.py:163-215`、`nodes.py:50-71`）
+- [x] native 引擎不消费 Planner 产物：AdaptivePlanner 白烧 LLM、官网种子/维度/超时配置全部静默失效 —— 已修（分支 `fix/native-consumes-plan`）：`extract_plan_directives` 把 plan 元数据折叠进 `RunState.plan_directives`，collector 官网种子/维度经 Send payload 生效，超时/重试优先 plan、缺省回退下限表
 - [x] REVIEWS 维度证据是 LLM 合成文本，硬编码 identity confirmed，无联网 provider 时可能整条幻觉 —— 已修（分支 `fix/evidence-chain-integrity`）：fetch_method=llm_synthesis + ambiguous + authority 0.4 + 禁伪造 G2 URL，QA 校正不再抬回高权威
 - [x] `_is_official` 产品名子串匹配可被伪冒域名利用 —— 已修（同分支）：注册域主标签精确等值匹配，伪冒域（notion-fans.xyz / evilnotion.so）判非官方
 - [x] fuzzy 命中时 Evidence.content 是 LLM 转述仍标 VERIFIED —— 已修（分支 `fix/evidence-chain-integrity`）：content 一律落 linker 定位的原文切片，fuzzy 置信封顶 0.85，offset 用规范化映射精确回定位
@@ -62,6 +62,7 @@ _（无）_
 
 ### 2026-07-02
 
+- **修 P1：native 引擎消费 Planner 产物**（分支 `fix/native-consumes-plan`）：新增 `backend/orchestrator/plan_directives.py`——`extract_plan_directives` 把 DAGPlan（模板/adaptive 两种形状）折叠成 JSON-可序列化指令集 `{products: {显示名: {official_url, collect_dims}}, nodes: {agent: {timeout_ms, max_retries}}}`，`_run_native` 写进新声明的 `RunState.plan_directives`（进 checkpoint，resume/rework 自动带回；旧 checkpoint 无键回退空 dict）。消费侧：`collect_dispatch`/`extract_dispatch` 把官网种子/维度/超时重试打进 Send payload（Send-target 看不到全局 state），collector 不再永远 `official_url=None` 走搜索兜底（「抓错产品」上游诱因之一）；analyst/reporter/qa 直接从 state 解析。超时优先取 plan、缺省回退 `NODE_TIMEOUT_FLOOR_MS` 下限表（原 `nodes.py` `_NODE_TIMEOUT_MS` 挪入，事故精调下限语义不变；低于下限的 plan 值提取时钳底），「超时不重试」语义保持。配置源头对齐：4 张模板 YAML 的 collect 180s→300s / analyst 120s→240s / qa 60s→180s，adaptive collect 180s→300s（reporter 600s 等更高值保留）。fail-soft：plan 为 None/提取失败 → 空指令集，一切回退现状。TDD：新增 `test_plan_directives.py` 18 用例（提取/钳底/维度过滤/序列化往返/dispatch payload/节点消费回退/官网种子 e2e/旧 checkpoint 向后兼容）；全量 455 passed（基线 437+18），ruff check/format 干净。docs/DAG.md（§1/§4/§5/§6.2/§6.3/§9/§10）与 docs/ARCHITECTURE.md 同步对齐事实，顺手修正 §6.2「native 节点不做指数退避重试」的失实描述
 - **修 H1：REVIEWS 维度 LLM 合成证据可区分、可降权**（分支 `fix/evidence-chain-integrity`）：`_reviews_finding_to_docs` 的产物改标 `fetch_method="llm_synthesis"`（schema/前端类型/docs 同步加枚举值，向后兼容）；身份不再硬编码 confirmed 0.85——合成文本上跑身份校验是循环论证，一律 ambiguous（带引用 URL 置信 0.5 / 纯聚合 0.3），QA identity_consistency 自动浮出为 minor；权威度从评论站正典 0.92 压到 0.4（新常量 `LLM_SYNTHESIS_AUTHORITY`，低于 QA 弱源阈值 0.7）；LLM 未给引用 URL 时不再伪造 G2 URL，改用 RFC 2606 `.invalid` 合成标记 URI；QA `evidence_completeness` 的跨维度权威校正改取 `min(矩阵值, 存值)`，防止合成证据被校正「抬回」高权威。TDD：新增 `collector/tests/test_reviews_synthesis.py` 5 用例 + QA 侧 1 用例
 - **修 H3：`_is_official` 伪冒域名直通官方判定**（同分支）：产品名子串匹配 + `host.endswith(官方域)` 两条模糊路径删除（`notion-fans.xyz`/`evilnotion.so` 过去可直通 confirmed 0.9 + authority 0.95）；改为注册域主标签精确等值（`_domain_label` 重写：剥 TLD + 常见双后缀 co.uk/com.cn，不引 tldextract），官方 URL 子域仍放行。TDD：`test_identity.py` 新增 5 用例。验收：collector+extractor+qa 134 passed，全 backend（除 storage e2e 的既有环境泄漏问题）413 passed，ruff check/format 干净
 - **修 H4：证据原文逐字承诺**（分支 `fix/evidence-chain-integrity`，只动 `backend/agents/extractor/`）：EvidenceLinker 改用「规范化位置 → 原文位置」映射——精确命中的 char_start/char_end 不再靠 12 字符锚点近似（空白不一致时会切错）；fuzzy 命中时 Evidence.content 改存**原文窗口逐字文本**（LLM 转述 quote 不再落库），置信封顶 0.85 与精确命中（1.0）拉开；字段置信取 min(claim, link)；consolidation 占位 source 的隐式依赖写成显式注释。TDD：新增 `tests/test_evidence_verbatim.py` 5 个用例，extractor+qa+reporter 126 passed，ruff check/format 干净

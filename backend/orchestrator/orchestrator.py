@@ -184,6 +184,7 @@ class Orchestrator:
         与 ``_resume_native``(从 checkpoint 续跑)共用(DRY)。
         """
         from .graph import build_native_graph
+        from .plan_directives import extract_plan_directives
         from .run_state import RunState as _RunState
 
         graph = build_native_graph(
@@ -201,6 +202,11 @@ class Orchestrator:
             run_id=run_id or f"run_{ULID()}",
             analysis_mode=project.analysis_mode.value,
             products=[project.target_product, *project.competitors],
+            # P1-PLANCONSUME：把 Planner 产物(官网种子/采集维度/每节点超时重试)折叠成
+            # 指令集进 RunState —— native 节点消费它,AdaptivePlanner 的 LLM 推断不再
+            # 被扔掉。提取 fail-soft：plan 异常 → {},节点全部回退现状。
+            # 字段已声明,resume/rework 从 checkpoint 复算时自动带回。
+            plan_directives=extract_plan_directives(plan),
         ).model_dump()
         if seed_state:
             # 并入定向意图(prompt_override_by_node / rework_target / 预填 outputs 等)；
