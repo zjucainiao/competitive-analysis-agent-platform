@@ -148,8 +148,10 @@ class Executor:
         # node.metadata['user_prompt_override']。所有重试共用同一个 override。
         user_override = node.metadata.get("user_prompt_override")
 
-        # 2. 重试循环
+        # 2. 重试循环（超时会提前 break，attempts 记录实际尝试次数）
+        attempts = 0
         for attempt in range(node.max_retries + 1):
+            attempts = attempt + 1
             span_id = new_span_id()
             ctx_token = set_trace_context(
                 trace_id=self.trace_id,
@@ -171,15 +173,23 @@ class Executor:
                         timeout=node.timeout_ms / 1000.0,
                     )
                 except asyncio.TimeoutError:
+                    # 超时不重试：asyncio.wait_for 超时只取消这里的 await，
+                    # to_thread 里的同步 agent.invoke 没有协作式取消、仍会在
+                    # 后台线程跑完（僵尸线程）。此时若重试，会与僵尸线程并发
+                    # 执行同一 agent——重复烧 LLM 配额、trace 交叉、线程池被
+                    # 占满。break 出重试循环直接判失败（保留 hybrid collector
+                    # 的 mock 降级路径），最多只留 1 份僵尸线程。
                     last_error = AgentError(
                         code="LLM_TIMEOUT",
                         message=(
-                            f"node {node.node_id} attempt {attempt + 1} timed out "
-                            f"after {node.timeout_ms}ms"
+                            f"node {node.node_id} timed out after "
+                            f"{node.timeout_ms}ms (attempt {attempt + 1}; "
+                            f"timeout is not retried)"
                         ),
                         severity="error",
-                        retriable=True,
+                        retriable=False,
                     )
+                    break
                 except Exception as exc:  # noqa: BLE001
                     last_error = AgentError(
                         code="UNEXPECTED",
@@ -215,12 +225,12 @@ class Executor:
             if attempt < node.max_retries:
                 await asyncio.sleep(self.backoff_base * (_BACKOFF_MULT ** attempt))
 
-        # 3. 全部重试用完 —— Collector 在 hybrid 模式下尝试降级到 mock
+        # 3. 重试用完（或超时提前 break）—— Collector 在 hybrid 模式下尝试降级到 mock
         if self._should_degrade_collector(node):
             try:
                 degraded = await self._collector_fallback(node, input_obj)
                 return self._success_result(
-                    node, degraded, started_at, attempts=node.max_retries + 1, degraded=True
+                    node, degraded, started_at, attempts=attempts, degraded=True
                 )
             except Exception as exc:  # noqa: BLE001
                 last_error = AgentError(
@@ -231,7 +241,7 @@ class Executor:
                 )
 
         return self._failure_result(
-            node, last_error, started_at, attempts=node.max_retries + 1
+            node, last_error, started_at, attempts=attempts
         )
 
     def _resolve_agent(

@@ -6,6 +6,7 @@ asyncio_mode = "auto" (pyproject.toml)，@pytest.mark.asyncio 保留以明确意
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
@@ -76,18 +77,22 @@ async def test_attempts_count_on_failure():
 
 
 @pytest.mark.asyncio
-async def test_timeout_then_success():
-    """First invoke blocks 0.3 s, tripping the 50 ms timeout; retry succeeds."""
+async def test_timeout_fails_without_retry():
+    """超时必须立即判失败、不发起第二次 invoke。
 
-    class _TimeoutThenSuccessAgent:
+    asyncio.wait_for 超时只取消 await，to_thread 里的同步 invoke 仍在后台
+    线程跑完（僵尸线程）；若重试会与它并发执行同一 agent。这里用调用计数
+    验证：超时后（含等僵尸线程跑完）invoke 只被调过 1 次。
+    """
+
+    class _SlowAgent:
         def __init__(self):
             self.calls = 0
 
         def invoke(self, inp, *, trace_id, span_id, node_id):
             self.calls += 1
-            if self.calls == 1:
-                # Block long enough to reliably trip asyncio.wait_for(timeout=0.05)
-                time.sleep(0.3)
+            # Block long enough to reliably trip asyncio.wait_for(timeout=0.05)
+            time.sleep(0.3)
 
             class _Out:
                 status = AgentStatus.SUCCESS
@@ -96,13 +101,20 @@ async def test_timeout_then_success():
 
             return _Out()
 
-    agent = _TimeoutThenSuccessAgent()
+    agent = _SlowAgent()
     res = await run_agent_node(
         _Reg(agent), "collector", object(), outputs={}, trace_id="t",
         node_id="collect.x", max_retries=2, timeout_ms=50, backoff_base=0.0,
     )
-    assert res.status == AgentStatus.SUCCESS
-    assert agent.calls == 2  # first timed out, second succeeded
+    assert res.status == AgentStatus.FAILED
+    assert res.attempts == 1
+    assert res.error is not None
+    assert res.error.code == "LLM_TIMEOUT"
+    assert "timed out" in res.error.message
+    assert res.error.retriable is False
+    # 等僵尸线程跑完再断言：确认之后也没有第二次 invoke 被调度
+    await asyncio.sleep(0.4)
+    assert agent.calls == 1
 
 
 @pytest.mark.asyncio

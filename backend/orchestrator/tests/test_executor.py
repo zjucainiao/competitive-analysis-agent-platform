@@ -216,23 +216,29 @@ async def test_qa_input_collects_prior_verdicts(
 # ---------- 重试 / 超时（用桩 agent 直接塞 registry._cache） ----------
 
 
-async def test_node_timeout_triggers_retry_then_failure(
+async def test_node_timeout_fails_without_retry(
     project: Project, plan: DAGPlan, registry: AgentRegistry
 ) -> None:
-    """超时 max_retries 次后失败；非 hybrid 模式不降级（hybrid 已移除）。"""
+    """超时立即失败、不重试；非 hybrid 模式不降级（hybrid 已移除）。
+
+    同步 invoke 在超时后仍在后台线程跑完（僵尸线程），重试会与它并发
+    执行同一 agent。用调用计数验证不发生第二次 invoke。
+    """
+    import asyncio
+    import time
 
     class _SlowAgent:
         name = "collector"
+        calls = 0
 
         def invoke(self, inp: Any, **kwargs: Any) -> Any:
-            import time
-
-            time.sleep(0.5)
+            _SlowAgent.calls += 1
+            time.sleep(0.3)
             raise RuntimeError("unreachable")
 
     registry._cache["collector"] = _SlowAgent()  # type: ignore[assignment]
     node = _node_by_id(plan, "collect.notion").model_copy(
-        update={"timeout_ms": 50, "max_retries": 1}
+        update={"timeout_ms": 50, "max_retries": 3}
     )
 
     proj_real = project.model_copy(update={"mode": "real"})
@@ -240,8 +246,13 @@ async def test_node_timeout_triggers_retry_then_failure(
     result = await ex.execute(node, outputs={})
     assert result.status == NodeStatus.FAILED
     assert result.error.code == "LLM_TIMEOUT"
-    # max_retries=1 → 2 次尝试
-    assert result.metadata["attempts"] == 2
+    assert "timed out" in result.error.message
+    assert result.error.retriable is False
+    # 超时不重试 → 只有 1 次尝试
+    assert result.metadata["attempts"] == 1
+    # 等僵尸线程跑完再断言：确认之后也没有第二次 invoke 被调度
+    await asyncio.sleep(0.4)
+    assert _SlowAgent.calls == 1
 
 
 # ---------- helpers ----------
