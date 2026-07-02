@@ -8,7 +8,7 @@
 ## 当前状态
 
 - 线上版本：**v1.2.0**（at1as.tech，`deploy.sh <tag>` 部署，`/version` 可查）
-- 当前分支：`docs/cleanup-dev-leftovers`（文档清理，工作区干净）
+- 当前分支：`fix/evidence-chain-integrity`（H1/H3/H4 证据链修复，工作区未提交）
 
 ## 进行中
 
@@ -29,9 +29,9 @@ _（无）_
 ### P1 — 架构一致性 / 证据链可信度
 
 - [ ] native 引擎不消费 Planner 产物：AdaptivePlanner 白烧 LLM、官网种子/维度/超时配置全部静默失效（`orchestrator.py:163-215`、`nodes.py:50-71`）
-- [ ] REVIEWS 维度证据是 LLM 合成文本，硬编码 identity confirmed，无联网 provider 时可能整条幻觉（`collector/agent.py:1277-1364`）
-- [ ] `_is_official` 产品名子串匹配可被伪冒域名利用（`collector/agent.py:196-198`）
-- [ ] fuzzy 命中时 Evidence.content 是 LLM 转述仍标 VERIFIED（`extractor/agent.py:970-976`）
+- [x] REVIEWS 维度证据是 LLM 合成文本，硬编码 identity confirmed，无联网 provider 时可能整条幻觉 —— 已修（分支 `fix/evidence-chain-integrity`）：fetch_method=llm_synthesis + ambiguous + authority 0.4 + 禁伪造 G2 URL，QA 校正不再抬回高权威
+- [x] `_is_official` 产品名子串匹配可被伪冒域名利用 —— 已修（同分支）：注册域主标签精确等值匹配，伪冒域（notion-fans.xyz / evilnotion.so）判非官方
+- [x] fuzzy 命中时 Evidence.content 是 LLM 转述仍标 VERIFIED —— 已修（分支 `fix/evidence-chain-integrity`）：content 一律落 linker 定位的原文切片，fuzzy 置信封顶 0.85，offset 用规范化映射精确回定位
 - [x] ~~无任何 CI~~ 最小 CI 已随 P0 落地（`fix/p0-hardening`），lint/format 已收紧为阻断（`chore/ruff-cleanup`）
 - [ ] restart/retry/edit-prompt 的 run 永远没有 final_status 和快照，`/runs/{id}/state` 404（`interventions.py:106-123,679-691`）
 - [ ] run 控制面单进程假设无保护，多 worker 下防重/暂停/停止静默失效（`runs.py:103-121`）
@@ -62,6 +62,9 @@ _（无）_
 
 ### 2026-07-02
 
+- **修 H1：REVIEWS 维度 LLM 合成证据可区分、可降权**（分支 `fix/evidence-chain-integrity`）：`_reviews_finding_to_docs` 的产物改标 `fetch_method="llm_synthesis"`（schema/前端类型/docs 同步加枚举值，向后兼容）；身份不再硬编码 confirmed 0.85——合成文本上跑身份校验是循环论证，一律 ambiguous（带引用 URL 置信 0.5 / 纯聚合 0.3），QA identity_consistency 自动浮出为 minor；权威度从评论站正典 0.92 压到 0.4（新常量 `LLM_SYNTHESIS_AUTHORITY`，低于 QA 弱源阈值 0.7）；LLM 未给引用 URL 时不再伪造 G2 URL，改用 RFC 2606 `.invalid` 合成标记 URI；QA `evidence_completeness` 的跨维度权威校正改取 `min(矩阵值, 存值)`，防止合成证据被校正「抬回」高权威。TDD：新增 `collector/tests/test_reviews_synthesis.py` 5 用例 + QA 侧 1 用例
+- **修 H3：`_is_official` 伪冒域名直通官方判定**（同分支）：产品名子串匹配 + `host.endswith(官方域)` 两条模糊路径删除（`notion-fans.xyz`/`evilnotion.so` 过去可直通 confirmed 0.9 + authority 0.95）；改为注册域主标签精确等值（`_domain_label` 重写：剥 TLD + 常见双后缀 co.uk/com.cn，不引 tldextract），官方 URL 子域仍放行。TDD：`test_identity.py` 新增 5 用例。验收：collector+extractor+qa 134 passed，全 backend（除 storage e2e 的既有环境泄漏问题）413 passed，ruff check/format 干净
+- **修 H4：证据原文逐字承诺**（分支 `fix/evidence-chain-integrity`，只动 `backend/agents/extractor/`）：EvidenceLinker 改用「规范化位置 → 原文位置」映射——精确命中的 char_start/char_end 不再靠 12 字符锚点近似（空白不一致时会切错）；fuzzy 命中时 Evidence.content 改存**原文窗口逐字文本**（LLM 转述 quote 不再落库），置信封顶 0.85 与精确命中（1.0）拉开；字段置信取 min(claim, link)；consolidation 占位 source 的隐式依赖写成显式注释。TDD：新增 `tests/test_evidence_verbatim.py` 5 个用例，extractor+qa+reporter 126 passed，ruff check/format 干净
 - **ruff 存量清零 + format 统一 + CI 收紧**（分支 `chore/ruff-cleanup`，堆叠在 fix/p0-hardening 上）：5696 → 0（自动修 304 + 手工 62 + 配置豁免带论证）；顺手修掉 `inputs.py` 缺 import（F821）与 `sanitizer.py` 闭包晚绑定（B023）两处潜在问题；`ruff format` 统一 111 文件；CI 的 ruff/format 从观察模式改为阻断门禁
 - **修完全部 6 项 P0**（分支 `fix/p0-hardening`）：JWT 硬失败闸门、导出双修（去 mock + 带鉴权下载）、pytest e2e 守卫、discovery 事件循环阻塞、超时不重试（双引擎）、最小 CI。验收：裸跑 pytest 421 passed / 8 deselected（e2e 被正确拦截）；前端 tsc/eslint/build 全绿
 - 同步事实性文档修正：`docs/COMPLIANCE.md` JWT 描述、`docs/DEPLOY_PROD.md`、`.env.example`、`CONTRIBUTING.md`；本机 `.env`（不入仓）已配随机 `JWT_SECRET`
