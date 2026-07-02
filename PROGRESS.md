@@ -32,7 +32,7 @@ _（无）_
 - [ ] REVIEWS 维度证据是 LLM 合成文本，硬编码 identity confirmed，无联网 provider 时可能整条幻觉（`collector/agent.py:1277-1364`）
 - [ ] `_is_official` 产品名子串匹配可被伪冒域名利用（`collector/agent.py:196-198`）
 - [ ] fuzzy 命中时 Evidence.content 是 LLM 转述仍标 VERIFIED（`extractor/agent.py:970-976`）
-- [ ] 无任何 CI：ruff 5696 errors / format 漂移 110 文件 / 裸 pytest 红，均无人发现 → 补最小 GitHub Actions
+- [x] ~~无任何 CI~~ 最小 CI 已随 P0 落地（`fix/p0-hardening`），lint/format 已收紧为阻断（`chore/ruff-cleanup`）
 - [ ] restart/retry/edit-prompt 的 run 永远没有 final_status 和快照，`/runs/{id}/state` 404（`interventions.py:106-123,679-691`）
 - [ ] run 控制面单进程假设无保护，多 worker 下防重/暂停/停止静默失效（`runs.py:103-121`）
 - [ ] 前端 runId 路由段未消费，run 回放名存实亡；listRuns/getRunSnapshot 死代码（`client-workspace.tsx:243-263`）
@@ -52,7 +52,7 @@ _（无）_
 
 ### P1/P2 追加（P0 修复过程中新发现）
 
-- [ ] ruff 存量 386 个真实问题（253 可 `--fix`）+ format 漂移 110 文件 → 独立清理分支专项做，做完把 CI 的 ruff 步骤从观察模式收紧为阻断
+- [x] ruff 存量清零（5696 → 0，含 386 个真实问题）+ ruff format 全仓库统一（111 文件）+ CI 的 ruff/format 收紧为阻断门禁（分支 `chore/ruff-cleanup`，2026-07-02）
 - [ ] `backend/api/app.py:38` 模块级 `load_dotenv()` 是 .env 泄漏进测试会话的根源（storage conftest 已做快照防御），根治应挪到应用入口
 - [ ] native 引擎 NodeRun 无 error 字段，超时错误码（LLM_TIMEOUT）没透传到前端节点状态（`run_state.py` + `nodes.py`）
 
@@ -62,6 +62,7 @@ _（无）_
 
 ### 2026-07-02
 
+- **ruff 存量清零 + format 统一 + CI 收紧**（分支 `chore/ruff-cleanup`，堆叠在 fix/p0-hardening 上）：5696 → 0（自动修 304 + 手工 62 + 配置豁免带论证）；顺手修掉 `inputs.py` 缺 import（F821）与 `sanitizer.py` 闭包晚绑定（B023）两处潜在问题；`ruff format` 统一 111 文件；CI 的 ruff/format 从观察模式改为阻断门禁
 - **修完全部 6 项 P0**（分支 `fix/p0-hardening`）：JWT 硬失败闸门、导出双修（去 mock + 带鉴权下载）、pytest e2e 守卫、discovery 事件循环阻塞、超时不重试（双引擎）、最小 CI。验收：裸跑 pytest 421 passed / 8 deselected（e2e 被正确拦截）；前端 tsc/eslint/build 全绿
 - 同步事实性文档修正：`docs/COMPLIANCE.md` JWT 描述、`docs/DEPLOY_PROD.md`、`.env.example`、`CONTRIBUTING.md`；本机 `.env`（不入仓）已配随机 `JWT_SECRET`
 - 行为变化注意：显式跑真实 e2e 现在必须带 `-m e2e`（如 `RUN_REAL_LLM_TESTS=1 pytest <file> -m e2e`）

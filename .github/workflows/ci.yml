@@ -1,4 +1,4 @@
-# 最小 CI：守住「lint 可观察 + 单元/集成测试全绿 + 前端能编译」三条底线。
+# 最小 CI：守住「lint/format 阻断 + 单元/集成测试全绿 + 前端能编译」三条底线。
 #
 # 关键前提（CI 环境无任何 .env / API key / PG / Redis 也必须全绿）：
 # - pyproject 的 addopts = '-m "not e2e"' 已反选真实网络/真实 LLM 的 e2e 测试；
@@ -27,11 +27,12 @@ jobs:
       - name: 安装依赖
         run: pip install -e ".[dev]"
 
-      # 观察期：存量 lint 问题（unused-import / unsorted-imports 等）尚未清零，
-      # 先 continue-on-error 让结果可见不阻塞合并；清零后删掉这行收紧为强制门禁
-      - name: Ruff lint（观察，不阻塞）
+      # 存量已于 2026-07-02 清零（5696 → 0），lint/format 均为阻断门禁
+      - name: Ruff lint
         run: ruff check backend
-        continue-on-error: true
+
+      - name: Ruff format 检查
+        run: ruff format --check backend
 
       # addopts 已保证不跑 e2e（真实网络/LLM）；无 PG/Redis 环境变量时相关用例自动 skip
       - name: Pytest（单元 + 集成）
