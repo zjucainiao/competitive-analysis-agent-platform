@@ -61,12 +61,12 @@ class AggregateMetricsResponse(BaseModel):
 async def aggregate_metrics(
     storage: Storage = Depends(get_storage),
     current_user: User = Depends(get_current_user),
-    since_iso: str | None = Query(default=None, description="ISO8601；只算 created_at ≥ 此值的项目"),
+    since_iso: str | None = Query(
+        default=None, description="ISO8601；只算 created_at ≥ 此值的项目"
+    ),
 ) -> AggregateMetricsResponse:
     """跨项目汇总（仅当前用户自己的项目）。"""
-    projects = await storage.state_store.list_projects(
-        owner=current_user.user_id, limit=10000
-    )
+    projects = await storage.state_store.list_projects(owner=current_user.user_id, limit=10000)
 
     since_dt: datetime | None = None
     if since_iso:
@@ -141,9 +141,7 @@ async def metrics_timeseries(
     storage: Storage = Depends(get_storage),
     project: Project = Depends(get_owned_project),
 ) -> MetricsTimeseriesResponse:
-    return MetricsTimeseriesResponse(
-        project_id=project_id, history=list(project.metrics_history)
-    )
+    return MetricsTimeseriesResponse(project_id=project_id, history=list(project.metrics_history))
 
 
 # ============================================================
@@ -178,9 +176,7 @@ async def project_llm_calls(
     # 实时：本进程 ring buffer（含进行中节点，可能还没落库）
     live = [
         r.to_dict()
-        for r in list_calls(
-            trace_id=trace_id, node_id=node_id, agent_name=agent_name, limit=limit
-        )
+        for r in list_calls(trace_id=trace_id, node_id=node_id, agent_name=agent_name, limit=limit)
     ]
     # 持久化：postgres 模式重启后仍可查（memory 模式为进程内）
     persisted = await storage.state_store.list_llm_calls(
@@ -219,13 +215,9 @@ async def all_llm_calls(
     ring buffer 记录用 trace_id 关联项目（trace_{project_id}）；这里按本人项目集合过滤，
     防止跨用户看到他人 token 流水。
     """
-    projects = await storage.state_store.list_projects(
-        owner=current_user.user_id, limit=10000
-    )
+    projects = await storage.state_store.list_projects(owner=current_user.user_id, limit=10000)
     allowed_traces = {f"trace_{p.project_id}" for p in projects}
-    recs = [
-        r for r in list_calls(limit=limit) if r.trace_id in allowed_traces
-    ]
+    recs = [r for r in list_calls(limit=limit) if r.trace_id in allowed_traces]
     return LLMCallsResponse(calls=[r.to_dict() for r in recs], total=len(recs))
 
 
@@ -237,9 +229,7 @@ async def all_llm_calls(
 @router.get("/projects/{project_id}/export")
 async def export_project(
     project_id: str,
-    fmt: Literal["json", "markdown", "pdf", "docx"] = Query(
-        default="json", alias="format"
-    ),
+    fmt: Literal["json", "markdown", "pdf", "docx"] = Query(default="json", alias="format"),
     include_audit: bool = Query(
         default=False,
         description="markdown/pdf/docx 末尾附加「方法论与数据可信度」附录"
@@ -272,9 +262,7 @@ async def export_project(
         payload = {
             "project": project.model_dump(mode="json"),
             "plan": plan.model_dump(mode="json") if plan else None,
-            "outputs": {
-                nid: out.model_dump(mode="json") for nid, out in outputs.items()
-            },
+            "outputs": {nid: out.model_dump(mode="json") for nid, out in outputs.items()},
             "verdicts": [v.model_dump(mode="json") for v in verdicts],
             "exported_at": datetime.now(UTC).isoformat(),
         }
@@ -282,23 +270,17 @@ async def export_project(
         return Response(
             content=body,
             media_type="application/json",
-            headers={
-                "Content-Disposition": f'attachment; filename="{project_id}.json"'
-            },
+            headers={"Content-Disposition": f'attachment; filename="{project_id}.json"'},
         )
 
     # markdown 渲染（PDF / DOCX 都基于此做格式转换）
-    md = _render_markdown(
-        project_id, project, outputs, verdicts, include_audit=include_audit
-    )
+    md = _render_markdown(project_id, project, outputs, verdicts, include_audit=include_audit)
 
     if fmt == "markdown":
         return PlainTextResponse(
             content=md,
             media_type="text/markdown",
-            headers={
-                "Content-Disposition": f'attachment; filename="{project_id}.md"'
-            },
+            headers={"Content-Disposition": f'attachment; filename="{project_id}.md"'},
         )
 
     if fmt == "pdf":
@@ -307,17 +289,12 @@ async def export_project(
         except ImportError as e:
             raise HTTPException(
                 status_code=503,
-                detail=(
-                    "PDF export requires reportlab: "
-                    "`pip install '.[export-pdf-docx]'`"
-                ),
+                detail=("PDF export requires reportlab: `pip install '.[export-pdf-docx]'`"),
             ) from e
         return Response(
             content=body,
             media_type="application/pdf",
-            headers={
-                "Content-Disposition": f'attachment; filename="{project_id}.pdf"'
-            },
+            headers={"Content-Disposition": f'attachment; filename="{project_id}.pdf"'},
         )
 
     # docx
@@ -326,19 +303,12 @@ async def export_project(
     except ImportError as e:
         raise HTTPException(
             status_code=503,
-            detail=(
-                "DOCX export requires python-docx: "
-                "`pip install '.[export-pdf-docx]'`"
-            ),
+            detail=("DOCX export requires python-docx: `pip install '.[export-pdf-docx]'`"),
         ) from e
     return Response(
         content=body,
-        media_type=(
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ),
-        headers={
-            "Content-Disposition": f'attachment; filename="{project_id}.docx"'
-        },
+        media_type=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        headers={"Content-Disposition": f'attachment; filename="{project_id}.docx"'},
     )
 
 
@@ -368,9 +338,7 @@ def _source_label(source_type: str) -> str:
     return _SOURCE_TYPE_LABELS.get(source_type, source_type or "公开来源")
 
 
-def _render_markdown(
-    project_id, project, outputs, verdicts, *, include_audit: bool = False
-) -> str:
+def _render_markdown(project_id, project, outputs, verdicts, *, include_audit: bool = False) -> str:
     """把最终 reporter 输出渲染成「读者向」Markdown 报告。
 
     默认输出干净交付物：正文 + 编号引用 ``[n]`` + 「数据来源」列表 + 合规声明，
@@ -470,9 +438,7 @@ def _render_markdown(
 
     if include_audit:
         lines.append("")
-        lines.extend(
-            _render_audit_appendix(project_id, project, verdicts, ev_by_id)
-        )
+        lines.extend(_render_audit_appendix(project_id, project, verdicts, ev_by_id))
 
     return "\n".join(lines)
 
@@ -616,9 +582,7 @@ def _render_pdf(title: str, md_text: str) -> bytes:
         elif line.startswith("> "):
             story.append(Paragraph(_md_inline_to_html(line[2:].strip()), quote_style))
         elif line.startswith("- "):
-            story.append(
-                Paragraph("• " + _md_inline_to_html(line[2:].strip()), body_style)
-            )
+            story.append(Paragraph("• " + _md_inline_to_html(line[2:].strip()), body_style))
         else:
             story.append(Paragraph(_md_inline_to_html(line), body_style))
 
@@ -656,9 +620,7 @@ def _md_inline_to_html(text: str) -> str:
     """
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     text = _re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
-    text = _re.sub(
-        r"`([^`]+?)`", r'<font name="Courier" color="#a40000">\1</font>', text
-    )
+    text = _re.sub(r"`([^`]+?)`", r'<font name="Courier" color="#a40000">\1</font>', text)
     # 简单链接 [text](url) → text（reportlab 链接处理不稳，直接降级）
     text = _re.sub(r"\[(.+?)\]\(([^)]+?)\)", r"\1", text)
     return text

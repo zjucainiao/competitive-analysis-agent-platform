@@ -5,6 +5,7 @@
 - 纯 ambiguous → minor issue，但维度仍 pass（避免对比页空转）。
 - QA 整体：identity 是 core 维度，mismatch → blocking=True，routing 选最上游 collector。
 """
+
 from __future__ import annotations
 
 from backend.agents.qa import QA
@@ -92,9 +93,7 @@ def test_qa_mismatch_blocks_and_routes_to_collector() -> None:
     assert idr.pass_ is False
     assert verdict.blocking is True
     assert any(r.target_agent == "collector" for r in verdict.routing)
-    assert any(
-        i.dimension is QADimension.IDENTITY_CONSISTENCY for i in verdict.issues
-    )
+    assert any(i.dimension is QADimension.IDENTITY_CONSISTENCY for i in verdict.issues)
 
 
 # ---------- WI-1：被引用证据 tainted（疑似注入）→ 提权浮出 + 回 collector ----------

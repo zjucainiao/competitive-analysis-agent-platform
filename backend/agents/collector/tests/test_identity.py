@@ -7,6 +7,7 @@
 - 软标记：mismatch 的源**保留**在 raw_sources（不丢数据），并拉低 collector 置信。
 - P4：exclude_source_urls 命中的候选直接跳过（不再抓回同一个跑题页面）。
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -74,7 +75,11 @@ def test_heuristic_ambiguous_when_thirdparty_and_no_strong_hit() -> None:
 
 def _scrape(url: str, *, title: str, text: str) -> ScrapeResult:
     return ScrapeResult(
-        url=url, final_url=url, http_status=200, text=text, title=title,
+        url=url,
+        final_url=url,
+        http_status=200,
+        text=text,
+        title=title,
         fetched_with="scrape.firecrawl",
     )
 
@@ -149,14 +154,19 @@ def test_mismatch_sources_drag_confidence_below_rework_threshold() -> None:
 def test_mismatch_source_kept_not_dropped(make_registry) -> None:
     """软标记：抓到别的产品也**保留**在 raw_sources，只打 identity_status=mismatch。"""
     url = "https://thirdparty.com/notion-overview"
-    search = FakeSearch(fixed={"features": [SearchHit(url=url, title="Notion overview", provider="t")]})
+    search = FakeSearch(
+        fixed={"features": [SearchHit(url=url, title="Notion overview", provider="t")]}
+    )
     firecrawl = FakeScrape(
         name="scrape.firecrawl",
         enabled=True,
         default=ScrapeResult(
-            url=url, final_url=url, http_status=200,
+            url=url,
+            final_url=url,
+            http_status=200,
             text="Notion is a workspace. Notion databases, Notion pages.",
-            title="Notion overview", fetched_with="scrape.firecrawl",
+            title="Notion overview",
+            fetched_with="scrape.firecrawl",
         ),
     )
     fake = FakeLLM(
@@ -195,9 +205,12 @@ def test_collect_emits_progress_per_source(make_registry) -> None:
         name="scrape.firecrawl",
         enabled=True,
         default=ScrapeResult(
-            url=url, final_url=url, http_status=200,
+            url=url,
+            final_url=url,
+            http_status=200,
             text="Asana features: tasks, projects, timelines. Asana workflows.",
-            title="Asana features", fetched_with="scrape.firecrawl",
+            title="Asana features",
+            fetched_with="scrape.firecrawl",
         ),
     )
     reg = make_registry(search=search, firecrawl=firecrawl)
@@ -228,8 +241,12 @@ def test_no_emitter_is_silent_noop(make_registry) -> None:
         name="scrape.firecrawl",
         enabled=True,
         default=ScrapeResult(
-            url=url, final_url=url, http_status=200, text="Asana features. Asana.",
-            title="Asana features", fetched_with="scrape.firecrawl",
+            url=url,
+            final_url=url,
+            http_status=200,
+            text="Asana features. Asana.",
+            title="Asana features",
+            fetched_with="scrape.firecrawl",
         ),
     )
     reg = make_registry(search=search, firecrawl=firecrawl)
@@ -258,9 +275,12 @@ def test_exclude_source_urls_skips_candidate(make_registry) -> None:
         enabled=True,
         url_to_result={
             good: ScrapeResult(
-                url=good, final_url=good, http_status=200,
+                url=good,
+                final_url=good,
+                http_status=200,
                 text="Asana features: tasks, projects, timelines. Asana workflows.",
-                title="Asana features", fetched_with="scrape.firecrawl",
+                title="Asana features",
+                fetched_with="scrape.firecrawl",
             ),
         },
     )

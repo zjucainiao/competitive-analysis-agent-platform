@@ -3,6 +3,7 @@
 escalate_by_self_status：自评 needs_rework 的 agent 名下的 minor issue 升级为 major，
 但不凭空造 issue（避免「一自评就强制返工」的失控循环）。
 """
+
 from __future__ import annotations
 
 from backend.agents.qa.routing import escalate_by_self_status

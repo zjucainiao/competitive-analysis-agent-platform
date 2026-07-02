@@ -61,9 +61,7 @@ from .routing import (
 PROMPT_DIR = Path(__file__).parent / "prompts"
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_EVIDENCE_DB_PATH = (
-    _REPO_ROOT / "fixtures" / "mock_data" / "evidences" / "evidence_db.jsonl"
-)
+_EVIDENCE_DB_PATH = _REPO_ROOT / "fixtures" / "mock_data" / "evidences" / "evidence_db.jsonl"
 _QA_FIXTURE_DIR = _REPO_ROOT / "fixtures" / "mock_data" / "qa_verdicts"
 
 
@@ -110,8 +108,7 @@ class QA(BaseAgent[QAInput, QAOutput]):
             else self.CONFIDENCE_HARD_FAIL
         )
         critique = (
-            "[mock] 按 draft.version="
-            f"{version} 返回 {verdict.overall_status.value} 固定 verdict。"
+            f"[mock] 按 draft.version={version} 返回 {verdict.overall_status.value} 固定 verdict。"
         )
         return QAOutput(
             agent_name=self.name,
@@ -156,10 +153,7 @@ class QA(BaseAgent[QAInput, QAOutput]):
                 errors.append(
                     AgentError(
                         code="CHECKER_FAILED",
-                        message=(
-                            f"{checker_cls.__name__} crashed: "
-                            f"{type(e).__name__}: {e}"
-                        ),
+                        message=(f"{checker_cls.__name__} crashed: {type(e).__name__}: {e}"),
                         severity="error",
                         retriable=True,
                     )
@@ -181,9 +175,7 @@ class QA(BaseAgent[QAInput, QAOutput]):
             errors.extend(result.errors)
 
         # ---- A1：杀静默放行 —— 对低分但无 issue 的维度补发 ----
-        all_issues.extend(
-            synthesize_threshold_issues(dimension_results, all_issues)
-        )
+        all_issues.extend(synthesize_threshold_issues(dimension_results, all_issues))
 
         # ---- ⑤ 把上游 agent 自评(needs_rework)接入判级：加权其名下已有 issue ----
         all_issues = escalate_by_self_status(all_issues, inp.upstream_statuses)
@@ -193,9 +185,7 @@ class QA(BaseAgent[QAInput, QAOutput]):
         # 逐条闭环：上一轮已要求修复但本轮仍在的 issue → 打未解决标记 + 强化反馈措辞
         # （在降级之前做：第 2 次出现加压，第 3 次才交给 downgrade 放弃）。
         all_issues = mark_unresolved_from_prior(all_issues, prior_counts)
-        adjusted_issues, downgraded = downgrade_repeated_issues(
-            all_issues, prior_counts
-        )
+        adjusted_issues, downgraded = downgrade_repeated_issues(all_issues, prior_counts)
 
         # ---- 整体判定（A1：核心维度不及格 → 强制 blocking 返工）----
         # 传 prior_verdicts 启用复发护栏:已失败过的核心维度不再强制阻塞,避免空转。
@@ -256,20 +246,13 @@ class QA(BaseAgent[QAInput, QAOutput]):
         verdict = out.verdict
 
         # 1. dimension_results 必须覆盖所有维度（QADimension 全集）
-        missing = [
-            d
-            for d in QADimension
-            if d not in verdict.dimension_results
-        ]
+        missing = [d for d in QADimension if d not in verdict.dimension_results]
         if missing:
             from backend.agents._base import AgentRunError
 
             raise AgentRunError(
                 code="OUTPUT_TYPE_MISMATCH",
-                message=(
-                    f"QA verdict missing dimensions: "
-                    f"{[d.value for d in missing]}"
-                ),
+                message=(f"QA verdict missing dimensions: {[d.value for d in missing]}"),
                 retriable=False,
             )
 
@@ -292,9 +275,7 @@ class QA(BaseAgent[QAInput, QAOutput]):
 
                 raise AgentRunError(
                     code="OUTPUT_TYPE_MISMATCH",
-                    message=(
-                        f"routing target {r.target_agent!r} has no backing issues"
-                    ),
+                    message=(f"routing target {r.target_agent!r} has no backing issues"),
                     retriable=False,
                 )
 
@@ -334,38 +315,24 @@ def _build_critique(
     upstream_statuses: dict[str, str] | None = None,
 ) -> str:
     bits: list[str] = []
-    failing = [
-        d for d, r in dimension_results.items() if not r.pass_
-    ]
+    failing = [d for d, r in dimension_results.items() if not r.pass_]
     if failing:
-        bits.append(
-            "未通过维度："
-            + ", ".join(d.value for d in failing)
-        )
-    flagged = sorted(
-        a for a, s in (upstream_statuses or {}).items() if s == "needs_rework"
-    )
+        bits.append("未通过维度：" + ", ".join(d.value for d in failing))
+    flagged = sorted(a for a, s in (upstream_statuses or {}).items() if s == "needs_rework")
     if flagged:
         bits.append(f"上游自评 needs_rework：{', '.join(flagged)}（已加权其名下 issue）")
     if verdict.issues:
         weight = sum(SEVERITY_WEIGHTS[i.severity] for i in verdict.issues)
-        bits.append(
-            f"共 {len(verdict.issues)} 条 issue，"
-            f"严重度权重 {weight}"
-        )
+        bits.append(f"共 {len(verdict.issues)} 条 issue，严重度权重 {weight}")
     if downgraded:
-        bits.append(
-            f"自动降级 {len(downgraded)} 条反复出现的 issue"
-        )
+        bits.append(f"自动降级 {len(downgraded)} 条反复出现的 issue")
     if max_retry_reached:
         bits.append(f"已达重试上限（prior={prior_count}），强制放行")
     err_codes = sorted({e.code for e in errors if e.severity in ("warn", "error")})
     if err_codes:
         bits.append(f"过程告警：{', '.join(err_codes)}")
     if not bits:
-        return (
-            f"6 维度全部通过；blocking={verdict.blocking}。"
-        )
+        return f"6 维度全部通过；blocking={verdict.blocking}。"
     return " | ".join(bits)
 
 

@@ -65,8 +65,7 @@ class Checker(Protocol):
 
     dimension: ClassVar[QADimension]
 
-    def run(self, ctx: CheckerContext) -> CheckerResult:
-        ...
+    def run(self, ctx: CheckerContext) -> CheckerResult: ...
 
 
 class BaseChecker(ABC):

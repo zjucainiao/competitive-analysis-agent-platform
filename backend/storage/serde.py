@@ -46,10 +46,7 @@ def load_output(payload: dict[str, Any]) -> AgentOutputBase:
         raise ValueError("payload missing 'agent_name'; cannot infer AgentOutput subtype")
     model = _OUTPUT_REGISTRY.get(agent_name)
     if model is None:
-        raise ValueError(
-            f"unknown agent_name={agent_name!r}; "
-            f"known: {sorted(_OUTPUT_REGISTRY)}"
-        )
+        raise ValueError(f"unknown agent_name={agent_name!r}; known: {sorted(_OUTPUT_REGISTRY)}")
     return model.model_validate(payload)
 
 

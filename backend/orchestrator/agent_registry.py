@@ -74,9 +74,7 @@ class AgentRegistry:
 
         cls = _AGENT_CLASSES.get(agent_name)
         if cls is None:
-            raise ValueError(
-                f"unknown agent: {agent_name!r}; known={self.known_agents()}"
-            )
+            raise ValueError(f"unknown agent: {agent_name!r}; known={self.known_agents()}")
 
         kwargs: dict[str, Any] = {
             "mock": False,

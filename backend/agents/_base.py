@@ -49,9 +49,7 @@ from backend.schemas.agent_io import (
 # 这是个跨 Agent 的人工介入兜底：用户 PATCH /nodes/{nid}/edit-prompt 后，无需
 # 任何 Agent 子类配合即可生效；具体效果取决于 LLM 对 USER OVERRIDE 块的服从度。
 
-_USER_PROMPT_OVERRIDE: ContextVar[str | None] = ContextVar(
-    "_USER_PROMPT_OVERRIDE", default=None
-)
+_USER_PROMPT_OVERRIDE: ContextVar[str | None] = ContextVar("_USER_PROMPT_OVERRIDE", default=None)
 
 
 def set_user_prompt_override(text: str | None):
@@ -66,6 +64,7 @@ def reset_user_prompt_override(token) -> None:
 
 def _current_user_prompt_override() -> str | None:
     return _USER_PROMPT_OVERRIDE.get()
+
 
 # ---------- Type variables ----------
 
@@ -101,8 +100,7 @@ class LLMProviderProtocol(Protocol):
         """同步对话。返回值由实现决定（通常含 .parsed / .usage / .raw）。"""
         ...
 
-    def embed(self, texts: list[str], **kwargs: Any) -> list[list[float]]:
-        ...
+    def embed(self, texts: list[str], **kwargs: Any) -> list[list[float]]: ...
 
 
 @runtime_checkable
@@ -131,11 +129,9 @@ class TracerProtocol(Protocol):
 class ToolRegistryProtocol(Protocol):
     """工具注册表的最小接口。"""
 
-    def get(self, name: str) -> Any:
-        ...
+    def get(self, name: str) -> Any: ...
 
-    def has(self, name: str) -> bool:
-        ...
+    def has(self, name: str) -> bool: ...
 
 
 # ---------- Errors ----------
@@ -247,8 +243,7 @@ class _TrackingLLMWrapper:
                         model=model,
                         system_prompt=kwargs.get("system", ""),
                         messages=kwargs.get("messages"),
-                        response=getattr(resp, "content", None)
-                        or getattr(resp, "parsed", None),
+                        response=getattr(resp, "content", None) or getattr(resp, "parsed", None),
                         tokens_input=tokens_in,
                         tokens_output=tokens_out,
                         cost_usd=cost,
@@ -369,10 +364,7 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
         if not isinstance(inp, self.input_model):
             raise AgentRunError(
                 code="INPUT_INVALID",
-                message=(
-                    f"Expected {self.input_model.__name__}, "
-                    f"got {type(inp).__name__}"
-                ),
+                message=(f"Expected {self.input_model.__name__}, got {type(inp).__name__}"),
                 retriable=False,
             )
 
@@ -442,8 +434,7 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
                     AgentError(
                         code="OUTPUT_TYPE_MISMATCH",
                         message=(
-                            f"Expected {self.output_model.__name__}, "
-                            f"got {type(out).__name__}"
+                            f"Expected {self.output_model.__name__}, got {type(out).__name__}"
                         ),
                         severity="fatal",
                         retriable=False,
@@ -525,8 +516,7 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
     def _run_mock(self, inp: TInput) -> TOutput:
         """Mock 模式。默认子类应当覆盖（return fixture）。"""
         raise NotImplementedError(
-            f"{self.name}._run_mock not implemented. "
-            "Override to support mock mode."
+            f"{self.name}._run_mock not implemented. Override to support mock mode."
         )
 
     def _post_validate(self, out: TOutput, inp: TInput) -> None:
@@ -570,10 +560,9 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
             span_id=span_id,
             status=AgentStatus.FAILED,
             confidence=0.0,
-            self_critique=(
-                "Execution failed; see errors. "
-                + "; ".join(e.message for e in errors)
-            )[:1000],
+            self_critique=("Execution failed; see errors. " + "; ".join(e.message for e in errors))[
+                :1000
+            ],
             tokens_input=0,
             tokens_output=0,
             cost_usd=0.0,

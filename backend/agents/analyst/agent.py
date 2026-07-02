@@ -132,9 +132,7 @@ class Analyst(BaseAgent[AnalystInput, AnalystOutput]):
         errors: list[AgentError] = []
         per_dim: dict[AnalysisDimension, DimensionAnalysis] = {}
         total_dropped = 0
-        missing_profiles = sorted(
-            {inp.target_product, *inp.competitors} - set(inp.profiles.keys())
-        )
+        missing_profiles = sorted({inp.target_product, *inp.competitors} - set(inp.profiles.keys()))
         if missing_profiles:
             errors.append(
                 AgentError(
@@ -183,9 +181,7 @@ class Analyst(BaseAgent[AnalystInput, AnalystOutput]):
             # 每维度 copy_context()：把 LLM trace contextvar（node_id/trace_id）带进
             # worker 线程，否则并发产生的 LLM call 会丢失 node 归属（同 collector）。
             contexts = [contextvars.copy_context() for _ in dims]
-            with ThreadPoolExecutor(
-                max_workers=min(len(dims), self.MAX_DIMENSION_WORKERS)
-            ) as pool:
+            with ThreadPoolExecutor(max_workers=min(len(dims), self.MAX_DIMENSION_WORKERS)) as pool:
                 futures = [
                     pool.submit(ctx.run, _run_one, dim)
                     for dim, ctx in zip(dims, contexts, strict=True)
@@ -245,8 +241,7 @@ class Analyst(BaseAgent[AnalystInput, AnalystOutput]):
                     AgentError(
                         code="LLM_SCHEMA_INVALID",
                         message=(
-                            f"LLM analysis for {dimension.value} failed: "
-                            f"{type(e).__name__}: {e}"
+                            f"LLM analysis for {dimension.value} failed: {type(e).__name__}: {e}"
                         ),
                         severity="warn",
                         retriable=True,
@@ -295,7 +290,9 @@ class Analyst(BaseAgent[AnalystInput, AnalystOutput]):
         user = _render(
             user_template,
             target=inp.target_product,
-            competitors=", ".join(inp.competitors) if inp.competitors else "(none — single-product research)",
+            competitors=", ".join(inp.competitors)
+            if inp.competitors
+            else "(none — single-product research)",
             dimension=dimension.value,
             valid_evidence_ids=", ".join(sorted(valid_pool)),
             profiles_json=_compact_profiles(inp.profiles),
@@ -308,8 +305,7 @@ class Analyst(BaseAgent[AnalystInput, AnalystOutput]):
                 "## NOTE: Single-product research mode\n"
                 "There are NO competitors in this run. Do NOT invent comparison claims. "
                 "Describe ONLY the target product based on its profile + cited evidence. "
-                "Skip any 'X is better/worse than Y' framing.\n\n"
-                + user
+                "Skip any 'X is better/worse than Y' framing.\n\n" + user
             )
         resp = self.llm.chat(
             system=system,
@@ -372,9 +368,7 @@ class Analyst(BaseAgent[AnalystInput, AnalystOutput]):
                     products_involved=claim.products_involved,
                     evidence_ids=valid_ev,
                     confidence=new_confidence,
-                    counter_evidence_ids=[
-                        e for e in claim.counter_evidence_ids if e in valid_pool
-                    ],
+                    counter_evidence_ids=[e for e in claim.counter_evidence_ids if e in valid_pool],
                     qualifier=claim.qualifier,
                 )
             )
@@ -474,9 +468,7 @@ class Analyst(BaseAgent[AnalystInput, AnalystOutput]):
             lines.append(f"过程告警：{', '.join(codes)}")
         if not lines:
             total_claims = sum(len(d.claims) for d in per_dim.values())
-            return (
-                f"覆盖 {len(per_dim)} 个维度，共产出 {total_claims} 条有 evidence 支撑的 claim。"
-            )
+            return f"覆盖 {len(per_dim)} 个维度，共产出 {total_claims} 条有 evidence 支撑的 claim。"
         return " | ".join(lines)
 
 
@@ -518,9 +510,7 @@ def _coerce_pydantic(resp: Any, model: type[BaseModel]) -> Any:
         return model.model_validate(resp)
     if hasattr(resp, "model_dump"):
         return model.model_validate(resp.model_dump())
-    raise ValueError(
-        f"cannot coerce LLM response to {model.__name__}: {type(resp).__name__}"
-    )
+    raise ValueError(f"cannot coerce LLM response to {model.__name__}: {type(resp).__name__}")
 
 
 def _compact_profiles(profiles: dict[str, CompetitorProfile]) -> str:

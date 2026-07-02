@@ -36,9 +36,7 @@ class FakeLLM:
     call_log: list[str] = field(default_factory=list)
 
     def chat(self, *, system: str, messages: list[dict], **kwargs: Any) -> Any:
-        user_content = next(
-            (m["content"] for m in messages if m["role"] == "user"), ""
-        )
+        user_content = next((m["content"] for m in messages if m["role"] == "user"), "")
         for dim_key, analysis in self.by_dimension.items():
             if dim_key in user_content:
                 self.call_log.append(dim_key)

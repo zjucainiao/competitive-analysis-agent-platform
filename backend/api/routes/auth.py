@@ -47,6 +47,7 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     """登录/注册成功返回。token_type 固定 bearer。"""
+
     model_config = ConfigDict(extra="forbid")
     access_token: str
     token_type: str = "bearer"

@@ -45,9 +45,7 @@ _log = logging.getLogger(__name__)
 async def _load_plan_or_404(storage: Storage, project_id: str):
     plan = await storage.state_store.get_dag_plan(project_id)
     if plan is None:
-        raise HTTPException(
-            status_code=404, detail=f"plan for project {project_id!r} not found"
-        )
+        raise HTTPException(status_code=404, detail=f"plan for project {project_id!r} not found")
     return plan
 
 
@@ -106,9 +104,7 @@ async def _start_fresh_native_run(
                 new_plan, project_with_run, run_id=run_id, seed_state=seed_state
             ):
                 pass
-            await storage.state_store.update_project_status(
-                project.project_id, ProjectStatus.DONE
-            )
+            await storage.state_store.update_project_status(project.project_id, ProjectStatus.DONE)
         except Exception:
             _log.exception("native rerun failed project=%s", project.project_id)
             await storage.state_store.update_project_status(
@@ -126,9 +122,7 @@ def _count_paragraphs(reporter_out: ReporterOutput) -> int:
     return sum(len(s.paragraphs) for s in reporter_out.draft.sections)
 
 
-def _bump_manual_edits(
-    project, total_paragraphs: int, increment: int = 1
-) -> ProjectMetrics:
+def _bump_manual_edits(project, total_paragraphs: int, increment: int = 1) -> ProjectMetrics:
     metrics = project.metrics or ProjectMetrics()
     new_edits = metrics.manual_edits + increment
     new_rate = min(new_edits / max(total_paragraphs, 1), 1.0) if total_paragraphs else 0.0
@@ -151,9 +145,7 @@ class QAOverrideResponse(BaseModel):
     overridden_verdict_id: str | None = None
 
 
-@router.post(
-    "/projects/{project_id}/override", response_model=QAOverrideResponse, tags=["qa"]
-)
+@router.post("/projects/{project_id}/override", response_model=QAOverrideResponse, tags=["qa"])
 async def override_qa(
     project_id: str,
     request: Request,
@@ -201,12 +193,12 @@ async def override_qa(
     # 无 verdict / 无改善时 best_round_reporter_key 退回「最高 revision」(旧行为)。
     final_reporter_key = best_round_reporter_key(outputs, verdicts)
     reporter_out = outputs.get(final_reporter_key)
-    total_paragraphs = _count_paragraphs(reporter_out) if isinstance(reporter_out, ReporterOutput) else 0
+    total_paragraphs = (
+        _count_paragraphs(reporter_out) if isinstance(reporter_out, ReporterOutput) else 0
+    )
     new_metrics = _bump_manual_edits(project, total_paragraphs)
 
-    updated = project.model_copy(
-        update={"status": ProjectStatus.DONE, "metrics": new_metrics}
-    )
+    updated = project.model_copy(update={"status": ProjectStatus.DONE, "metrics": new_metrics})
     await storage.state_store.save_project(updated)
 
     return QAOverrideResponse(
@@ -369,7 +361,9 @@ async def skip_node(
     await storage.state_store.save_dag_plan(plan.model_copy(update={"nodes": new_nodes}))
 
     return NodeActionResponse(
-        project_id=project_id, node_id=node_id, new_status=NodeStatus.SKIPPED,
+        project_id=project_id,
+        node_id=node_id,
+        new_status=NodeStatus.SKIPPED,
     )
 
 
@@ -396,10 +390,7 @@ async def force_start_node(
         # 同 skip：native 固定流水线无「强制启动单节点」语义。
         raise HTTPException(
             status_code=409,
-            detail=(
-                "native 引擎是固定流水线，不支持单节点 force-start；"
-                "如需重跑请用 retry。"
-            ),
+            detail=("native 引擎是固定流水线，不支持单节点 force-start；如需重跑请用 retry。"),
         )
 
     plan = await _load_plan_or_404(storage, project_id)
@@ -427,7 +418,9 @@ async def force_start_node(
     await storage.state_store.save_dag_plan(plan.model_copy(update={"nodes": new_nodes}))
 
     return NodeActionResponse(
-        project_id=project_id, node_id=node_id, new_status=NodeStatus.READY,
+        project_id=project_id,
+        node_id=node_id,
+        new_status=NodeStatus.READY,
     )
 
 
@@ -568,8 +561,10 @@ async def stop_run(
 
     await storage.state_store.update_project_status(project_id, ProjectStatus.FAILED)
     return RunControlResponse(
-        project_id=project_id, action="stopped",
-        cancelled_task=cancelled, plan_status_reset=plan_reset,
+        project_id=project_id,
+        action="stopped",
+        cancelled_task=cancelled,
+        plan_status_reset=plan_reset,
     )
 
 
@@ -589,7 +584,9 @@ async def pause_run(
     """
     cancelled = await _cancel_running_task(request, project_id)
     return RunControlResponse(
-        project_id=project_id, action="paused", cancelled_task=cancelled,
+        project_id=project_id,
+        action="paused",
+        cancelled_task=cancelled,
     )
 
 
@@ -687,6 +684,8 @@ async def restart_run(
     running_tasks[project_id] = task
 
     return RunControlResponse(
-        project_id=project_id, action="restarted",
-        cancelled_task=cancelled, plan_status_reset=True,
+        project_id=project_id,
+        action="restarted",
+        cancelled_task=cancelled,
+        plan_status_reset=True,
     )

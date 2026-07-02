@@ -3,6 +3,7 @@
 抓到的页面正文若含注入串（"ignore all previous instructions ..."），对应 RawSourceDoc
 标 tainted=True + taint_reasons，但**不丢数据**（软标记，交下游 QA 据 tainted 提权）。
 """
+
 from __future__ import annotations
 
 from backend.agents.collector.agent import Collector
@@ -20,8 +21,12 @@ def _agent_for(text: str, make_registry, *, url: str = "https://asana.com/featur
         name="scrape.firecrawl",
         enabled=True,
         default=ScrapeResult(
-            url=url, final_url=url, http_status=200, text=text,
-            title="Asana features", fetched_with="scrape.firecrawl",
+            url=url,
+            final_url=url,
+            http_status=200,
+            text=text,
+            title="Asana features",
+            fetched_with="scrape.firecrawl",
         ),
     )
     reg = make_registry(search=search, firecrawl=firecrawl)

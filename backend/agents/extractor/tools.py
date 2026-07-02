@@ -335,9 +335,7 @@ def coerce_pydantic(resp: Any, model: type[BaseModel]) -> Any:
         return model.model_validate(resp)
     if hasattr(resp, "model_dump"):
         return model.model_validate(resp.model_dump())
-    raise ValueError(
-        f"cannot coerce LLM response to {model.__name__}: {type(resp).__name__}"
-    )
+    raise ValueError(f"cannot coerce LLM response to {model.__name__}: {type(resp).__name__}")
 
 
 # ---------- Evidence ID / hash helpers ----------

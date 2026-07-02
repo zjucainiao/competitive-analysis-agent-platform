@@ -179,7 +179,9 @@ def test_qa_feedback_by_node_reporter_key() -> None:
     )
     assert goto == "reporter"
     fb = upd.get("qa_feedback_by_node", {})
-    assert "reporter" in fb, f"expected 'reporter' key in qa_feedback_by_node, got {list(fb.keys())}"
+    assert "reporter" in fb, (
+        f"expected 'reporter' key in qa_feedback_by_node, got {list(fb.keys())}"
+    )
     payload = fb["reporter"]
     assert "from_verdict_id" in payload, (
         f"expected 'from_verdict_id' in reporter payload, got {list(payload.keys())}"

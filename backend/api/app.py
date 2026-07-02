@@ -84,9 +84,7 @@ def create_app(
 
         registry = AgentRegistry.from_env()
 
-        orch = Orchestrator(
-            registry=registry, storage=storage, max_parallel=max_parallel
-        )
+        orch = Orchestrator(registry=registry, storage=storage, max_parallel=max_parallel)
 
         app.state.storage = storage
         app.state.agent_registry = registry

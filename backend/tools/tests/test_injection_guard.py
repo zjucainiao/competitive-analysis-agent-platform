@@ -4,6 +4,7 @@
 1. 真注入串能命中（tainted=True）；
 2. 正常含 "ignore" / "disregard" 等词的评测文本**不误杀**（阈值/模式足够具体）。
 """
+
 from __future__ import annotations
 
 from backend.tools.injection_guard import scan
@@ -48,9 +49,7 @@ def test_scan_clean_competitive_text_not_tainted() -> None:
 
 def test_scan_benign_ignore_not_false_positive() -> None:
     # 正常含 'ignore' 的评测语句：仅 'ignore … previous instructions' 结构才算注入。
-    v = scan(
-        "Users can safely ignore the minor UI differences between Notion and ClickUp."
-    )
+    v = scan("Users can safely ignore the minor UI differences between Notion and ClickUp.")
     assert v.tainted is False
 
 

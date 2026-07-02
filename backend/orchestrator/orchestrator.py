@@ -80,11 +80,10 @@ def native_thread_config(project_id: str, run_id: str | None) -> dict:
     thread_id = f"{project_id}::{run_id}" if run_id else project_id
     return {"configurable": {"thread_id": thread_id}}
 
+
 _DEFAULT_MAX_PARALLEL = 4
 
-_TERMINAL_STATUSES = frozenset(
-    [NodeStatus.SUCCESS, NodeStatus.FAILED, NodeStatus.SKIPPED]
-)
+_TERMINAL_STATUSES = frozenset([NodeStatus.SUCCESS, NodeStatus.FAILED, NodeStatus.SKIPPED])
 
 
 class Orchestrator:
@@ -139,9 +138,7 @@ class Orchestrator:
         ``ORCH_ENGINE=legacy`` 显式回退旧引擎；未设或设为 ``native`` 走原生 LangGraph 图。
         """
         if os.getenv("ORCH_ENGINE", "native") == "native":
-            async for r in self._run_native(
-                plan, project, run_id=run_id, seed_state=seed_state
-            ):
+            async for r in self._run_native(plan, project, run_id=run_id, seed_state=seed_state):
                 yield r
             return
 
@@ -329,9 +326,7 @@ class Orchestrator:
                 metadata={"kind": "collect_progress", **payload},
             )
             try:
-                fut = asyncio.run_coroutine_threadsafe(
-                    _bus.publish(channel, res), loop
-                )
+                fut = asyncio.run_coroutine_threadsafe(_bus.publish(channel, res), loop)
                 # 取回异常避免「Future exception was never retrieved」噪音(纯观测)。
                 fut.add_done_callback(lambda f: f.exception())
             except Exception:
@@ -339,9 +334,7 @@ class Orchestrator:
 
         emit_token = set_collect_progress_emitter(_emit_collect_progress)
         try:
-            async for snap in graph.astream(
-                init, config=config, stream_mode="values"
-            ):
+            async for snap in graph.astream(init, config=config, stream_mode="values"):
                 final_state = snap
                 for ref, out in snap["outputs"].items():
                     if out is None:
@@ -364,7 +357,9 @@ class Orchestrator:
                     try:
                         await self._persist_node_llm_calls(project.project_id, res)
                     except Exception as exc:
-                        _log.warning("native _persist_node_llm_calls failed: %s", exc, exc_info=True)
+                        _log.warning(
+                            "native _persist_node_llm_calls failed: %s", exc, exc_info=True
+                        )
                     await self.storage.event_bus.publish(channel, res)
                     yield res
 
@@ -379,12 +374,16 @@ class Orchestrator:
                     node = getattr(run, "node", None) or (
                         run.get("node") if isinstance(run, dict) else None
                     )
-                    product = getattr(run, "product", None) if not isinstance(
-                        run, dict
-                    ) else run.get("product")
-                    round_ = getattr(run, "round", None) if not isinstance(
-                        run, dict
-                    ) else run.get("round", 1)
+                    product = (
+                        getattr(run, "product", None)
+                        if not isinstance(run, dict)
+                        else run.get("product")
+                    )
+                    round_ = (
+                        getattr(run, "round", None)
+                        if not isinstance(run, dict)
+                        else run.get("round", 1)
+                    )
                     if node is None:
                         continue
                     nid = _node_id(node, product, round_ or 1)
@@ -449,9 +448,7 @@ class Orchestrator:
             except Exception as exc:
                 _log.warning("native _persist_metrics failed: %s", exc, exc_info=True)
 
-    async def resume(
-        self, project_id: str, project: Project
-    ) -> AsyncIterator[NodeExecutionResult]:
+    async def resume(self, project_id: str, project: Project) -> AsyncIterator[NodeExecutionResult]:
         """从 checkpoint 继续。
 
         引擎选择同 ``run``:``ORCH_ENGINE=native`` 时走 ``_resume_native``
@@ -521,9 +518,7 @@ class Orchestrator:
         if not ready:
             return {
                 "aborted": True,
-                "abort_reason": (
-                    "no ready nodes but DAG not terminal (deadlock or all failed)"
-                ),
+                "abort_reason": ("no ready nodes but DAG not terminal (deadlock or all failed)"),
                 "last_batch_results": [],
             }
 
@@ -584,16 +579,19 @@ class Orchestrator:
             await self.storage.event_bus.publish(channel, r)
 
         # 6. QA 反馈路由
-        new_plan, qa_feedback_by_node, verdict_history, qa_round_count = (
-            await self._process_qa_routing(
-                results=results,
-                plan=new_plan,
-                outputs=outputs,
-                verdict_history=verdict_history,
-                qa_feedback_by_node=qa_feedback_by_node,
-                qa_round_count=qa_round_count,
-                project=project,
-            )
+        (
+            new_plan,
+            qa_feedback_by_node,
+            verdict_history,
+            qa_round_count,
+        ) = await self._process_qa_routing(
+            results=results,
+            plan=new_plan,
+            outputs=outputs,
+            verdict_history=verdict_history,
+            qa_feedback_by_node=qa_feedback_by_node,
+            qa_round_count=qa_round_count,
+            project=project,
         )
 
         # 7. 落最新 plan
@@ -677,9 +675,7 @@ class Orchestrator:
                 }
             )
 
-        snapshot = ProjectMetricsSnapshot(
-            captured_at=datetime.now(UTC), metrics=metrics
-        )
+        snapshot = ProjectMetricsSnapshot(captured_at=datetime.now(UTC), metrics=metrics)
         new_history = [*base_project.metrics_history, snapshot]
         updated = base_project.model_copy(
             update={"metrics": metrics, "metrics_history": new_history}
@@ -720,9 +716,7 @@ class Orchestrator:
             if outcome.aborted:
                 # 触顶后不再重做，由 should_continue 在下一轮判定 DAG 终止
                 # 同时把 qa_round_count 提到 max，防止后续仍 routing
-                qa_round_count = max(
-                    qa_round_count, self.feedback_router.max_rounds
-                )
+                qa_round_count = max(qa_round_count, self.feedback_router.max_rounds)
                 continue
 
             plan = _apply_feedback_outcome(plan, outcome)
@@ -761,9 +755,7 @@ def _native_outputs_for_metrics(
 # ---------- 纯函数：plan 调度逻辑 ----------
 
 
-def _find_ready_nodes(
-    plan: DAGPlan, outputs: dict[str, AgentOutputBase]
-) -> list[DAGNode]:
+def _find_ready_nodes(plan: DAGPlan, outputs: dict[str, AgentOutputBase]) -> list[DAGNode]:
     """status=PENDING 且所有 input_refs 均为 SUCCESS / SKIPPED 的节点。"""
     by_id = {n.node_id: n for n in plan.nodes}
     ready: list[DAGNode] = []
@@ -788,9 +780,7 @@ def _all_terminal(plan: DAGPlan) -> bool:
     return all(n.status in _TERMINAL_STATUSES for n in plan.nodes)
 
 
-def _apply_node_results(
-    plan: DAGPlan, results: list[NodeExecutionResult]
-) -> DAGPlan:
+def _apply_node_results(plan: DAGPlan, results: list[NodeExecutionResult]) -> DAGPlan:
     """把一批 NodeExecutionResult 应用到 plan.nodes 的状态字段。"""
     results_by_id = {r.node_id: r for r in results}
     new_nodes: list[DAGNode] = []

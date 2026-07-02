@@ -18,9 +18,7 @@ class NullLLM:
     """空 LLM 桩。chat 报错 → 触发 Reporter 启发式 fallback。"""
 
     def chat(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError(
-            "NullLLM.chat called — Reporter should fall back to heuristics"
-        )
+        raise NotImplementedError("NullLLM.chat called — Reporter should fall back to heuristics")
 
     def embed(self, texts: list[str], **kwargs: Any) -> list[list[float]]:
         return [[0.0] * 8 for _ in texts]
@@ -52,9 +50,7 @@ class FakeLLM:
         response_format: Any = None,
         **kwargs: Any,
     ) -> Any:
-        user_content = next(
-            (m["content"] for m in messages if m["role"] == "user"), ""
-        )
+        user_content = next((m["content"] for m in messages if m["role"] == "user"), "")
         rf_name = getattr(response_format, "__name__", "")
         if rf_name == "EntailmentVerdict":
             for phrase, verdict in self.entailment_by_phrase.items():
@@ -83,9 +79,7 @@ class FakeLLM:
             if section_id in user_content:
                 self.call_log.append(section_id)
                 return section
-        raise NotImplementedError(
-            f"FakeLLM has no response for content: {user_content[:120]}..."
-        )
+        raise NotImplementedError(f"FakeLLM has no response for content: {user_content[:120]}...")
 
     def embed(self, texts: list[str], **kwargs: Any) -> list[list[float]]:
         return [[0.0] * 8 for _ in texts]

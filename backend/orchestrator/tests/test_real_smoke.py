@@ -29,10 +29,7 @@ if os.getenv("RUN_REAL_LLM_TESTS") == "1":
 
 
 def _has_any_llm_key() -> bool:
-    return any(
-        os.getenv(k)
-        for k in ("DOUBAO_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY")
-    )
+    return any(os.getenv(k) for k in ("DOUBAO_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY"))
 
 
 def _real_llm_disabled() -> bool:
@@ -67,9 +64,7 @@ def test_real_analyst_invocation_succeeds() -> None:
     out = analyst.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id)
 
     # 容忍 PARTIAL/NEEDS_REWORK，但绝不能是 FAILED
-    assert out.status != AgentStatus.FAILED, (
-        f"analyst FAILED with errors: {out.errors}"
-    )
+    assert out.status != AgentStatus.FAILED, f"analyst FAILED with errors: {out.errors}"
     # 结果必须有维度且每个维度都有 LLM 生成的 claim
     assert out.result.dimensions, "real analyst returned empty dimensions"
     total_claims = sum(len(d.claims) for d in out.result.dimensions.values())

@@ -147,12 +147,7 @@ def test_does_not_double_redact():
 
 
 def test_handles_multiline():
-    text = (
-        "Contact:\n"
-        "  email: bob@y.com\n"
-        "  phone: 13812345678\n"
-        "  ssn: 123-45-6789\n"
-    )
+    text = "Contact:\n  email: bob@y.com\n  phone: 13812345678\n  ssn: 123-45-6789\n"
     out, stats = sanitize_with_stats(text)
     assert "bob@y.com" not in out
     assert "13812345678" not in out

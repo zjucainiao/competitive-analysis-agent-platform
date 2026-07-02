@@ -150,11 +150,7 @@ class FactConsistencyChecker(BaseChecker):
             for p_idx, para in enumerate(section.paragraphs):
                 if para.is_soft_conclusion or not para.text.strip():
                     continue
-                evs = [
-                    ctx.evidence_db[e]
-                    for e in para.evidence_ids
-                    if e in ctx.evidence_db
-                ]
+                evs = [ctx.evidence_db[e] for e in para.evidence_ids if e in ctx.evidence_db]
                 para_index[para.paragraph_id] = (s_idx, p_idx, para, evs)
 
         # ---- LLM entailment（按段落分批，每批最多 6 段） ----
@@ -166,10 +162,7 @@ class FactConsistencyChecker(BaseChecker):
                 errors.append(
                     AgentError(
                         code="ENTAILMENT_FAILED",
-                        message=(
-                            f"fact_consistency LLM call failed: "
-                            f"{type(e).__name__}: {e}"
-                        ),
+                        message=(f"fact_consistency LLM call failed: {type(e).__name__}: {e}"),
                         severity="warn",
                         retriable=True,
                     )
@@ -199,8 +192,7 @@ class FactConsistencyChecker(BaseChecker):
                         severity="major",
                         location=location,
                         problem=(
-                            f"段落 {pid!r} 与引用 evidence 冲突。"
-                            f"{entailment.note}".strip()
+                            f"段落 {pid!r} 与引用 evidence 冲突。{entailment.note}".strip()
                             if entailment
                             else ""
                         ).strip(),
@@ -321,11 +313,7 @@ class FactConsistencyChecker(BaseChecker):
         notes = (
             f"entailed {entailed}/{total}；contradicted 段落 "
             f"{len(contradicted_paragraphs)}。"
-            + (
-                f" {unverified} 段未核验(LLM 不可用/漏判)，维度降级未通过。"
-                if degraded
-                else ""
-            )
+            + (f" {unverified} 段未核验(LLM 不可用/漏判)，维度降级未通过。" if degraded else "")
         )
         return CheckerResult(
             dimension=self.dimension,
@@ -347,16 +335,12 @@ class FactConsistencyChecker(BaseChecker):
         prompt_path = Path(ctx.prompt_dir) / "entailment.md"
         if not prompt_path.exists():
             return {}
-        system, user_template = _split_prompt(
-            prompt_path.read_text(encoding="utf-8")
-        )
+        system, user_template = _split_prompt(prompt_path.read_text(encoding="utf-8"))
 
         out: dict[str, _EntailmentVerdict] = {}
         # 仅对有 evidence 的段落送 LLM
         batch_input: list[tuple[str, ReportParagraph, list[Evidence]]] = [
-            (pid, para, evs)
-            for pid, (_, _, para, evs) in para_index.items()
-            if evs
+            (pid, para, evs) for pid, (_, _, para, evs) in para_index.items() if evs
         ]
         if not batch_input:
             return {}
@@ -442,9 +426,7 @@ def _coerce(resp: object, model: type[BaseModel]) -> BaseModel:
         return model.model_validate(resp)
     if hasattr(resp, "model_dump"):
         return model.model_validate(resp.model_dump())
-    raise ValueError(
-        f"cannot coerce response to {model.__name__}: {type(resp).__name__}"
-    )
+    raise ValueError(f"cannot coerce response to {model.__name__}: {type(resp).__name__}")
 
 
 _ = AnalysisClaim  # 避免未使用警告

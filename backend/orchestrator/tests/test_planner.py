@@ -18,9 +18,7 @@ from backend.schemas import (
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_DEMO_PROJECT_FILE = (
-    _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
-)
+_DEMO_PROJECT_FILE = _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
 
 
 def _load_demo_project() -> Project:
@@ -152,7 +150,11 @@ def test_plan_product_metadata_on_agent_nodes() -> None:
     notion = by_id["collect.notion"].metadata
     assert notion["product"] == "Notion"
     assert notion["collect_dimensions"] == [
-        "homepage", "features", "pricing", "help_docs", "user_reviews",
+        "homepage",
+        "features",
+        "pricing",
+        "help_docs",
+        "user_reviews",
     ]
 
     # Extractor 节点仅带 product

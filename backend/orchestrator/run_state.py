@@ -1,4 +1,5 @@
 """原生 LangGraph 编排 state。RunState 是 StateGraph 的 schema,也是 checkpoint 载荷。"""
+
 from __future__ import annotations
 
 import re
@@ -74,18 +75,19 @@ def latest_outputs(outputs: dict[str, Any]) -> dict[str, Any]:
 
 class NodeRun(BaseModel):
     """history 里一条节点执行记录(回放真相源的最小单元)。"""
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    node: str                  # 逻辑节点: collect/extract/analyst/reporter/qa
+    node: str  # 逻辑节点: collect/extract/analyst/reporter/qa
     agent: str
     product: str | None = None
-    round: int = 1             # QA 返工轮次(1=首跑)
-    status: str                # success/partial/needs_rework/failed
+    round: int = 1  # QA 返工轮次(1=首跑)
+    status: str  # success/partial/needs_rework/failed
     span_id: str
     started_at: str | None = None
     ended_at: str | None = None
     prompt_preview: str | None = None
     response_preview: str | None = None
-    output_ref: str | None = None   # outputs 里的 key
+    output_ref: str | None = None  # outputs 里的 key
 
 
 def merge_outputs(current: dict, update: dict) -> dict:
@@ -104,7 +106,7 @@ class RunState(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     project_id: str
     run_id: str
-    analysis_mode: str                 # 透传给 agent,编排不解释
+    analysis_mode: str  # 透传给 agent,编排不解释
     products: list[str]
     outputs: Annotated[dict[str, Any], merge_outputs] = Field(default_factory=dict)
     history: Annotated[list[NodeRun], append_list] = Field(default_factory=list)

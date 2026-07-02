@@ -65,9 +65,7 @@ class EvidenceCompletenessChecker(BaseChecker):
                             dimension=self.dimension,
                             severity="major",
                             location=location,
-                            problem=(
-                                f"事实性段落 {para.paragraph_id!r} 的 evidence_ids 为空。"
-                            ),
+                            problem=(f"事实性段落 {para.paragraph_id!r} 的 evidence_ids 为空。"),
                             suggested_fix=(
                                 "补充该段落引用的 evidence_ids，或将段落标记为 "
                                 "is_soft_conclusion=True。"
@@ -91,12 +89,8 @@ class EvidenceCompletenessChecker(BaseChecker):
                             issue_id=f"iss_ec_claim_{claim.claim_id}",
                             dimension=self.dimension,
                             severity="major",
-                            location=(
-                                f"analysis.dimensions[{dim.value}].claims[{c_idx}]"
-                            ),
-                            problem=(
-                                f"Analysis claim {claim.claim_id!r} 无 evidence_ids。"
-                            ),
+                            location=(f"analysis.dimensions[{dim.value}].claims[{c_idx}]"),
+                            problem=(f"Analysis claim {claim.claim_id!r} 无 evidence_ids。"),
                             suggested_fix=(
                                 "Analyst 需要为该 claim 补充至少 1 条 evidence_id，"
                                 "若上游 profile 不含相关支撑则回到 Collector 重采。"
@@ -156,8 +150,7 @@ class EvidenceCompletenessChecker(BaseChecker):
                         severity="critical",
                         location=f"analysis.dimensions[{dim.value}]",
                         problem=(
-                            f"维度 {dim.value!r} 的所有 claim 都没有 evidence_ids，"
-                            "数据来源缺失。"
+                            f"维度 {dim.value!r} 的所有 claim 都没有 evidence_ids，数据来源缺失。"
                         ),
                         suggested_fix=(
                             "Collector 重新采集与该维度相关的来源文档，"
@@ -167,11 +160,7 @@ class EvidenceCompletenessChecker(BaseChecker):
                         required_inputs={
                             "dimension": dim.value,
                             "competitors_involved": list(
-                                {
-                                    p
-                                    for c in dim_obj.claims
-                                    for p in c.products_involved
-                                }
+                                {p for c in dim_obj.claims for p in c.products_involved}
                             ),
                         },
                     )
@@ -192,10 +181,7 @@ class EvidenceCompletenessChecker(BaseChecker):
 
         total_claims = sum(len(d.claims) for d in ctx.analysis.dimensions.values())
         claims_with_ev = sum(
-            1
-            for d in ctx.analysis.dimensions.values()
-            for c in d.claims
-            if c.evidence_ids
+            1 for d in ctx.analysis.dimensions.values() for c in d.claims if c.evidence_ids
         )
         claim_score = 1.0 if total_claims == 0 else claims_with_ev / total_claims
 
@@ -240,8 +226,7 @@ class EvidenceCompletenessChecker(BaseChecker):
                     severity="minor",
                     location="report.dimension[evidence_completeness]",
                     problem=(
-                        f"{len(weak_other)} 处量化结论仅由低权威来源支撑，"
-                        "关键数字可信度不足。"
+                        f"{len(weak_other)} 处量化结论仅由低权威来源支撑，关键数字可信度不足。"
                     ),
                     suggested_fix="Collector 为这些量化结论补采更高权威来源。",
                     target_agent="collector",
@@ -264,9 +249,7 @@ class EvidenceCompletenessChecker(BaseChecker):
             issues=issues,
         )
 
-    def _weak_authority_quant(
-        self, ctx: CheckerContext
-    ) -> tuple[list[str], list[str]]:
+    def _weak_authority_quant(self, ctx: CheckerContext) -> tuple[list[str], list[str]]:
         """检测「量化结论仅由弱来源支撑」的段落（相对语义 + 跨维度校正）。
 
         返回 ``(weak_key, weak_other)``：weak_key=定价/功能关键量化段，weak_other=其余量化段。
@@ -282,22 +265,12 @@ class EvidenceCompletenessChecker(BaseChecker):
             topic = _section_dimension(sec.section_id, sec.title)
             collect_dim = ANALYSIS_TO_COLLECT.get(topic) if topic else None
             for para in sec.paragraphs:
-                if (
-                    not para.is_quantitative
-                    or para.is_soft_conclusion
-                    or not para.evidence_ids
-                ):
+                if not para.is_quantitative or para.is_soft_conclusion or not para.evidence_ids:
                     continue
-                evs = [
-                    ctx.evidence_db[e]
-                    for e in para.evidence_ids
-                    if e in ctx.evidence_db
-                ]
+                evs = [ctx.evidence_db[e] for e in para.evidence_ids if e in ctx.evidence_db]
                 if not evs:
                     continue
-                classes = {
-                    e.source_class for e in evs if e.source_class is not None
-                }
+                classes = {e.source_class for e in evs if e.source_class is not None}
                 if len(classes) >= 2:
                     continue  # 多来源类型互证 → 豁免
                 corrected = [

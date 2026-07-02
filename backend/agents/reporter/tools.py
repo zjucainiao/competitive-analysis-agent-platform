@@ -113,9 +113,7 @@ _VERSION_RE = re.compile(r"\bv(\d+(?:\.\d+){1,3})\b", re.IGNORECASE)
 # 注意：lookahead/lookbehind 只阻断 ASCII 字母数字下划线点和 %。
 # 不要用 \w —— Python 3 默认开 Unicode，中文字符也算 \w，
 # 会导致 "17 个集成" 中的 "17" 被「个」阻断 → hallucination 漏网。
-_PLAIN_NUMBER_RE = re.compile(
-    r"(?<![A-Za-z0-9_.])(\d{2,}(?:\.\d{1,2})?)\+?(?![A-Za-z0-9_.%])"
-)
+_PLAIN_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_.])(\d{2,}(?:\.\d{1,2})?)\+?(?![A-Za-z0-9_.%])")
 
 
 def extract_quantities(text: str) -> list[tuple[str, float]]:
@@ -227,9 +225,7 @@ def _collect_numbers(haystack: str, *, prefer_price: bool) -> list[float]:
             v = _safe_float(m.group(1))
             if v is not None:
                 out.append(v)
-    for m in re.finditer(
-        r"(?<![A-Za-z0-9_.])(\d{1,4}(?:\.\d{1,2})?)(?![A-Za-z0-9_.%])", haystack
-    ):
+    for m in re.finditer(r"(?<![A-Za-z0-9_.])(\d{1,4}(?:\.\d{1,2})?)(?![A-Za-z0-9_.%])", haystack):
         v = _safe_float(m.group(1))
         if v is not None:
             out.append(v)
@@ -257,8 +253,7 @@ class EvidenceProvider(Protocol):
     ``FixtureEvidenceProvider`` 直接从 jsonl 加载。
     """
 
-    def get_many(self, evidence_ids: Iterable[str]) -> dict[str, Evidence]:
-        ...
+    def get_many(self, evidence_ids: Iterable[str]) -> dict[str, Evidence]: ...
 
 
 class FixtureEvidenceProvider:

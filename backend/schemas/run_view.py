@@ -48,9 +48,9 @@ class StageInstance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     product: str
-    status: str                       # NodeRun.status: success/partial/needs_rework/failed
-    revision: int = 1                 # 该产品对应 NodeRun 的最新 round
-    run_ref: str | None = None     # 投影节点 ID（collect.{product} 等），用于查 outputs
+    status: str  # NodeRun.status: success/partial/needs_rework/failed
+    revision: int = 1  # 该产品对应 NodeRun 的最新 round
+    run_ref: str | None = None  # 投影节点 ID（collect.{product} 等），用于查 outputs
     span_id: str | None = None
     started_at: str | None = None
     ended_at: str | None = None
@@ -68,7 +68,7 @@ class StageRevision(BaseModel):
 
     round: int = 1
     status: str
-    run_ref: str | None = None     # 投影节点 ID（reporter / reporter_v2 / ...）
+    run_ref: str | None = None  # 投影节点 ID（reporter / reporter_v2 / ...）
     span_id: str | None = None
     started_at: str | None = None
     ended_at: str | None = None
@@ -88,7 +88,7 @@ class RunStageView(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    stage: str                        # collect/extract/analyst/reporter/qa
+    stage: str  # collect/extract/analyst/reporter/qa
     agent: str
     instances: list[StageInstance] = Field(default_factory=list)
     revisions: list[StageRevision] = Field(default_factory=list)
@@ -101,7 +101,7 @@ class RunStateView(BaseModel):
 
     project_id: str
     run_id: str | None = None
-    status: str                       # running/done/failed/aborted
+    status: str  # running/done/failed/aborted
     products: list[str] = Field(default_factory=list)
     stages: list[RunStageView] = Field(default_factory=list)
     history: list[dict[str, Any]] = Field(default_factory=list)

@@ -77,23 +77,41 @@ def _seed_project_and_report(client: TestClient) -> tuple[str, str]:
 
     paragraphs = [
         ReportParagraph(
-            paragraph_id="p1", text="原文 1", evidence_ids=["ev1"], is_quantitative=False,
+            paragraph_id="p1",
+            text="原文 1",
+            evidence_ids=["ev1"],
+            is_quantitative=False,
         ),
         ReportParagraph(
-            paragraph_id="p2", text="原文 2", evidence_ids=["ev2"], is_quantitative=True,
+            paragraph_id="p2",
+            text="原文 2",
+            evidence_ids=["ev2"],
+            is_quantitative=True,
         ),
     ]
     section = ReportSection(
-        section_id="sec1", title="Overview", order=1, paragraphs=paragraphs,
+        section_id="sec1",
+        title="Overview",
+        order=1,
+        paragraphs=paragraphs,
     )
     draft = ReportDraft(
-        report_id="rpt_1", version=1, template_id="standard_v1",
-        sections=[section], summary="s", metadata={},
+        report_id="rpt_1",
+        version=1,
+        template_id="standard_v1",
+        sections=[section],
+        summary="s",
+        metadata={},
     )
     output = ReporterOutput(
-        agent_name="reporter", agent_version="1.0.0",
-        task_id="reporter", trace_id="t", span_id="s",
-        status=AgentStatus.SUCCESS, confidence=0.85, self_critique="",
+        agent_name="reporter",
+        agent_version="1.0.0",
+        task_id="reporter",
+        trace_id="t",
+        span_id="s",
+        status=AgentStatus.SUCCESS,
+        confidence=0.85,
+        self_critique="",
         draft=draft,
     )
 
@@ -228,9 +246,7 @@ def _reporter_output(node_id: str, n_paragraphs: int) -> ReporterOutput:
         report_id=f"rpt_{node_id}",
         version=1,
         template_id="standard_v1",
-        sections=[
-            ReportSection(section_id="s", title="t", order=1, paragraphs=paras)
-        ],
+        sections=[ReportSection(section_id="s", title="t", order=1, paragraphs=paras)],
         summary="",
         metadata={},
     )
@@ -256,7 +272,5 @@ def test_latest_report_total_paragraphs_picks_highest_version() -> None:
         "reporter_v2": _reporter_output("reporter_v2", 5),
     }
     assert _latest_report_total_paragraphs(outputs) == 5  # 取 v2
-    assert _latest_report_total_paragraphs(
-        {"reporter": _reporter_output("reporter", 3)}
-    ) == 3
+    assert _latest_report_total_paragraphs({"reporter": _reporter_output("reporter", 3)}) == 3
     assert _latest_report_total_paragraphs({}) == 0

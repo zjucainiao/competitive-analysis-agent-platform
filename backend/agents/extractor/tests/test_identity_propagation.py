@@ -3,6 +3,7 @@
 抓错产品的源（identity_status=mismatch）抽出的证据也应携带 mismatch，
 让下游 QA 的 identity_consistency 维度能据此发现「这条证据其实来自别的产品」。
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -62,8 +63,11 @@ def test_mint_evidence_default_unvalidated_for_legacy_source() -> None:
     )
     inp = make_extractor_input(product_name="钉钉", raw_sources=[src])
     link = LinkResult(
-        source_id="s_mismatch", matched_text="x", location=EvidenceLocation(),
-        confidence=0.8, matched=True,
+        source_id="s_mismatch",
+        matched_text="x",
+        location=EvidenceLocation(),
+        confidence=0.8,
+        matched=True,
     )
     ev = agent._mint_evidence(inp=inp, link=link, quote="飞书 messaging and docs", tag="t")
     assert ev.identity_status == "unvalidated"

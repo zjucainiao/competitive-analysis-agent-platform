@@ -88,18 +88,14 @@ class Planner:
                 pass
         return self._plan_template(project, template_id=template_id)
 
-    def _plan_template(
-        self, project: Project, *, template_id: str | None = None
-    ) -> DAGPlan:
+    def _plan_template(self, project: Project, *, template_id: str | None = None) -> DAGPlan:
         tid = template_id or self._default_template_id(project)
         raw = self._load_template(tid)
         return self._expand(raw, project, template_id=tid)
 
     def _plan_adaptive(self, project: Project) -> DAGPlan:
         if self._llm is None:
-            raise RuntimeError(
-                "Planner(mode='adaptive') requires llm to be passed at __init__"
-            )
+            raise RuntimeError("Planner(mode='adaptive') requires llm to be passed at __init__")
         from .adaptive_planner import AdaptivePlanner
 
         return AdaptivePlanner(llm=self._llm).plan(project)
@@ -122,9 +118,7 @@ class Planner:
     def _load_template(self, template_id: str) -> dict[str, Any]:
         path = self.templates_dir / f"{template_id}.yaml"
         if not path.exists():
-            raise TemplateNotFoundError(
-                f"template {template_id!r} not found at {path}"
-            )
+            raise TemplateNotFoundError(f"template {template_id!r} not found at {path}")
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise TemplateExpandError(
@@ -175,8 +169,7 @@ class Planner:
                 concrete = {k: v for k, v in spec.items() if k != "for_each"}
                 concrete["id"] = self._substitute(spec["id"], product=slug)
                 concrete["depends_on"] = [
-                    self._substitute(d, product=slug)
-                    for d in spec.get("depends_on", [])
+                    self._substitute(d, product=slug) for d in spec.get("depends_on", [])
                 ]
                 # 业务字段：runtime 用 metadata.product 知道这个节点服务哪个产品
                 concrete["_product"] = product
@@ -188,9 +181,7 @@ class Planner:
             for dep in spec.get("depends_on", []) or []:
                 if dep.endswith(".*"):
                     prefix = dep[:-2] + "."
-                    matches = sorted(
-                        n for n in expanded if n.startswith(prefix)
-                    )
+                    matches = sorted(n for n in expanded if n.startswith(prefix))
                     if not matches:
                         raise TemplateExpandError(
                             f"node {node_id!r}: depends_on={dep!r} matches no nodes"
@@ -198,9 +189,7 @@ class Planner:
                     resolved.extend(matches)
                 else:
                     if dep not in expanded:
-                        raise TemplateExpandError(
-                            f"node {node_id!r}: depends_on={dep!r} not found"
-                        )
+                        raise TemplateExpandError(f"node {node_id!r}: depends_on={dep!r} not found")
                     resolved.append(dep)
             spec["depends_on"] = resolved
 
@@ -213,8 +202,7 @@ class Planner:
 
         # 落 DAGNode + DAGEdge
         nodes = [
-            self._to_dag_node(spec, project, variables=variables)
-            for spec in expanded.values()
+            self._to_dag_node(spec, project, variables=variables) for spec in expanded.values()
         ]
         edges = []
         for spec in expanded.values():
@@ -246,9 +234,7 @@ class Planner:
 
     # ----- 工具 -----
 
-    def _resolve_variables(
-        self, raw_vars: dict[str, Any], project: Project
-    ) -> dict[str, Any]:
+    def _resolve_variables(self, raw_vars: dict[str, Any], project: Project) -> dict[str, Any]:
         """把模板里 ``project.*`` 形式的引用替换成实际值。"""
         resolved: dict[str, Any] = {}
         for key, value in raw_vars.items():

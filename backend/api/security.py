@@ -60,9 +60,7 @@ def ensure_jwt_secret(storage_mode: str) -> None:
         return
     if not _dev_fallback_allowed(storage_mode):
         raise RuntimeError(_MISSING_SECRET_HINT)
-    logger.warning(
-        "JWT_SECRET 未设置，使用不安全的开发默认值。生产部署必须设置 JWT_SECRET。"
-    )
+    logger.warning("JWT_SECRET 未设置，使用不安全的开发默认值。生产部署必须设置 JWT_SECRET。")
 
 
 def _secret() -> str:
@@ -70,9 +68,7 @@ def _secret() -> str:
     if not secret:
         # 生产形态在启动闸门（ensure_jwt_secret）就已拒启；能走到这里的只有
         # 开发/测试形态，回退开发默认值并持续告警，避免弱密钥被无感使用。
-        logger.warning(
-            "JWT_SECRET 未设置，使用不安全的开发默认值。生产部署必须设置 JWT_SECRET。"
-        )
+        logger.warning("JWT_SECRET 未设置，使用不安全的开发默认值。生产部署必须设置 JWT_SECRET。")
         return _DEV_FALLBACK_SECRET
     return secret
 

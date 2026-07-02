@@ -41,9 +41,7 @@ class DiscoveredCompetitor(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    reason: str = Field(
-        description="为什么把它列为竞品（一句话给用户做判断依据）"
-    )
+    reason: str = Field(description="为什么把它列为竞品（一句话给用户做判断依据）")
     official_url: str | None = None
 
 
@@ -143,11 +141,7 @@ async def discover_competitors(
 
     # 去掉 target_product 自己被列进去的情况（LLM 偶尔会犯）
     dedup_name = req.target_product.strip().lower()
-    filtered = [
-        c
-        for c in parsed.competitors
-        if c.name.strip().lower() != dedup_name
-    ]
+    filtered = [c for c in parsed.competitors if c.name.strip().lower() != dedup_name]
     # 限上限
     filtered = filtered[: req.max_competitors]
 

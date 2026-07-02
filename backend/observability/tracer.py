@@ -163,9 +163,7 @@ class OTLPSpan:
             from opentelemetry import trace  # type: ignore
 
             ctx = trace.set_span_in_context(self._otel_span)
-            with self._otel_tracer.start_as_current_span(
-                "llm.chat", context=ctx
-            ) as child:
+            with self._otel_tracer.start_as_current_span("llm.chat", context=ctx) as child:
                 child.set_attribute("llm.model", model or "")
                 child.set_attribute("llm.tokens_input", int(tokens_input or 0))
                 child.set_attribute("llm.tokens_output", int(tokens_output or 0))
@@ -199,9 +197,7 @@ class OTLPSpan:
             from opentelemetry import trace  # type: ignore
 
             ctx = trace.set_span_in_context(self._otel_span)
-            with self._otel_tracer.start_as_current_span(
-                f"tool.{tool_name}", context=ctx
-            ) as child:
+            with self._otel_tracer.start_as_current_span(f"tool.{tool_name}", context=ctx) as child:
                 child.set_attribute("tool.name", tool_name)
                 if arguments is not None:
                     child.set_attribute("tool.arguments", _safe_json(arguments))
@@ -342,9 +338,7 @@ def build_tracer_from_env(
         _logger.info("no OTLP endpoint configured, using NullTracer")
         return NullTracer()
 
-    effective_name = (
-        service_name or os.getenv("OTEL_SERVICE_NAME") or "competitive-analysis-agent"
-    )
+    effective_name = service_name or os.getenv("OTEL_SERVICE_NAME") or "competitive-analysis-agent"
     try:
         return OTLPTracer(
             service_name=effective_name,

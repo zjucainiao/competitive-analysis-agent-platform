@@ -74,9 +74,7 @@ def _resolve_agent(registry, agent_name: str, outputs: dict[str, AgentOutputBase
         from backend.agents.reporter.tools import StaticEvidenceProvider
 
         ev_db = _collect_evidences(outputs)
-        return registry.make_reporter(
-            evidence_provider=StaticEvidenceProvider(ev_db)
-        )
+        return registry.make_reporter(evidence_provider=StaticEvidenceProvider(ev_db))
     if agent_name == "qa":
         ev_db = _collect_evidences(outputs)
         return registry.make_qa(evidence_db=ev_db)

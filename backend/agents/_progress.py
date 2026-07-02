@@ -12,6 +12,7 @@ Collector 在抓取过程中**逐条**产出来源时调 ``emit_collect_progress
 ``run_coroutine_threadsafe`` 调回主 loop）。未注入 emitter 时 ``emit_collect_progress``
 是 no-op，且任何异常都被吞掉——实时进度是纯观测，绝不影响采集主流程。
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

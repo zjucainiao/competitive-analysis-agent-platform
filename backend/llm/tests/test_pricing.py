@@ -67,9 +67,7 @@ def test_cost_zero_tokens():
 def test_env_override(monkeypatch):
     monkeypatch.setenv("LLM_PRICING_GPT_4O_MINI", "99.0,100.0")
     assert get_price("gpt-4o-mini") == (99.0, 100.0)
-    assert estimate_cost("gpt-4o-mini", 1_000_000, 1_000_000) == pytest.approx(
-        99.0 + 100.0
-    )
+    assert estimate_cost("gpt-4o-mini", 1_000_000, 1_000_000) == pytest.approx(99.0 + 100.0)
 
 
 def test_env_override_bad_format_falls_back(monkeypatch):

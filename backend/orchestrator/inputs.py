@@ -3,6 +3,7 @@
 从 Executor._build_* 抽出,去掉 DAGNode 耦合:既给旧 Executor(适配 node)
 复用,也给新原生节点(从 RunState 取参)复用。纯函数,无副作用。
 """
+
 from __future__ import annotations
 
 from ulid import ULID

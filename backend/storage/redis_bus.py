@@ -47,9 +47,7 @@ class RedisEventBus:
             # 撞上 5s 超时，又能让真实消息亚秒级投递；空闲读超时被吞掉继续等。
             while True:
                 try:
-                    msg = await pubsub.get_message(
-                        ignore_subscribe_messages=True, timeout=1.0
-                    )
+                    msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                 except RedisTimeoutError:
                     # 空闲读超时不是错误：保持订阅，继续等下一条
                     continue

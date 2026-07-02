@@ -5,6 +5,7 @@ contract: run_state_to_dagplan 接受 RunState.model_dump() 产出的 dict
 Stage D 后 projection 不再对前端暴露，但仍是 orchestrator metrics 的内部依赖，
 故本测试保留。
 """
+
 from __future__ import annotations
 
 import json
@@ -16,9 +17,7 @@ from backend.orchestrator.run_state import NodeRun, RunState
 from backend.schemas import Project
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_DEMO_PROJECT_FILE = (
-    _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
-)
+_DEMO_PROJECT_FILE = _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
 
 
 # ---------- fixtures ----------
@@ -29,9 +28,7 @@ def two_product_project() -> Project:
     """加载 demo 项目,设置两产品 Notion + Asana。"""
     data = json.loads(_DEMO_PROJECT_FILE.read_text(encoding="utf-8"))
     proj = Project.model_validate(data)
-    return proj.model_copy(
-        update={"target_product": "Notion", "competitors": ["Asana"]}
-    )
+    return proj.model_copy(update={"target_product": "Notion", "competitors": ["Asana"]})
 
 
 def _make_node_run(
@@ -62,10 +59,8 @@ def sample_final_state(two_product_project: Project) -> dict:
     包含 collect.Notion、extract.Notion、analyst、reporter、qa 五类节点。
     """
     history = [
-        _make_node_run("collect", "collector", product="Notion",
-                       output_ref="collect.Notion"),
-        _make_node_run("extract", "extractor", product="Notion",
-                       output_ref="extract.Notion"),
+        _make_node_run("collect", "collector", product="Notion", output_ref="collect.Notion"),
+        _make_node_run("extract", "extractor", product="Notion", output_ref="extract.Notion"),
         _make_node_run("analyst", "analyst", output_ref="analyst"),
         _make_node_run("reporter", "reporter", output_ref="reporter"),
         _make_node_run("qa", "qa", output_ref="qa"),
@@ -94,10 +89,8 @@ def rework_final_state(two_product_project: Project) -> dict:
     history 里有两条 reporter NodeRun：round=1 和 round=2。
     """
     history = [
-        _make_node_run("collect", "collector", product="Notion",
-                       output_ref="collect.Notion"),
-        _make_node_run("extract", "extractor", product="Notion",
-                       output_ref="extract.Notion"),
+        _make_node_run("collect", "collector", product="Notion", output_ref="collect.Notion"),
+        _make_node_run("extract", "extractor", product="Notion", output_ref="extract.Notion"),
         _make_node_run("analyst", "analyst", output_ref="analyst"),
         # reporter 首跑
         _make_node_run("reporter", "reporter", round_=1, output_ref="reporter"),

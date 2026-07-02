@@ -34,10 +34,7 @@ if os.getenv("RUN_REAL_LLM_TESTS") == "1":
 
 
 def _has_any_llm_key() -> bool:
-    return any(
-        os.getenv(k)
-        for k in ("DOUBAO_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY")
-    )
+    return any(os.getenv(k) for k in ("DOUBAO_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY"))
 
 
 def _real_llm_disabled() -> bool:
@@ -131,8 +128,7 @@ def test_real_full_chain_end_to_end(client: TestClient) -> None:
     # 1. 5 个 Agent 类阶段至少各有一次完整 output(原生 run_ref 命名,大小写/产品后缀无关)
     for stage in ["collect", "extract", "analyst", "reporter", "qa"]:
         assert any(
-            k == stage or k.startswith(f"{stage}.") or k.startswith(f"{stage}_v")
-            for k in outputs
+            k == stage or k.startswith(f"{stage}.") or k.startswith(f"{stage}_v") for k in outputs
         ), f"stage {stage} produced no output (real chain failed at {stage})"
 
     # 2. Analyst 真出了 claim
@@ -145,14 +141,10 @@ def test_real_full_chain_end_to_end(client: TestClient) -> None:
     print(f"  self_critique: {(analyst_out.get('self_critique') or '')[:200]}")
     print(f"  has 'result' key: {'result' in analyst_out}")
     if analyst_status == "failed":
-        pytest.fail(
-            f"analyst status=failed; errors={analyst_out.get('errors')}"
-        )
+        pytest.fail(f"analyst status=failed; errors={analyst_out.get('errors')}")
     result = analyst_out.get("result")
     assert result, f"analyst missing 'result' field; output keys={list(analyst_out.keys())}"
-    total_claims = sum(
-        len(d.get("claims") or []) for d in result.get("dimensions", {}).values()
-    )
+    total_claims = sum(len(d.get("claims") or []) for d in result.get("dimensions", {}).values())
     assert total_claims > 0, f"analyst returned 0 claims; result={result}"
 
     # 3. Reporter 出了 section（最终版本）
@@ -174,10 +166,7 @@ def test_real_full_chain_end_to_end(client: TestClient) -> None:
     assert verdicts[0]["dimension_results"], "QA produced no dimension results"
 
     # 5. 早期节点（非 _v 派生）不允许 failed
-    early_failed = [
-        k for k, o in outputs.items()
-        if o.get("status") == "failed" and "_v" not in k
-    ]
+    early_failed = [k for k, o in outputs.items() if o.get("status") == "failed" and "_v" not in k]
     assert not early_failed, f"early nodes failed: {early_failed}"
 
     # 6. 报告几行预览（看到才放心）
@@ -193,8 +182,14 @@ def test_real_full_chain_end_to_end(client: TestClient) -> None:
     print("  dimensions:")
     for dim, res in (last_v.get("dimension_results") or {}).items():
         marker = "✓" if res.get("pass") else "✗"
-        print(f"    {marker} {dim}: score={res.get('score'):.2f}  notes={(res.get('notes') or '')[:120]}")
+        print(
+            f"    {marker} {dim}: score={res.get('score'):.2f}  notes={(res.get('notes') or '')[:120]}"
+        )
     print(f"  issues ({len(last_v.get('issues') or [])}):")
     for iss in (last_v.get("issues") or [])[:8]:
-        print(f"    [{iss.get('severity')}] {iss.get('dimension')} → {iss.get('target_agent')}: {(iss.get('problem') or '')[:120]}")
-    print(f"  routing: {[(r.get('target_agent'), (r.get('reason') or '')[:60]) for r in (last_v.get('routing') or [])]}")
+        print(
+            f"    [{iss.get('severity')}] {iss.get('dimension')} → {iss.get('target_agent')}: {(iss.get('problem') or '')[:120]}"
+        )
+    print(
+        f"  routing: {[(r.get('target_agent'), (r.get('reason') or '')[:60]) for r in (last_v.get('routing') or [])]}"
+    )

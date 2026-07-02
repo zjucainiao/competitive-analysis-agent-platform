@@ -73,18 +73,14 @@ async def test_pg_list_projects_filter(state_store, make_project):
     p3 = make_project(owner=owner, status=ProjectStatus.RUNNING)
     for p in [p1, p2, p3]:
         await state_store.save_project(p)
-    running = await state_store.list_projects(
-        owner=owner, status=ProjectStatus.RUNNING
-    )
+    running = await state_store.list_projects(owner=owner, status=ProjectStatus.RUNNING)
     assert {p.project_id for p in running} == {p1.project_id, p3.project_id}
 
 
 async def test_pg_update_project_status(state_store, make_project):
     project = make_project(status=ProjectStatus.DRAFT)
     await state_store.save_project(project)
-    await state_store.update_project_status(
-        project.project_id, ProjectStatus.RUNNING
-    )
+    await state_store.update_project_status(project.project_id, ProjectStatus.RUNNING)
     got = await state_store.get_project(project.project_id)
     assert got is not None
     assert got.status == ProjectStatus.RUNNING
@@ -105,18 +101,14 @@ async def test_pg_update_node_status(state_store, make_project, make_dag_plan):
     await state_store.save_project(project)
     plan = make_dag_plan(project.project_id)
     await state_store.save_dag_plan(plan)
-    await state_store.update_node_status(
-        project.project_id, "n1", NodeStatus.SUCCESS
-    )
+    await state_store.update_node_status(project.project_id, "n1", NodeStatus.SUCCESS)
     got = await state_store.get_dag_plan(project.project_id)
     assert got is not None
     n1 = next(n for n in got.nodes if n.node_id == "n1")
     assert n1.status == NodeStatus.SUCCESS
 
 
-async def test_pg_node_output_polymorphic(
-    state_store, make_project, make_collector_output
-):
+async def test_pg_node_output_polymorphic(state_store, make_project, make_collector_output):
     project = make_project()
     await state_store.save_project(project)
     out = make_collector_output()
@@ -127,9 +119,7 @@ async def test_pg_node_output_polymorphic(
     assert got.confidence == pytest.approx(out.confidence)
 
 
-async def test_pg_qa_verdicts_ordered_desc(
-    state_store, make_project, make_qa_verdict
-):
+async def test_pg_qa_verdicts_ordered_desc(state_store, make_project, make_qa_verdict):
     import asyncio
 
     project = make_project()
@@ -145,9 +135,7 @@ async def test_pg_qa_verdicts_ordered_desc(
     assert ids.index(v2.verdict_id) < ids.index(v1.verdict_id)
 
 
-async def test_pg_llm_calls_persist_filter_and_survive(
-    engine, state_store, make_project
-):
+async def test_pg_llm_calls_persist_filter_and_survive(engine, state_store, make_project):
     project = make_project(project_id=f"pg-llm-{uuid.uuid4().hex[:8]}")
     await state_store.save_project(project)
     pid = project.project_id
@@ -206,19 +194,18 @@ async def test_pg_llm_calls_persist_filter_and_survive(
 async def test_pg_checkpoint_put_get_latest(checkpointer):
     tid = f"thread-{uuid.uuid4().hex[:8]}"
     cfg = make_config(tid)
-    cfg1 = await checkpointer.aput(
-        cfg, {"v": 1, "channel_values": {"x": 1}}, {"step": 0}, {}
-    )
-    cfg2 = await checkpointer.aput(
-        cfg1, {"v": 1, "channel_values": {"x": 2}}, {"step": 1}, {}
-    )
+    cfg1 = await checkpointer.aput(cfg, {"v": 1, "channel_values": {"x": 1}}, {"step": 0}, {})
+    cfg2 = await checkpointer.aput(cfg1, {"v": 1, "channel_values": {"x": 2}}, {"step": 1}, {})
     # 不指定 checkpoint_id 应拿到最新
     latest = await checkpointer.aget_tuple(make_config(tid))
     assert latest is not None
     assert latest.checkpoint["channel_values"]["x"] == 2  # type: ignore[index]
-    assert latest.config["configurable"]["checkpoint_id"] == cfg2["configurable"][  # type: ignore[index]
-        "checkpoint_id"
-    ]
+    assert (
+        latest.config["configurable"]["checkpoint_id"]
+        == cfg2["configurable"][  # type: ignore[index]
+            "checkpoint_id"
+        ]
+    )
     assert latest.parent_config is not None
     assert (
         latest.parent_config["configurable"]["checkpoint_id"]  # type: ignore[index]
@@ -233,9 +220,7 @@ async def test_pg_checkpoint_alist_orders_desc(checkpointer):
 
     ids: list[str] = []
     for i in range(3):
-        c = await checkpointer.aput(
-            cfg, {"v": 1, "channel_values": {"i": i}}, {"step": i}, {}
-        )
+        c = await checkpointer.aput(cfg, {"v": 1, "channel_values": {"i": i}}, {"step": i}, {})
         ids.append(c["configurable"]["checkpoint_id"])  # type: ignore[index]
         await asyncio.sleep(0.005)  # 保证 created_at 有差
 
@@ -250,12 +235,8 @@ async def test_pg_checkpoint_aput_writes(checkpointer):
     tid = f"thread-{uuid.uuid4().hex[:8]}"
     cfg = make_config(tid)
     cfg1 = await checkpointer.aput(cfg, {"v": 1, "channel_values": {}}, {}, {})
-    await checkpointer.aput_writes(
-        cfg1, [("ch1", "v1"), ("ch2", "v2")], task_id="task-A"
-    )
-    await checkpointer.aput_writes(
-        cfg1, [("ch3", "v3")], task_id="task-B"
-    )
+    await checkpointer.aput_writes(cfg1, [("ch1", "v1"), ("ch2", "v2")], task_id="task-A")
+    await checkpointer.aput_writes(cfg1, [("ch3", "v3")], task_id="task-B")
     got = await checkpointer.aget_tuple(cfg1)
     assert got is not None
     by_task = {(t, ch): val for t, ch, val in got.pending_writes}

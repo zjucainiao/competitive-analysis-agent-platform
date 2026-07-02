@@ -16,9 +16,7 @@ from backend.schemas import CompetitorProfile, Evidence
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _MOCK_PROFILE_DIR = _REPO_ROOT / "fixtures" / "mock_data" / "competitor_profiles"
-_MOCK_EVIDENCE_FILE = (
-    _REPO_ROOT / "fixtures" / "mock_data" / "evidences" / "evidence_db.jsonl"
-)
+_MOCK_EVIDENCE_FILE = _REPO_ROOT / "fixtures" / "mock_data" / "evidences" / "evidence_db.jsonl"
 
 
 def _slug(product_name: str) -> str:

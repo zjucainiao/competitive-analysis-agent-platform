@@ -51,12 +51,8 @@ async def test_redis_publish_and_subscribe(bus):
     # Redis 订阅生效需要一小段时间（实际 pubsub.subscribe RTT）
     await asyncio.sleep(0.2)
 
-    p1 = NodeExecutionResult(
-        project_id="p1", node_id="n1", status=NodeStatus.SUCCESS
-    )
-    p2 = NodeExecutionResult(
-        project_id="p1", node_id="n2", status=NodeStatus.RUNNING
-    )
+    p1 = NodeExecutionResult(project_id="p1", node_id="n1", status=NodeStatus.SUCCESS)
+    p2 = NodeExecutionResult(project_id="p1", node_id="n2", status=NodeStatus.RUNNING)
     await bus.publish(channel, p1)
     await bus.publish(channel, p2)
 
@@ -66,9 +62,7 @@ async def test_redis_publish_and_subscribe(bus):
 
 async def test_redis_no_replay_before_subscribe(bus):
     channel = _channel()
-    payload = NodeExecutionResult(
-        project_id="p1", node_id="n1", status=NodeStatus.SUCCESS
-    )
+    payload = NodeExecutionResult(project_id="p1", node_id="n1", status=NodeStatus.SUCCESS)
     await bus.publish(channel, payload)  # 没人订阅
 
     received: list[NodeExecutionResult] = []
@@ -87,8 +81,6 @@ async def test_redis_no_replay_before_subscribe(bus):
 
 async def test_redis_publish_after_close(bus):
     await bus.close()
-    payload = NodeExecutionResult(
-        project_id="p1", node_id="n1", status=NodeStatus.SUCCESS
-    )
+    payload = NodeExecutionResult(project_id="p1", node_id="n1", status=NodeStatus.SUCCESS)
     with pytest.raises(RuntimeError):
         await bus.publish(_channel(), payload)

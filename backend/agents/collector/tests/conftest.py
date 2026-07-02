@@ -37,7 +37,9 @@ def make_collector_input(
         trace_id="trace-test",
         span_id="span-test",
         product_name=product_name,
-        official_url=f"https://www.{product_name.lower()}.so/" if product_name == "Notion" else None,
+        official_url=f"https://www.{product_name.lower()}.so/"
+        if product_name == "Notion"
+        else None,
         industry="collaboration_saas",
         dimensions=dimensions
         or [

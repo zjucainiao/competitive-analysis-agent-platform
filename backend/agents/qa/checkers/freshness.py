@@ -108,13 +108,10 @@ class FreshnessChecker(BaseChecker):
                             issue_id=f"iss_fr_{para.paragraph_id}",
                             dimension=self.dimension,
                             severity=severity,  # type: ignore[arg-type]
-                            location=(
-                                f"report.sections[{sec_idx}].paragraphs[{para_idx}]"
-                            ),
+                            location=(f"report.sections[{sec_idx}].paragraphs[{para_idx}]"),
                             problem=(
                                 f"段落引用 {len(stale_ids)} 条过期 evidence："
-                                f"{stale_ids[:3]}"
-                                + ("…" if len(stale_ids) > 3 else "")
+                                f"{stale_ids[:3]}" + ("…" if len(stale_ids) > 3 else "")
                             ),
                             suggested_fix=fix,
                             target_agent=target,  # type: ignore[arg-type]
@@ -138,9 +135,8 @@ class FreshnessChecker(BaseChecker):
             score = sum(contributions) / dated_count
         if sensitive_violations >= 3:
             score = min(score, 0.6)
-        pass_ = (
-            score >= self.OVERALL_PASS_THRESHOLD
-            and not any(i.severity in ("major", "critical") for i in issues)
+        pass_ = score >= self.OVERALL_PASS_THRESHOLD and not any(
+            i.severity in ("major", "critical") for i in issues
         )
         notes = _build_notes(
             dated_count=dated_count,
@@ -198,9 +194,7 @@ def _build_notes(
     if dated_count:
         bits.append(f"最大年龄 {max_age_days} 天")
     if undated_count:
-        bits.append(
-            f"{undated_count} 项无日期（不计入评分，仅带日期且过期才报警）"
-        )
+        bits.append(f"{undated_count} 项无日期（不计入评分，仅带日期且过期才报警）")
     if stale_issues:
         bits.append(f"过期 {stale_issues} 处")
     return "；".join(bits) + "。"

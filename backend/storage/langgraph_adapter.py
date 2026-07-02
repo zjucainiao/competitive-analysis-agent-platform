@@ -87,9 +87,7 @@ def to_langgraph_saver(impl: CheckpointerProtocol) -> BaseCheckpointSaver:
             metadata: Any,
             new_versions: Any,
         ) -> Any:
-            return asyncio.run(
-                self._inner.aput(config, checkpoint, metadata, new_versions)
-            )
+            return asyncio.run(self._inner.aput(config, checkpoint, metadata, new_versions))
 
         def list(
             self,

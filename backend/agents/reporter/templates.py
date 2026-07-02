@@ -137,9 +137,7 @@ STANDARD_V1 = ReportTemplate(
 INVESTOR_V1 = ReportTemplate(
     template_id="investor_v1",
     target_audience="投资人",
-    summary_style=(
-        "中性、数据驱动、突出定价差异与潜在市场风险；避免推荐意见"
-    ),
+    summary_style=("中性、数据驱动、突出定价差异与潜在市场风险；避免推荐意见"),
     sections=[
         ReportSectionTemplate(
             section_id="sec_overview",
@@ -223,10 +221,7 @@ PM_V1 = ReportTemplate(
             title="3. 差异化机会",
             order=3,
             dimension=AnalysisDimension.DIFFERENTIATION,
-            style=(
-                "可输出 is_soft_conclusion=True 的探索性段落，但需在 self_critique"
-                "中说明假设"
-            ),
+            style=("可输出 is_soft_conclusion=True 的探索性段落，但需在 self_critique中说明假设"),
             min_paragraphs=1,
         ),
         ReportSectionTemplate(
@@ -264,9 +259,7 @@ PM_V1 = ReportTemplate(
 SINGLE_RESEARCH_V1 = ReportTemplate(
     template_id="single_research_v1",
     target_audience="产品经理",
-    summary_style=(
-        "客观、聚焦目标产品本身，不做对比；用'调研'而非'对比'的基调"
-    ),
+    summary_style=("客观、聚焦目标产品本身，不做对比；用'调研'而非'对比'的基调"),
     sections=[
         ReportSectionTemplate(
             section_id="sec_overview",

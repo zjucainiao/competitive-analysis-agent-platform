@@ -11,6 +11,7 @@
 - gap 5：先跑一次再 ``resume(pid, project)``(ORCH_ENGINE=native)不崩(走 native
   续跑而非 legacy OrchestratorState schema)。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -87,9 +88,7 @@ def _failing_analyst_registry() -> _FakeRegistry:
 
 
 @pytest.mark.asyncio
-async def test_gap7_analyst_failure_failsoft(
-    monkeypatch, two_product_project, memory_storage
-):
+async def test_gap7_analyst_failure_failsoft(monkeypatch, two_product_project, memory_storage):
     """analyst FAILED → reporter/qa 不 KeyError,run aborted 优雅收尾。"""
     monkeypatch.setenv("ORCH_ENGINE", "native")
     from backend.orchestrator.orchestrator import Orchestrator
@@ -101,22 +100,16 @@ async def test_gap7_analyst_failure_failsoft(
     _results = [r async for r in orch.run(plan, two_product_project)]
 
     # analyst output 为 None → 不应落库 analyst/reporter/qa output
-    saved = await memory_storage.state_store.list_node_outputs(
-        two_product_project.project_id
-    )
+    saved = await memory_storage.state_store.list_node_outputs(two_product_project.project_id)
     assert "analyst" not in saved
     assert "reporter" not in saved
     # 投影 plan 应已落库(收尾正常)
-    plan2 = await memory_storage.state_store.get_dag_plan(
-        two_product_project.project_id
-    )
+    plan2 = await memory_storage.state_store.get_dag_plan(two_product_project.project_id)
     assert plan2 is not None
 
 
 @pytest.mark.asyncio
-async def test_gap1_failed_node_broadcast(
-    monkeypatch, two_product_project, memory_storage
-):
+async def test_gap1_failed_node_broadcast(monkeypatch, two_product_project, memory_storage):
     """失败 run 的结果流里含 status=FAILED 的 NodeExecutionResult(广播失败节点)。"""
     monkeypatch.setenv("ORCH_ENGINE", "native")
     from backend.orchestrator.orchestrator import Orchestrator
@@ -138,9 +131,7 @@ async def test_gap1_failed_node_broadcast(
 
 
 @pytest.mark.asyncio
-async def test_gap2_metrics_persisted(
-    monkeypatch, two_product_project, memory_storage
-):
+async def test_gap2_metrics_persisted(monkeypatch, two_product_project, memory_storage):
     """native run 跑完,get_project(pid).metrics is not None。"""
     monkeypatch.setenv("ORCH_ENGINE", "native")
     from backend.orchestrator.orchestrator import Orchestrator
@@ -148,15 +139,11 @@ async def test_gap2_metrics_persisted(
     # 先把 project 落库(_persist_metrics 走 get_project → save_project)
     await memory_storage.state_store.save_project(two_product_project)
 
-    orch = Orchestrator(
-        registry=_FakeRegistry(_StubQA([_pass_verdict()])), storage=memory_storage
-    )
+    orch = Orchestrator(registry=_FakeRegistry(_StubQA([_pass_verdict()])), storage=memory_storage)
     plan = orch.plan(two_product_project)
     _ = [r async for r in orch.run(plan, two_product_project)]
 
-    persisted = await memory_storage.state_store.get_project(
-        two_product_project.project_id
-    )
+    persisted = await memory_storage.state_store.get_project(two_product_project.project_id)
     assert persisted is not None
     assert persisted.metrics is not None, "ProjectMetrics 未在 native run 后落库"
     assert len(persisted.metrics_history) >= 1
@@ -166,16 +153,12 @@ async def test_gap2_metrics_persisted(
 
 
 @pytest.mark.asyncio
-async def test_gap3_persist_llm_calls_invoked(
-    monkeypatch, two_product_project, memory_storage
-):
+async def test_gap3_persist_llm_calls_invoked(monkeypatch, two_product_project, memory_storage):
     """每个落库的 output 都会触发一次 _persist_node_llm_calls(spy 计数)。"""
     monkeypatch.setenv("ORCH_ENGINE", "native")
     from backend.orchestrator.orchestrator import Orchestrator
 
-    orch = Orchestrator(
-        registry=_FakeRegistry(_StubQA([_pass_verdict()])), storage=memory_storage
-    )
+    orch = Orchestrator(registry=_FakeRegistry(_StubQA([_pass_verdict()])), storage=memory_storage)
 
     calls: list[str] = []
     orig = orch._persist_node_llm_calls
@@ -214,9 +197,7 @@ async def test_gap4_rework_reporter_receives_qa_feedback(
     seen_feedback: list[Any] = []
     orig_build = nodes_mod.build_reporter_input
 
-    def _spy_build(
-        project, *, trace_id, analyst_output, qa_feedback, prior_draft=None
-    ):
+    def _spy_build(project, *, trace_id, analyst_output, qa_feedback, prior_draft=None):
         seen_feedback.append(qa_feedback)
         return orig_build(
             project,
@@ -230,9 +211,7 @@ async def test_gap4_rework_reporter_receives_qa_feedback(
 
     from backend.orchestrator.orchestrator import Orchestrator
 
-    rework_registry = _FakeRegistry(
-        _StubQA([_block_reporter_verdict(), _pass_verdict()])
-    )
+    rework_registry = _FakeRegistry(_StubQA([_block_reporter_verdict(), _pass_verdict()]))
     orch = Orchestrator(registry=rework_registry, storage=memory_storage)
     plan = orch.plan(two_product_project)
     _ = [r async for r in orch.run(plan, two_product_project)]
@@ -241,9 +220,7 @@ async def test_gap4_rework_reporter_receives_qa_feedback(
         f"expected >=2 reporter builds (initial + rework), got {len(seen_feedback)}"
     )
     assert seen_feedback[0] is None, "首跑 reporter 不应有 qa_feedback"
-    assert seen_feedback[1] is not None, (
-        "返工 reporter 应收到非空 qa_feedback(gap 4 未注入)"
-    )
+    assert seen_feedback[1] is not None, "返工 reporter 应收到非空 qa_feedback(gap 4 未注入)"
     # payload 形如 feedback_router._build_qa_feedback_payload 产物
     assert "from_verdict_id" in seen_feedback[1]
 
@@ -252,28 +229,19 @@ async def test_gap4_rework_reporter_receives_qa_feedback(
 
 
 @pytest.mark.asyncio
-async def test_gap5_resume_native(
-    monkeypatch, two_product_project, memory_storage
-):
+async def test_gap5_resume_native(monkeypatch, two_product_project, memory_storage):
     """先跑一次 native,再 resume(ORCH_ENGINE=native)→ 走 native 续跑不崩。"""
     monkeypatch.setenv("ORCH_ENGINE", "native")
     from backend.orchestrator.orchestrator import Orchestrator
 
-    orch = Orchestrator(
-        registry=_FakeRegistry(_StubQA([_pass_verdict()])), storage=memory_storage
-    )
+    orch = Orchestrator(registry=_FakeRegistry(_StubQA([_pass_verdict()])), storage=memory_storage)
     plan = orch.plan(two_product_project)
     _ = [r async for r in orch.run(plan, two_product_project)]
 
     # resume:run 已完成,从 checkpoint 续跑应优雅产出(0 个或全量重放),不抛异常
-    resumed = [
-        r
-        async for r in orch.resume(two_product_project.project_id, two_product_project)
-    ]
+    resumed = [r async for r in orch.resume(two_product_project.project_id, two_product_project)]
     # 不崩即通过;且仍能查回投影 plan
-    plan2 = await memory_storage.state_store.get_dag_plan(
-        two_product_project.project_id
-    )
+    plan2 = await memory_storage.state_store.get_dag_plan(two_product_project.project_id)
     assert plan2 is not None
     assert isinstance(resumed, list)
 
@@ -282,24 +250,18 @@ async def test_gap5_resume_native(
 
 
 @pytest.mark.asyncio
-async def test_gap6_no_legacy_placeholder_plan(
-    monkeypatch, two_product_project, memory_storage
-):
+async def test_gap6_no_legacy_placeholder_plan(monkeypatch, two_product_project, memory_storage):
     """native run 后 get_dag_plan 返回投影 plan,含 native node ids(collect.Notion),
     不含 legacy 占位 plan 的小写 slug node ids(collect.notion)。
     """
     monkeypatch.setenv("ORCH_ENGINE", "native")
     from backend.orchestrator.orchestrator import Orchestrator
 
-    orch = Orchestrator(
-        registry=_FakeRegistry(_StubQA([_pass_verdict()])), storage=memory_storage
-    )
+    orch = Orchestrator(registry=_FakeRegistry(_StubQA([_pass_verdict()])), storage=memory_storage)
     plan = orch.plan(two_product_project)
     _ = [r async for r in orch.run(plan, two_product_project)]
 
-    persisted_plan = await memory_storage.state_store.get_dag_plan(
-        two_product_project.project_id
-    )
+    persisted_plan = await memory_storage.state_store.get_dag_plan(two_product_project.project_id)
     assert persisted_plan is not None, "DAGPlan 未在 native run 后落库"
 
     node_ids = [n.node_id for n in persisted_plan.nodes]

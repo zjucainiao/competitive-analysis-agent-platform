@@ -1,4 +1,5 @@
 """RunState + reducer 单元测试。TDD Step 1: 先写失败测试。"""
+
 from __future__ import annotations
 
 from backend.orchestrator.run_state import (
@@ -52,5 +53,7 @@ def test_append_list_concatenates():
 
 
 def test_runstate_defaults():
-    s = RunState(project_id="p", run_id="r", analysis_mode="competitive_compare", products=["Notion"])
+    s = RunState(
+        project_id="p", run_id="r", analysis_mode="competitive_compare", products=["Notion"]
+    )
     assert s.outputs == {} and s.history == [] and s.qa_round == 0 and s.aborted is False

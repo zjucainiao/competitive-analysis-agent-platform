@@ -35,9 +35,7 @@ from backend.schemas import (
 from backend.schemas.evidence import CollectDimension
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_DEMO_PROJECT_FILE = (
-    _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
-)
+_DEMO_PROJECT_FILE = _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
 
 
 def _load_demo_project() -> Project:
@@ -84,9 +82,7 @@ def executor(registry: AgentRegistry, project: Project) -> Executor:
 # ---------- 控制节点（不调用 Agent） ----------
 
 
-async def test_start_node_returns_success_immediately(
-    plan: DAGPlan, executor: Executor
-) -> None:
+async def test_start_node_returns_success_immediately(plan: DAGPlan, executor: Executor) -> None:
     start = _node_by_id(plan, "start")
     result = await executor.execute(start, outputs={})
     assert result.status == NodeStatus.SUCCESS
@@ -100,9 +96,7 @@ async def test_end_node_returns_success(plan: DAGPlan, executor: Executor) -> No
     assert result.status == NodeStatus.SUCCESS
 
 
-async def test_parallel_join_returns_success(
-    plan: DAGPlan, executor: Executor
-) -> None:
+async def test_parallel_join_returns_success(plan: DAGPlan, executor: Executor) -> None:
     join = _node_by_id(plan, "join_extract")
     assert join.node_type == NodeType.PARALLEL_JOIN
     result = await executor.execute(join, outputs={})
@@ -112,9 +106,7 @@ async def test_parallel_join_returns_success(
 # ---------- input 解包（不实际调用 Agent） ----------
 
 
-async def test_collector_input_dimensions_from_metadata(
-    plan: DAGPlan, executor: Executor
-) -> None:
+async def test_collector_input_dimensions_from_metadata(plan: DAGPlan, executor: Executor) -> None:
     """构造的 CollectorInput 应读 metadata 里的 collect_dimensions。"""
     node = _node_by_id(plan, "collect.notion")
     inp = executor._build_collector_input(node, qa_feedback=None)
@@ -170,18 +162,14 @@ async def test_extractor_industry_schema_id_derived(
     assert inp.industry_schema_id == "collaboration_saas_v1"
 
 
-async def test_extractor_missing_upstream_input_fails(
-    plan: DAGPlan, executor: Executor
-) -> None:
+async def test_extractor_missing_upstream_input_fails(plan: DAGPlan, executor: Executor) -> None:
     extractor_node = _node_by_id(plan, "extract.notion")
     result = await executor.execute(extractor_node, outputs={})
     assert result.status == NodeStatus.FAILED
     assert result.error.code == "INPUT_BUILD_FAILED"
 
 
-async def test_reporter_input_requires_analyst(
-    plan: DAGPlan, executor: Executor
-) -> None:
+async def test_reporter_input_requires_analyst(plan: DAGPlan, executor: Executor) -> None:
     from backend.orchestrator.executor import BuildInputError
 
     reporter_node = _node_by_id(plan, "reporter")
@@ -200,9 +188,7 @@ async def test_latest_output_helper_picks_highest_revision() -> None:
     assert picked.task_id == "analyst_v3"
 
 
-async def test_qa_input_collects_prior_verdicts(
-    plan: DAGPlan, executor: Executor
-) -> None:
+async def test_qa_input_collects_prior_verdicts(plan: DAGPlan, executor: Executor) -> None:
     qa_node = _node_by_id(plan, "qa")
     outputs = _build_synthetic_outputs()
     outputs["qa_v1"] = _make_qa_output(verdict_id="vd_old")

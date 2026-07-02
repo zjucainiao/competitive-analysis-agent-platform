@@ -145,9 +145,7 @@ def _scores_per_round(
       **并列时取较晚轮**（更多返工、更可能是最终打磨版），故不改善时退化为最后一轮。
     """
     per_round = [round(_verdict_mean_score(v), 6) for v in verdicts]
-    deltas = [
-        round(per_round[i] - per_round[i - 1], 6) for i in range(1, len(per_round))
-    ]
+    deltas = [round(per_round[i] - per_round[i - 1], 6) for i in range(1, len(per_round))]
     best_round = 0
     if per_round:
         best_idx = 0
@@ -160,9 +158,7 @@ def _scores_per_round(
     return per_round, deltas, best_round
 
 
-def best_round_reporter_key(
-    outputs: dict[str, Any], verdicts: list[QAVerdict]
-) -> str:
+def best_round_reporter_key(outputs: dict[str, Any], verdicts: list[QAVerdict]) -> str:
     """发布择优：挑维度均分最高那一轮对应的 reporter 输出 key。
 
     **契约：``verdicts`` 必须按轮次升序(round1 在前)**。注意 storage 的
@@ -176,9 +172,7 @@ def best_round_reporter_key(
     """
 
     def _fallback() -> str:
-        versioned = sorted(
-            (k for k in outputs if k.startswith("reporter_v")), reverse=True
-        )
+        versioned = sorted((k for k in outputs if k.startswith("reporter_v")), reverse=True)
         return versioned[0] if versioned else "reporter"
 
     if not verdicts:

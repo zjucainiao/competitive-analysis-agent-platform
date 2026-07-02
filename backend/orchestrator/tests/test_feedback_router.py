@@ -25,9 +25,7 @@ from backend.schemas import (
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_DEMO_PROJECT_FILE = (
-    _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
-)
+_DEMO_PROJECT_FILE = _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
 
 
 # ---------- fixtures ----------
@@ -312,9 +310,7 @@ def test_double_apply_increments_to_v3() -> None:
             "edges": plan.edges + outcome1.new_edges,
         }
     )
-    verdict2 = _make_verdict(
-        routings=[QARouting(target_agent="analyst", reason="r2")]
-    )
+    verdict2 = _make_verdict(routings=[QARouting(target_agent="analyst", reason="r2")])
     outcome2 = router.apply(verdict=verdict2, plan=plan2, qa_round_count=1)
     assert outcome2.new_nodes[0].node_id == "analyst_v3"
     assert outcome2.new_nodes[0].revision == 3

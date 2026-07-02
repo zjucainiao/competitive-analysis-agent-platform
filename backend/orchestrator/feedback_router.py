@@ -109,12 +109,8 @@ class FeedbackRouter:
         for routing in verdict.routing:
             # 只把"该 target_agent 名下的 issues"喂给目标选择，用其 required_inputs
             # 里的 product / node_id 把返工收窄到具体产品节点（而非整类 agent 全重跑）。
-            relevant_issues = [
-                i for i in verdict.issues if i.target_agent == routing.target_agent
-            ]
-            targets = _find_rework_targets(
-                plan, routing.target_agent, issues=relevant_issues
-            )
+            relevant_issues = [i for i in verdict.issues if i.target_agent == routing.target_agent]
+            targets = _find_rework_targets(plan, routing.target_agent, issues=relevant_issues)
             if not targets:
                 continue
             any_matched = True
@@ -122,9 +118,7 @@ class FeedbackRouter:
             qa_round = qa_round_count + 1
             for old in targets:
                 new_id = _next_versioned_id(old.node_id, old.revision)
-                payload = _build_qa_feedback_payload(
-                    verdict, routing, qa_round=qa_round
-                )
+                payload = _build_qa_feedback_payload(verdict, routing, qa_round=qa_round)
                 new_node = _spawn_rework_node(
                     old=old,
                     new_id=new_id,
@@ -160,12 +154,8 @@ class FeedbackRouter:
                             edge_type="feedback",
                         )
                     )
-                    current_refs = updated_refs.get(
-                        downstream_id, list(downstream.input_refs)
-                    )
-                    new_refs = [
-                        new_id if r == old.node_id else r for r in current_refs
-                    ]
+                    current_refs = updated_refs.get(downstream_id, list(downstream.input_refs))
+                    new_refs = [new_id if r == old.node_id else r for r in current_refs]
                     updated_refs[downstream_id] = new_refs
 
                 # 传递下游（含控制节点）全部 reset 到 PENDING
@@ -268,8 +258,7 @@ def _find_rework_targets(
     narrowed = [
         n
         for n in candidates
-        if n.node_id in wanted_node_ids
-        or n.metadata.get("product") in wanted_products
+        if n.node_id in wanted_node_ids or n.metadata.get("product") in wanted_products
     ]
     return narrowed or candidates
 
@@ -313,9 +302,7 @@ def _spawn_rework_node(*, old: DAGNode, new_id: str, qa_round: int) -> DAGNode:
     )
 
 
-def _build_qa_feedback_payload(
-    verdict: QAVerdict, routing: QARouting, *, qa_round: int
-) -> dict:
+def _build_qa_feedback_payload(verdict: QAVerdict, routing: QARouting, *, qa_round: int) -> dict:
     """根据 verdict + routing 组装 ``qa_feedback`` dict（即将注入到 Agent input）。
 
     payload 的 ``revision`` 字段会被 Reporter 用来 bump ``ReportDraft.version``，

@@ -94,9 +94,7 @@ async def patch_paragraph(
     edit_rate = manual_edits / total_paragraphs if total_paragraphs > 0 else 0.0
     # ProjectMetrics.edit_rate 是 [0,1] 约束，截顶
     edit_rate = min(edit_rate, 1.0)
-    new_metrics = metrics.model_copy(
-        update={"manual_edits": manual_edits, "edit_rate": edit_rate}
-    )
+    new_metrics = metrics.model_copy(update={"manual_edits": manual_edits, "edit_rate": edit_rate})
     updated_project = project.model_copy(update={"metrics": new_metrics})
     await storage.state_store.save_project(updated_project)
 

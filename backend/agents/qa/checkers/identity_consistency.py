@@ -15,6 +15,7 @@ routing：mismatch / ambiguous 一律回 collector（抓错产品的根因在采
 extractor 只是忠实抽取）。按 product 聚合，每个产品一条 issue，便于一次性排除该
 产品名下所有跑题 URL。
 """
+
 from __future__ import annotations
 
 from typing import ClassVar
@@ -69,9 +70,7 @@ class IdentityConsistencyChecker(BaseChecker):
         # ambiguous（且无 mismatch 覆盖该产品）：minor，仅浮出，不致失败
         mismatch_products = {e.product_name for e in mismatch}
         amb_by_product = {
-            p: evs
-            for p, evs in _group_by_product(ambiguous).items()
-            if p not in mismatch_products
+            p: evs for p, evs in _group_by_product(ambiguous).items() if p not in mismatch_products
         }
         for product, evs in amb_by_product.items():
             urls = sorted({str(e.source_url) for e in evs})
@@ -85,9 +84,7 @@ class IdentityConsistencyChecker(BaseChecker):
                         f"产品 {product!r} 有 {len(evs)} 条证据无法确证属于该产品"
                         "（可能来自对比页/第三方站），建议人工复核。"
                     ),
-                    suggested_fix=(
-                        "Collector 优先采集目标产品官方/直接来源，减少身份存疑的引用。"
-                    ),
+                    suggested_fix=("Collector 优先采集目标产品官方/直接来源，减少身份存疑的引用。"),
                     target_agent="collector",
                     required_inputs={
                         "product": product,

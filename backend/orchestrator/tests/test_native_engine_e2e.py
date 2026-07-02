@@ -8,6 +8,7 @@
 仅在 env 置位时走 native 分支;默认 legacy 路径不受影响(见
 ``test_native_engine_legacy_default_untouched``)。
 """
+
 from __future__ import annotations
 
 import pytest
@@ -44,8 +45,8 @@ def memory_storage():
 # (``collect.Notion`` 首字母大写,取自 project.target_product),legacy 模板
 # 用小写化的 product slug(``collect.notion``)且带 start/join_extract/end 等
 # 结构节点。靠首字母大小写即可可靠区分本次到底走了哪条引擎分支。
-_NATIVE_MARKER = "collect.Notion"   # native only
-_LEGACY_MARKER = "collect.notion"   # legacy template only
+_NATIVE_MARKER = "collect.Notion"  # native only
+_LEGACY_MARKER = "collect.notion"  # legacy template only
 
 
 @pytest.mark.asyncio
@@ -61,9 +62,7 @@ async def test_native_engine_persists_outputs(
     results = [r async for r in orch.run(plan, two_product_project)]
 
     assert any(r.node_id == "reporter" for r in results)
-    saved = await memory_storage.state_store.list_node_outputs(
-        two_product_project.project_id
-    )
+    saved = await memory_storage.state_store.list_node_outputs(two_product_project.project_id)
     assert "reporter" in saved and "qa" in saved
     # 确认确实走了 native 引擎(而非 legacy 也恰好落了 reporter/qa)
     assert _NATIVE_MARKER in saved
@@ -86,9 +85,7 @@ async def test_default_engine_is_native(
     results = [r async for r in orch.run(plan, two_product_project)]
 
     assert results
-    saved = await memory_storage.state_store.list_node_outputs(
-        two_product_project.project_id
-    )
+    saved = await memory_storage.state_store.list_node_outputs(two_product_project.project_id)
     # 默认走 native:有 native marker,没有 legacy 模板形状的小写 marker
     assert _NATIVE_MARKER in saved
     assert _LEGACY_MARKER not in saved
@@ -107,9 +104,7 @@ async def test_legacy_engine_reachable_via_flag(
     results = [r async for r in orch.run(plan, two_product_project)]
 
     assert results
-    saved = await memory_storage.state_store.list_node_outputs(
-        two_product_project.project_id
-    )
+    saved = await memory_storage.state_store.list_node_outputs(two_product_project.project_id)
     # 显式 legacy:legacy 模板形状,无 native marker
     assert _LEGACY_MARKER in saved
     assert _NATIVE_MARKER not in saved
@@ -160,9 +155,7 @@ async def test_rework_native_targets_reporter_only(
     plan = orch.plan(two_product_project)
     _ = [r async for r in orch.run(plan, two_product_project)]
 
-    before = await memory_storage.state_store.list_node_outputs(
-        two_product_project.project_id
-    )
+    before = await memory_storage.state_store.list_node_outputs(two_product_project.project_id)
     assert "reporter" in before and "reporter_v2" not in before
 
     fb = {
@@ -174,17 +167,10 @@ async def test_rework_native_targets_reporter_only(
             "revision": 1,
         }
     }
-    results = [
-        r
-        async for r in orch.rework_native(
-            two_product_project, qa_feedback_by_node=fb
-        )
-    ]
+    results = [r async for r in orch.rework_native(two_product_project, qa_feedback_by_node=fb)]
     assert results, "rework_native 应触发并产出节点结果"
 
-    after = await memory_storage.state_store.list_node_outputs(
-        two_product_project.project_id
-    )
+    after = await memory_storage.state_store.list_node_outputs(two_product_project.project_id)
     # 定向返工：reporter_v2 产出；collect/extract 未再产新版本(仍只有 v1)
     assert "reporter_v2" in after
     assert "collect.Notion_v2" not in after
@@ -213,9 +199,7 @@ async def test_native_engine_persists_reworked_output(
     monkeypatch.setenv("ORCH_ENGINE", "native")
     from backend.orchestrator.orchestrator import Orchestrator
 
-    rework_registry = _FakeRegistry(
-        _StubQA([_block_reporter_verdict(), _pass_verdict()])
-    )
+    rework_registry = _FakeRegistry(_StubQA([_block_reporter_verdict(), _pass_verdict()]))
     orch = Orchestrator(registry=rework_registry, storage=memory_storage)
     plan = orch.plan(two_product_project)
     results = [r async for r in orch.run(plan, two_product_project)]
@@ -238,6 +222,5 @@ async def test_native_engine_persists_reworked_output(
     )
     assert persisted_v2 is not None, "reworked reporter_v2 was not persisted at all"
     assert persisted_v2.draft.version == 2, (
-        f"expected reworked draft version 2 under 'reporter_v2', "
-        f"got {persisted_v2.draft.version}"
+        f"expected reworked draft version 2 under 'reporter_v2', got {persisted_v2.draft.version}"
     )

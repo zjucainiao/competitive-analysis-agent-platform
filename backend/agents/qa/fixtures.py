@@ -38,18 +38,14 @@ def load_analysis_result(name: str = "analysis_full") -> AnalysisResult:
     path = _ANALYSIS / f"{name}.json"
     if not path.exists():
         raise FileNotFoundError(f"analysis fixture not found: {path}")
-    return AnalysisResult.model_validate(
-        json.loads(path.read_text(encoding="utf-8"))
-    )
+    return AnalysisResult.model_validate(json.loads(path.read_text(encoding="utf-8")))
 
 
 def load_competitor_profile(name: str) -> CompetitorProfile:
     path = _PROFILES / f"{name.lower().replace(' ', '')}.json"
     if not path.exists():
         raise FileNotFoundError(f"profile fixture not found: {path}")
-    return CompetitorProfile.model_validate(
-        json.loads(path.read_text(encoding="utf-8"))
-    )
+    return CompetitorProfile.model_validate(json.loads(path.read_text(encoding="utf-8")))
 
 
 def load_competitor_profiles(
@@ -90,11 +86,15 @@ def load_demo_input(
     span_id: str = "span-qa",
 ) -> QAInput:
     """组装 demo 用 QAInput（默认 Notion / ClickUp / Asana 三件套）。"""
-    profile_names = profile_names if profile_names is not None else [
-        "Notion",
-        "ClickUp",
-        "Asana",
-    ]
+    profile_names = (
+        profile_names
+        if profile_names is not None
+        else [
+            "Notion",
+            "ClickUp",
+            "Asana",
+        ]
+    )
     return QAInput(
         task_id=task_id,
         project_id=project_id,

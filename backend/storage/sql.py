@@ -113,12 +113,8 @@ CREATE TABLE IF NOT EXISTS qa_verdicts (
 # P2-RUNSCOPE 迁移：已存在的库补 run_id 列（幂等）。新库由上面的 CREATE 直接带列；
 # 这两条对老库 ADD COLUMN，老行 run_id=NULL（被 list_* 的「最新 run」作用域视作一个
 # 历史 run，不影响新 run 隔离）。
-ALTER_NODE_OUTPUTS_RUN_ID = (
-    "ALTER TABLE node_outputs ADD COLUMN IF NOT EXISTS run_id text;"
-)
-ALTER_QA_VERDICTS_RUN_ID = (
-    "ALTER TABLE qa_verdicts ADD COLUMN IF NOT EXISTS run_id text;"
-)
+ALTER_NODE_OUTPUTS_RUN_ID = "ALTER TABLE node_outputs ADD COLUMN IF NOT EXISTS run_id text;"
+ALTER_QA_VERDICTS_RUN_ID = "ALTER TABLE qa_verdicts ADD COLUMN IF NOT EXISTS run_id text;"
 
 CREATE_QA_VERDICTS_IDX = """
 CREATE INDEX IF NOT EXISTS idx_qa_verdicts_project

@@ -162,9 +162,7 @@ def test_real_collect_notion_user_reviews_via_llm_websearch() -> None:
     for e in out.errors:
         print(f"  ! {e.severity} {e.code}: {e.message}")
 
-    assert review_docs, (
-        f"expected >=1 REVIEWS RawSourceDoc, got 0. errors={out.errors}"
-    )
+    assert review_docs, f"expected >=1 REVIEWS RawSourceDoc, got 0. errors={out.errors}"
     # 至少一条是 LLM 联网搜索产出（fetch_method='search'）
     llm_origin = [s for s in review_docs if s.fetch_method == "search"]
     assert llm_origin, (
@@ -173,10 +171,9 @@ def test_real_collect_notion_user_reviews_via_llm_websearch() -> None:
     )
     # Extractor 抽 overall_rating 的最小依赖：raw_text 里必须含一个 0-5 数字 + 平台名
     import re
+
     rating_pattern = re.compile(r"\b[0-5]([.,]\d)?\b")
-    platform_pattern = re.compile(
-        r"\b(G2|Capterra|TrustRadius|Software Advice|Gartner)\b", re.I
-    )
+    platform_pattern = re.compile(r"\b(G2|Capterra|TrustRadius|Software Advice|Gartner)\b", re.I)
     for s in llm_origin:
         assert rating_pattern.search(s.raw_text), (
             f"raw_text missing rating number: {s.raw_text[:200]!r}"

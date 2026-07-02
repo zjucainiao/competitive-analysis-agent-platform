@@ -3,6 +3,7 @@
 镜像 test_identity_propagation.py：Collector 在 RawSourceDoc 上标 tainted（注入命中），
 Extractor 铸造 Evidence 时继承，让下游 QA 据 tainted 提权。
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -85,9 +86,9 @@ def test_extract_prompt_has_spotlighting_guard() -> None:
 
     import backend.agents.extractor as ext_pkg
 
-    text = (
-        Path(ext_pkg.__file__).parent / "prompts" / "extract_source.md"
-    ).read_text(encoding="utf-8")
+    text = (Path(ext_pkg.__file__).parent / "prompts" / "extract_source.md").read_text(
+        encoding="utf-8"
+    )
     # 归一化空白：提示词里短语可能因 markdown 折行被换行打断，按语义匹配而非字面
     normalized = " ".join(text.lower().split())
     assert "untrusted" in normalized

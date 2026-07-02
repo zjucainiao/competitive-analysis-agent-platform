@@ -54,6 +54,7 @@ def test_mock_loads_notion_profile_and_evidences(notion_raw_sources) -> None:
     assert out.agent_version == "1.1.0"
     # schema_version 跟 backend.schemas.SCHEMA_VERSION 走，不写死字面量
     from backend.schemas import SCHEMA_VERSION
+
     assert out.schema_version == SCHEMA_VERSION
     # field_confidence / status 至少覆盖几个关键字段
     assert "basic_info.positioning" in out.profile.field_status
@@ -83,7 +84,10 @@ def test_mock_unknown_product_marks_failed() -> None:
 def test_extractor_input_rejects_extra_fields(notion_raw_sources) -> None:
     with pytest.raises(ValidationError):
         ExtractorInput(  # type: ignore[call-arg]
-            task_id="t", project_id="p", trace_id="tr", span_id="sp",
+            task_id="t",
+            project_id="p",
+            trace_id="tr",
+            span_id="sp",
             product_name="Notion",
             industry_schema_id="collaboration_saas_v1",
             raw_sources=notion_raw_sources,
@@ -96,9 +100,7 @@ def test_extractor_input_rejects_extra_fields(notion_raw_sources) -> None:
 
 def test_real_mode_without_llm_returns_failed(notion_raw_sources) -> None:
     # tracer 必须给（BaseAgent 非 mock 强制），LLM 故意不给 → 业务层抛 UPSTREAM_MISSING
-    agent = Extractor(
-        llm=ScriptedLLM(), tracer=NullTracer()
-    )
+    agent = Extractor(llm=ScriptedLLM(), tracer=NullTracer())
     # 直接绕过 BaseAgent 的 mock=True 路径
     object.__setattr__(agent, "llm", None)  # mypy 噪音忽略
 
@@ -609,10 +611,18 @@ def test_industry_extension_backfills_all_12_dimensions(notion_raw_sources) -> N
     assert ext.industry_id == "collaboration_saas"
 
     dims = [
-        "task_management", "kanban_view", "calendar_view", "gantt_view",
-        "document_collaboration", "workflow_automation", "knowledge_base",
-        "team_permission", "third_party_integration", "mobile_support",
-        "realtime_editing", "ai_assistance",
+        "task_management",
+        "kanban_view",
+        "calendar_view",
+        "gantt_view",
+        "document_collaboration",
+        "workflow_automation",
+        "knowledge_base",
+        "team_permission",
+        "third_party_integration",
+        "mobile_support",
+        "realtime_editing",
+        "ai_assistance",
     ]
     # 12 维全部非 None
     for d in dims:
@@ -687,10 +697,7 @@ def test_overall_rating_conflict_flagged(notion_raw_sources) -> None:
 
     # 即便冲突也必须保留 best confidence 的值，绝不丢空（schema_completeness）
     assert out.profile.user_feedback.overall_rating == 4.7
-    assert (
-        out.profile.field_status.get("user_feedback.overall_rating")
-        is FieldStatus.CONFLICTING
-    )
+    assert out.profile.field_status.get("user_feedback.overall_rating") is FieldStatus.CONFLICTING
     assert any(e.code == "CONFLICTING_FACTS" for e in out.errors)
 
 
@@ -714,9 +721,7 @@ def test_safe_pricing_plan_survives_string_limits() -> None:
     """带 str 类型 limits 的定价档位应被正常解析（而非整个 Extractor 崩）。"""
     from backend.agents.extractor.agent import _safe_pricing_plan
 
-    plan = _safe_pricing_plan(
-        {"name": "Pro", "price_per_seat_monthly_usd": 10, "limits": "无限制"}
-    )
+    plan = _safe_pricing_plan({"name": "Pro", "price_per_seat_monthly_usd": 10, "limits": "无限制"})
     assert plan is not None
     assert plan.name == "Pro"
     assert plan.limits == {"summary": "无限制"}

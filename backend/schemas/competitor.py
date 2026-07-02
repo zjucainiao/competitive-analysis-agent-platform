@@ -18,10 +18,10 @@ from .industry import IndustryExtensionUnion
 class FieldStatus(str, Enum):
     """字段级状态。配合 CompetitorProfile.field_status 使用。"""
 
-    VERIFIED = "verified"          # 有 evidence 支撑
-    UNVERIFIED = "unverified"      # LLM 抽取但 evidence 匹配失败
-    UNKNOWN = "unknown"            # 原文未提及
-    CONFLICTING = "conflicting"    # 多源冲突
+    VERIFIED = "verified"  # 有 evidence 支撑
+    UNVERIFIED = "unverified"  # LLM 抽取但 evidence 匹配失败
+    UNKNOWN = "unknown"  # 原文未提及
+    CONFLICTING = "conflicting"  # 多源冲突
 
 
 # ---------- Basic Info ----------

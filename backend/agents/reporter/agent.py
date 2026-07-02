@@ -82,10 +82,7 @@ def _parallel_map(fn, items: list, *, max_workers: int) -> list:
         return [fn(it) for it in items]
     contexts = [contextvars.copy_context() for _ in items]
     with ThreadPoolExecutor(max_workers=min(len(items), max_workers)) as pool:
-        futures = [
-            pool.submit(ctx.run, fn, it)
-            for it, ctx in zip(items, contexts, strict=True)
-        ]
+        futures = [pool.submit(ctx.run, fn, it) for it, ctx in zip(items, contexts, strict=True)]
         return [f.result() for f in futures]
 
 
@@ -259,16 +256,11 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                         retriable=False,
                     )
                 # 3. 事实性段落必须有 evidence
-                if (
-                    not para.is_soft_conclusion
-                    and not para.evidence_ids
-                    and para.text.strip()
-                ):
+                if not para.is_soft_conclusion and not para.evidence_ids and para.text.strip():
                     raise AgentRunError(
                         code="MISSING_CITATION",
                         message=(
-                            f"paragraph {para.paragraph_id} is factual but has no "
-                            f"evidence_ids"
+                            f"paragraph {para.paragraph_id} is factual but has no evidence_ids"
                         ),
                         retriable=False,
                     )
@@ -318,9 +310,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
     # ----- 内部：核心组装 -----
 
     @staticmethod
-    def _affected_section_ids(
-        qa_feedback: dict, prior_draft: ReportDraft
-    ) -> set[str] | None:
+    def _affected_section_ids(qa_feedback: dict, prior_draft: ReportDraft) -> set[str] | None:
         """从 QA 反馈定位需要重写的 section_id 集合（B1 定向改稿）。
 
         只认结构化 location：``report.sections[i]...`` / ``report.paragraphs[pid]``
@@ -337,9 +327,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
         if not flagged:
             return None
         pid_to_sec = {
-            p.paragraph_id: s.section_id
-            for s in prior_draft.sections
-            for p in s.paragraphs
+            p.paragraph_id: s.section_id for s in prior_draft.sections for p in s.paragraphs
         }
         affected: set[str] = set()
         for iss in flagged:
@@ -410,13 +398,9 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
         affected_ids: set[str] | None = None
         prior_by_id: dict[str, ReportSection] = {}
         if inp.prior_draft is not None and inp.qa_feedback:
-            affected_ids = self._affected_section_ids(
-                inp.qa_feedback, inp.prior_draft
-            )
+            affected_ids = self._affected_section_ids(inp.qa_feedback, inp.prior_draft)
             if affected_ids is not None:
-                prior_by_id = {
-                    s.section_id: s for s in inp.prior_draft.sections
-                }
+                prior_by_id = {s.section_id: s for s in inp.prior_draft.sections}
 
         def _build_one(sec_tpl: ReportSectionTemplate):
             if (
@@ -436,9 +420,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                 allow_llm=allow_llm,
             )
 
-        section_results = _parallel_map(
-            _build_one, ordered_tpls, max_workers=self.MAX_LLM_WORKERS
-        )
+        section_results = _parallel_map(_build_one, ordered_tpls, max_workers=self.MAX_LLM_WORKERS)
         for section, sec_errors, sec_banned, sec_unverified in section_results:
             sections.append(section)
             errors.extend(sec_errors)
@@ -468,21 +450,15 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
         sections = _renumber_sections(sections)
 
         total_paragraphs = sum(len(s.paragraphs) for s in sections)
-        word_count = sum(
-            len(p.text) for s in sections for p in s.paragraphs
-        )
-        claim_count = len(
-            {cid for s in sections for p in s.paragraphs for cid in p.claim_ids}
-        )
+        word_count = sum(len(p.text) for s in sections for p in s.paragraphs)
+        claim_count = len({cid for s in sections for p in s.paragraphs for cid in p.claim_ids})
         evidence_count = len(
             {eid for s in sections for p in s.paragraphs for eid in p.evidence_ids}
         )
 
         draft = ReportDraft(
             report_id=f"rep_{inp.task_id}",
-            version=1 + (inp.qa_feedback or {}).get("revision", 0)
-            if inp.qa_feedback
-            else 1,
+            version=1 + (inp.qa_feedback or {}).get("revision", 0) if inp.qa_feedback else 1,
             template_id=template.template_id,
             sections=sections,
             summary=self._build_summary(inp.analysis, template),
@@ -564,8 +540,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
         else:
             section = None
             has_dimension_claims = (
-                tpl.dimension is not None
-                and inp.analysis.dimensions.get(tpl.dimension) is not None
+                tpl.dimension is not None and inp.analysis.dimensions.get(tpl.dimension) is not None
             )
             if allow_llm and self.llm is not None and has_dimension_claims:
                 try:
@@ -581,8 +556,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                         AgentError(
                             code="LLM_SCHEMA_INVALID",
                             message=(
-                                f"LLM section {tpl.section_id} failed: "
-                                f"{type(e).__name__}: {e}"
+                                f"LLM section {tpl.section_id} failed: {type(e).__name__}: {e}"
                             ),
                             severity="warn",
                             retriable=True,
@@ -756,11 +730,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                 return False
             if any(e not in valid_evidence for e in para.evidence_ids):
                 return False
-            if (
-                not para.is_soft_conclusion
-                and not para.evidence_ids
-                and para.text.strip()
-            ):
+            if not para.is_soft_conclusion and not para.evidence_ids and para.text.strip():
                 return False
             # 数字校验：self_correct=True 时放行 → 由后置 _run_self_correct 处理
             # （含定向 LLM repair + 兜底剥号），避免一遇 hallucination 就 fallback
@@ -794,9 +764,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
         prompt_path = PROMPT_DIR / "entailment.md"
         if not prompt_path.exists():
             return None
-        system_block, user_template = _split_prompt(
-            prompt_path.read_text(encoding="utf-8")
-        )
+        system_block, user_template = _split_prompt(prompt_path.read_text(encoding="utf-8"))
         excerpts = [
             {
                 "evidence_id": ev.evidence_id,
@@ -864,9 +832,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
             }
 
         verdict_cache: dict[tuple[str, str], EntailmentVerdict | None] = {}
-        entail_enabled = (
-            self.entailment_check and not self.mock and self.llm is not None
-        )
+        entail_enabled = self.entailment_check and not self.mock and self.llm is not None
         # entailment 判定 / repair 重写并行化：entailment 的 LLM 调用放在锁外
         # 才能真正并发；budget 计数 + verdict_cache 读写在锁内保证线程安全。
         cache_lock = threading.Lock()
@@ -908,14 +874,8 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
 
         def _detect_dirty() -> list[tuple[ReportParagraph, _RepairIssue]]:
             paras = [p for s in sections for p in s.paragraphs]
-            issues = _parallel_map(
-                compute_issue, paras, max_workers=self.MAX_LLM_WORKERS
-            )
-            return [
-                (p, iss)
-                for p, iss in zip(paras, issues, strict=True)
-                if iss is not None
-            ]
+            issues = _parallel_map(compute_issue, paras, max_workers=self.MAX_LLM_WORKERS)
+            return [(p, iss) for p, iss in zip(paras, issues, strict=True) if iss is not None]
 
         repair_attempts = 0
         for _attempt in range(self.MAX_REPAIR_ATTEMPTS):
@@ -931,9 +891,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                 evs = [ev_db[e] for e in para.evidence_ids if e in ev_db]
                 return para, self._llm_repair_paragraph(para, issue, evs)
 
-            for para, repaired in _parallel_map(
-                _repair, dirty, max_workers=self.MAX_LLM_WORKERS
-            ):
+            for para, repaired in _parallel_map(_repair, dirty, max_workers=self.MAX_LLM_WORKERS):
                 if repaired is None or not repaired.text.strip():
                     continue
                 para.text = repaired.text
@@ -947,9 +905,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
             id(p): iss
             for p, iss in zip(
                 _final_paras,
-                _parallel_map(
-                    compute_issue, _final_paras, max_workers=self.MAX_LLM_WORKERS
-                ),
+                _parallel_map(compute_issue, _final_paras, max_workers=self.MAX_LLM_WORKERS),
                 strict=True,
             )
         }
@@ -1000,10 +956,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                 kept.append(
                     ReportParagraph(
                         paragraph_id=f"p_{section.section_id}_fallback",
-                        text=(
-                            "本章节涉及的结论暂无可直接引用的 evidence 支撑，"
-                            "已隐去待人工复核。"
-                        ),
+                        text=("本章节涉及的结论暂无可直接引用的 evidence 支撑，已隐去待人工复核。"),
                         claim_ids=[],
                         evidence_ids=[],
                         is_quantitative=False,
@@ -1044,9 +997,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
         prompt_path = PROMPT_DIR / "self_correct.md"
         if not prompt_path.exists():
             return None
-        system_block, user_template = _split_prompt(
-            prompt_path.read_text(encoding="utf-8")
-        )
+        system_block, user_template = _split_prompt(prompt_path.read_text(encoding="utf-8"))
         excerpts = [
             {
                 "evidence_id": ev.evidence_id,
@@ -1088,9 +1039,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
     # ---- 启发式路径 ----
 
     @staticmethod
-    def _heuristic_overview(
-        tpl: ReportSectionTemplate, inp: ReporterInput
-    ) -> ReportSection:
+    def _heuristic_overview(tpl: ReportSectionTemplate, inp: ReporterInput) -> ReportSection:
         target = inp.analysis.target_product
         competitors = "、".join(inp.analysis.competitors) or "（暂无）"
         dims = (
@@ -1116,9 +1065,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
         )
 
     @staticmethod
-    def _disclaimer_section(
-        tpl: ReportSectionTemplate, template: ReportTemplate
-    ) -> ReportSection:
+    def _disclaimer_section(tpl: ReportSectionTemplate, template: ReportTemplate) -> ReportSection:
         para = ReportParagraph(
             paragraph_id=f"p_{tpl.section_id}_01",
             text=template.disclaimer,
@@ -1267,12 +1214,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
         if confidence < 0.6:
             return AgentStatus.NEEDS_REWORK
         thin = total_paragraphs < template.min_total_paragraphs
-        if (
-            thin
-            or banned_hits > 0
-            or unverified_hits > 0
-            or forced_fallbacks > 0
-        ):
+        if thin or banned_hits > 0 or unverified_hits > 0 or forced_fallbacks > 0:
             return AgentStatus.PARTIAL
         return AgentStatus.SUCCESS
 
@@ -1290,23 +1232,16 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
     ) -> str:
         lines: list[str] = []
         if total_paragraphs < template.min_total_paragraphs:
-            lines.append(
-                f"段落数 {total_paragraphs} 低于模板下限 "
-                f"{template.min_total_paragraphs}"
-            )
+            lines.append(f"段落数 {total_paragraphs} 低于模板下限 {template.min_total_paragraphs}")
         if banned_hits:
-            lines.append(
-                f"命中 {banned_hits} 处禁用词（绝对化表述），建议换措辞"
-            )
+            lines.append(f"命中 {banned_hits} 处禁用词（绝对化表述），建议换措辞")
         if unverified_hits:
             lines.append(
                 f"有 {unverified_hits} 处数字未能在 evidence 中字面核对，"
                 "若 evidence_provider 未注入请优先补齐"
             )
         if repair_attempts:
-            lines.append(
-                f"self-correct 跑了 {repair_attempts} 轮 LLM 重写来清理 hallucination"
-            )
+            lines.append(f"self-correct 跑了 {repair_attempts} 轮 LLM 重写来清理 hallucination")
         if entailment_checks:
             lines.append(f"entailment judge 执行 {entailment_checks} 次")
         if forced_fallbacks:
@@ -1348,9 +1283,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                 pool.update(c.counter_evidence_ids)
         return pool
 
-    def _fail(
-        self, inp: ReporterInput, errors: list[AgentError]
-    ) -> ReporterOutput:
+    def _fail(self, inp: ReporterInput, errors: list[AgentError]) -> ReporterOutput:
         draft = ReportDraft(
             report_id=f"rep_{inp.task_id}",
             version=1,
@@ -1421,9 +1354,7 @@ def _render_qa_feedback_block(qa_feedback: dict | None) -> str:
     """Reporter 专用 thin wrapper（保留原名让外部测试用同样路径调）。"""
     from backend.agents._qa_feedback import render_qa_feedback_block
 
-    return render_qa_feedback_block(
-        qa_feedback, closing_instruction=_REPORTER_CLOSING
-    )
+    return render_qa_feedback_block(qa_feedback, closing_instruction=_REPORTER_CLOSING)
 
 
 def _coerce_pydantic(resp: Any, model: type[BaseModel]) -> Any:
@@ -1438,9 +1369,7 @@ def _coerce_pydantic(resp: Any, model: type[BaseModel]) -> Any:
         return model.model_validate(resp)
     if hasattr(resp, "model_dump"):
         return model.model_validate(resp.model_dump())
-    raise ValueError(
-        f"cannot coerce LLM response to {model.__name__}: {type(resp).__name__}"
-    )
+    raise ValueError(f"cannot coerce LLM response to {model.__name__}: {type(resp).__name__}")
 
 
 # ---------- 启发式辅助 ----------

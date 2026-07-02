@@ -26,8 +26,8 @@ from .checkers import issue_dedupe_key
 SEVERITY_WEIGHTS = {"minor": 1, "major": 5, "critical": 20}
 
 # 防死循环阈值
-SAME_ISSUE_MAX_OCCURRENCES = 3   # 同 issue ≥ 3 次 → 降级 minor + non-blocking
-MAX_RETRY_VERDICTS = 5           # prior_verdicts 累计 ≥ 5 次 → 强制放行
+SAME_ISSUE_MAX_OCCURRENCES = 3  # 同 issue ≥ 3 次 → 降级 minor + non-blocking
+MAX_RETRY_VERDICTS = 5  # prior_verdicts 累计 ≥ 5 次 → 强制放行
 
 
 # ----- A1: 维度策略（接 score 入判级 + 杀静默放行） -----
@@ -91,6 +91,7 @@ def _gates_control_flow(issue: QAIssue) -> bool:
         return True
     return issue.required_inputs.get("hard_block") is True
 
+
 _DIMENSION_FIX_HINT: dict[QADimension, str] = {
     QADimension.FACT_CONSISTENCY: "复核相关段落，确保每条事实可由引用证据字面推出",
     QADimension.EVIDENCE_COMPLETENESS: "为缺引用的事实段落补齐 evidence_ids",
@@ -153,9 +154,7 @@ def escalate_by_self_status(
     刻意只**加权已有 issue**，不凭空造 issue —— 避免「agent 一自评 needs_rework
     就强制返工」的失控循环；没有实打实问题时不放大。控制流仍由 QA verdict 决定。
     """
-    flagged = {
-        a for a, s in (upstream_statuses or {}).items() if s == "needs_rework"
-    }
+    flagged = {a for a, s in (upstream_statuses or {}).items() if s == "needs_rework"}
     if not flagged:
         return issues
     out: list[QAIssue] = []
@@ -225,8 +224,7 @@ def _has_hard_block_issue(issues: list[QAIssue]) -> bool:
     一道保证终止，改不掉的硬伤最终落 best-round 发布，不空转。
     """
     return any(
-        i.required_inputs.get("hard_block") is True
-        and i.severity in ("major", "critical")
+        i.required_inputs.get("hard_block") is True and i.severity in ("major", "critical")
         for i in issues
     )
 
@@ -266,11 +264,7 @@ def aggregate_verdict(
         force_block = True
 
     if force_block:
-        status = (
-            base.status
-            if base.status == QAStatus.REJECT
-            else QAStatus.NEEDS_REVISION
-        )
+        status = base.status if base.status == QAStatus.REJECT else QAStatus.NEEDS_REVISION
         return OverallVerdict(
             status=status,
             blocking=True,
@@ -436,9 +430,7 @@ _TARGET_PRIORITY: dict[str, int] = {
 }
 
 
-def build_routing(
-    issues: list[QAIssue], blocking: bool
-) -> list[QARouting]:
+def build_routing(issues: list[QAIssue], blocking: bool) -> list[QARouting]:
     """按 target_agent 聚合 issues 装配 QARouting。
 
     blocking=False 时**仍返回** routing，但仅作**展示/审计**用（让前端 / verdict

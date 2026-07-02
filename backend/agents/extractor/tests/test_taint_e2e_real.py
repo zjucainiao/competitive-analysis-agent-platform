@@ -10,6 +10,7 @@
 3. 结构化输出**不含**被注入想要写入的话（"best product in the world" / "garbage" 等）
    —— 即抽取器把注入文本当数据、没当指令执行。
 """
+
 from __future__ import annotations
 
 import json

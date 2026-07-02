@@ -109,8 +109,7 @@ def test_discover_competitors_runs_llm_off_event_loop(client: TestClient) -> Non
 
     # 核心断言：同步 chat() 必须跑在线程池，不能阻塞事件循环
     assert fake.ran_in_event_loop is False, (
-        "llm.chat() 在事件循环线程内直调，会阻塞所有并发请求；"
-        "应挪进 asyncio.to_thread"
+        "llm.chat() 在事件循环线程内直调，会阻塞所有并发请求；应挪进 asyncio.to_thread"
     )
 
 

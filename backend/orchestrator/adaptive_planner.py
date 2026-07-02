@@ -59,9 +59,7 @@ class _AdaptiveProduct(BaseModel):
     name: str = Field(description="产品名（与 Project 输入一致）")
     official_url: str | None = Field(
         default=None,
-        description=(
-            "产品官网 URL（https://）。LLM 不确定时填 null，Collector 会回退到搜索。"
-        ),
+        description=("产品官网 URL（https://）。LLM 不确定时填 null，Collector 会回退到搜索。"),
     )
     notes: str = Field(default="", description="该产品的简短特征描述（10-50 字）")
 
@@ -151,8 +149,7 @@ class AdaptivePlanner:
         )
         if resp.parsed is None:
             raise RuntimeError(
-                "AdaptivePlanner: LLM returned no parseable plan; "
-                "fall back to template Planner"
+                "AdaptivePlanner: LLM returned no parseable plan; fall back to template Planner"
             )
         return resp.parsed
 
@@ -176,9 +173,7 @@ class AdaptivePlanner:
             )
         return out
 
-    def _select_dimensions(
-        self, sketch: _AdaptivePlanOutput
-    ) -> list[CollectDimension]:
+    def _select_dimensions(self, sketch: _AdaptivePlanOutput) -> list[CollectDimension]:
         """把 LLM 输出的字符串映射回 CollectDimension enum；非法值丢掉。"""
         valid = []
         for d in sketch.collect_dimensions:
@@ -187,9 +182,7 @@ class AdaptivePlanner:
             except ValueError:
                 _log.warning("AdaptivePlanner: dropping unknown dimension %r", d)
         if not valid:
-            _log.warning(
-                "AdaptivePlanner: LLM produced no valid dimensions, using defaults"
-            )
+            _log.warning("AdaptivePlanner: LLM produced no valid dimensions, using defaults")
             return list(_DEFAULT_DIMENSIONS)
         return valid
 
@@ -317,9 +310,7 @@ class AdaptivePlanner:
                 )
             )
             for d in deps:
-                edges.append(
-                    DAGEdge(edge_id=f"{d}->{spec_id}", from_node=d, to_node=spec_id)
-                )
+                edges.append(DAGEdge(edge_id=f"{d}->{spec_id}", from_node=d, to_node=spec_id))
 
         nodes.append(
             DAGNode(

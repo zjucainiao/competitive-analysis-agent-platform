@@ -50,8 +50,15 @@ class _Reg:
 async def test_retry_then_success():
     agent = _FakeAgent(fail_times=1)
     res = await run_agent_node(
-        _Reg(agent), "collector", object(), outputs={}, trace_id="t",
-        node_id="collect.x", max_retries=2, timeout_ms=2000, backoff_base=0.0,
+        _Reg(agent),
+        "collector",
+        object(),
+        outputs={},
+        trace_id="t",
+        node_id="collect.x",
+        max_retries=2,
+        timeout_ms=2000,
+        backoff_base=0.0,
     )
     assert res.status == AgentStatus.SUCCESS and agent.calls == 2
 
@@ -60,8 +67,15 @@ async def test_retry_then_success():
 async def test_all_retries_fail_returns_failed():
     agent = _FakeAgent(fail_times=5)
     res = await run_agent_node(
-        _Reg(agent), "collector", object(), outputs={}, trace_id="t",
-        node_id="collect.x", max_retries=1, timeout_ms=2000, backoff_base=0.0,
+        _Reg(agent),
+        "collector",
+        object(),
+        outputs={},
+        trace_id="t",
+        node_id="collect.x",
+        max_retries=1,
+        timeout_ms=2000,
+        backoff_base=0.0,
     )
     assert res.status == AgentStatus.FAILED and res.error is not None
 
@@ -71,8 +85,15 @@ async def test_attempts_count_on_failure():
     """max_retries=1 → total attempts must be exactly 2 (no off-by-one)."""
     agent = _FakeAgent(fail_times=5)  # always fails
     res = await run_agent_node(
-        _Reg(agent), "collector", object(), outputs={}, trace_id="t",
-        node_id="collect.x", max_retries=1, timeout_ms=2000, backoff_base=0.0,
+        _Reg(agent),
+        "collector",
+        object(),
+        outputs={},
+        trace_id="t",
+        node_id="collect.x",
+        max_retries=1,
+        timeout_ms=2000,
+        backoff_base=0.0,
     )
     assert res.status == AgentStatus.FAILED
     assert res.attempts == 2  # max_retries + 1
@@ -105,8 +126,15 @@ async def test_timeout_fails_without_retry():
 
     agent = _SlowAgent()
     res = await run_agent_node(
-        _Reg(agent), "collector", object(), outputs={}, trace_id="t",
-        node_id="collect.x", max_retries=2, timeout_ms=50, backoff_base=0.0,
+        _Reg(agent),
+        "collector",
+        object(),
+        outputs={},
+        trace_id="t",
+        node_id="collect.x",
+        max_retries=2,
+        timeout_ms=50,
+        backoff_base=0.0,
     )
     assert res.status == AgentStatus.FAILED
     assert res.attempts == 1
@@ -145,8 +173,15 @@ async def test_non_retriable_failed_returns_immediately():
 
     agent = _NonRetriableAgent()
     res = await run_agent_node(
-        _Reg(agent), "collector", object(), outputs={}, trace_id="t",
-        node_id="collect.x", max_retries=3, timeout_ms=2000, backoff_base=0.0,
+        _Reg(agent),
+        "collector",
+        object(),
+        outputs={},
+        trace_id="t",
+        node_id="collect.x",
+        max_retries=3,
+        timeout_ms=2000,
+        backoff_base=0.0,
     )
     assert res.status == AgentStatus.FAILED
     assert res.error is not None
@@ -174,8 +209,15 @@ async def test_partial_returned_as_is():
 
     agent = _PartialAgent()
     res = await run_agent_node(
-        _Reg(agent), "collector", object(), outputs={}, trace_id="t",
-        node_id="collect.x", max_retries=3, timeout_ms=2000, backoff_base=0.0,
+        _Reg(agent),
+        "collector",
+        object(),
+        outputs={},
+        trace_id="t",
+        node_id="collect.x",
+        max_retries=3,
+        timeout_ms=2000,
+        backoff_base=0.0,
     )
     assert res.status == AgentStatus.PARTIAL
     assert agent.calls == 1  # PARTIAL is terminal — no retry

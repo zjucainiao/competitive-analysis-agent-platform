@@ -234,9 +234,7 @@ _BY_PRODUCT: dict[str, dict[CollectDimension, RawSourceDoc]] = {
 }
 
 
-def get_mock_sources(
-    product: str, dimensions: list[CollectDimension]
-) -> list[RawSourceDoc]:
+def get_mock_sources(product: str, dimensions: list[CollectDimension]) -> list[RawSourceDoc]:
     """按产品 + 维度组合返回 mock RawSourceDoc 列表。
 
     未覆盖的产品 / 维度返回空（由 Collector 转 self_critique 提示）。
