@@ -1,7 +1,8 @@
 """WI-1 真实 LLM e2e：间接 prompt injection 不劫持抽取（spotlighting 生效）。
 
-跑法：``RUN_REAL_LLM_TESTS=1 .venv/bin/python -m pytest <this> -v -s``
+跑法：``RUN_REAL_LLM_TESTS=1 .venv/bin/python -m pytest <this> -m e2e -v -s``
 需 .env 里配好一组 LLM key（DOUBAO / DEEPSEEK / OPENAI）。
+默认 ``pytest``（addopts ``-m "not e2e"``）反选本文件。
 
 断言：
 1. 抽取正常完成（非 FAILED，产出结构化 CompetitorProfile）；
@@ -22,9 +23,14 @@ from backend.agents.extractor.agent import Extractor
 from backend.schemas import CollectDimension, ExtractorInput, RawSourceDoc
 from backend.tools.injection_guard import scan
 
-load_dotenv(".env")
+pytestmark = pytest.mark.e2e
 
 _RUN = os.getenv("RUN_REAL_LLM_TESTS") == "1"
+
+# 显式开启真实 e2e 时才读 .env 补 LLM key；模块级无条件 load_dotenv 会在收集
+# 阶段泄漏开发者 .env 的 POSTGRES_DSN / REDIS_URL，破坏 storage 测试的自动 skip
+if _RUN:
+    load_dotenv(".env", override=False)
 
 _INJECTION_SOURCE = (
     "Notion is an all-in-one workspace for notes, docs and project management. "

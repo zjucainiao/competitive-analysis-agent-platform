@@ -7,8 +7,12 @@
           → DeepSeek API + Tavily/Serper 真采集
       → 轮询 GET /api/projects/{id}/run-state 直到整体终态(done/failed/aborted)
 
-显式 opt-in：必须 ``RUN_REAL_LLM_TESTS=1`` 且 ``DEEPSEEK_API_KEY`` 或
-``OPENAI_API_KEY`` 至少有一个非空，否则整文件 skip。
+显式 opt-in（双重门控）::
+
+    RUN_REAL_LLM_TESTS=1 pytest backend/api/tests/test_real_full_chain.py -m e2e -v -s
+
+必须 ``RUN_REAL_LLM_TESTS=1`` 且 ``DEEPSEEK_API_KEY`` 或 ``OPENAI_API_KEY``
+至少有一个非空，否则整文件 skip；默认 ``pytest``（addopts ``-m "not e2e"``）反选本文件。
 """
 
 from __future__ import annotations
@@ -22,7 +26,11 @@ from fastapi.testclient import TestClient
 
 from backend.api import create_app
 
-load_dotenv()
+# 显式开启真实链路时才读 .env 补 LLM key；模块级无条件 load_dotenv 会在收集
+# 阶段把开发者 .env 的 POSTGRES_DSN / REDIS_URL 泄漏进进程环境，
+# 破坏 storage 测试「无环境变量自动 skip」的约定。override=False：不覆盖已导出变量。
+if os.getenv("RUN_REAL_LLM_TESTS") == "1":
+    load_dotenv(override=False)
 
 
 def _has_any_llm_key() -> bool:
@@ -38,13 +46,16 @@ def _real_llm_disabled() -> bool:
     return not _has_any_llm_key()
 
 
-pytestmark = pytest.mark.skipif(
-    _real_llm_disabled(),
-    reason=(
-        "real full-chain test: set RUN_REAL_LLM_TESTS=1 + "
-        "DOUBAO_API_KEY (or DEEPSEEK / OPENAI) to enable"
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.skipif(
+        _real_llm_disabled(),
+        reason=(
+            "real full-chain test: set RUN_REAL_LLM_TESTS=1 + "
+            "DOUBAO_API_KEY (or DEEPSEEK / OPENAI) to enable"
+        ),
     ),
-)
+]
 
 
 @pytest.fixture

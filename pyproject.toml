@@ -108,6 +108,8 @@ disallow_untyped_defs = false  # v1 阶段允许，v2 启用
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# 默认反选 e2e（真实网络 / 真实 LLM，慢且烧钱）；显式跑需追加 `-m e2e` 覆盖
+addopts = '-m "not e2e"'
 markers = [
     "slow: marks tests as slow",
     "e2e: end-to-end integration tests",
@@ -115,4 +117,4 @@ markers = [
     "redis: requires a running Redis (REDIS_URL env var)",
     "otlp: requires opentelemetry SDK + exporter installed",
 ]
-testpaths = ["backend/tests", "backend/agents", "backend/orchestrator", "backend/storage", "backend/api", "backend/tools", "backend/llm", "backend/observability"]
+testpaths = ["backend/agents", "backend/orchestrator", "backend/storage", "backend/api", "backend/tools", "backend/llm", "backend/observability"]

@@ -4,7 +4,8 @@
 
     pytest backend/agents/collector/tests/test_e2e_real.py -m e2e -v -s
 
-默认 `pytest` 不带 `-m e2e` 时**会跳过**本文件，避免单元测试受外网影响。
+默认 `pytest`（pyproject 里 ``addopts = '-m "not e2e"'``）会**反选**本文件，
+避免单元测试受外网影响；必须显式带 ``-m e2e`` 才会执行。
 """
 
 from __future__ import annotations
@@ -24,7 +25,17 @@ from backend.schemas import AgentStatus, CollectDimension
 
 pytestmark = pytest.mark.e2e
 
-load_dotenv(".env")
+
+@pytest.fixture(autouse=True, scope="module")
+def _load_env() -> None:
+    """e2e 被显式选中执行时才读 .env 补 key。
+
+    不能放模块级：即便 `-m "not e2e"` 反选，收集阶段仍会 import 本模块，
+    模块级 load_dotenv 会把开发者 .env 的 POSTGRES_DSN / REDIS_URL 泄漏进
+    进程环境，破坏 storage 测试「无环境变量自动 skip」的约定。
+    override=False：不覆盖 shell 已导出的变量。
+    """
+    load_dotenv(".env", override=False)
 
 
 def _network_or_skip() -> None:
