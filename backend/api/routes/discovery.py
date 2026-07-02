@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -112,7 +113,10 @@ async def discover_competitors(
     )
 
     try:
-        resp = llm.chat(
+        # llm.chat 是同步阻塞客户端（底层 openai.OpenAI），一次调用数秒；
+        # 挪进线程池执行，避免卡死整个事件循环（与 orchestrator run_agent 一致）。
+        resp = await asyncio.to_thread(
+            llm.chat,
             system=_DISCOVER_SYSTEM,
             messages=[{"role": "user", "content": user_prompt}],
             response_format=_DiscoverLLMResponse,
