@@ -27,11 +27,11 @@ import json
 import logging
 import os
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any
 
 from backend.tools import sanitize
-
 
 _logger = logging.getLogger("backend.observability")
 
@@ -99,7 +99,7 @@ def _safe_json(value: Any, limit: int = _MAX_ATTR_LEN) -> str:
         else:
             data = str(value)
         raw = json.dumps(data, ensure_ascii=False, default=str)
-    except Exception:  # noqa: BLE001
+    except Exception:
         raw = str(value)
     return _trim(sanitize(raw), limit)
 
@@ -132,7 +132,7 @@ class OTLPSpan:
                 self._otel_span.set_attribute("agent.tokens_output", tout)
             if cost:
                 self._otel_span.set_attribute("agent.cost_usd", cost)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     def set_error(self, err: BaseException) -> None:
@@ -141,7 +141,7 @@ class OTLPSpan:
         try:
             self._otel_span.record_exception(err)
             self._otel_span.set_status(Status(StatusCode.ERROR, str(err)))
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     def add_llm_call(
@@ -163,9 +163,7 @@ class OTLPSpan:
             from opentelemetry import trace  # type: ignore
 
             ctx = trace.set_span_in_context(self._otel_span)
-            with self._otel_tracer.start_as_current_span(
-                "llm.chat", context=ctx
-            ) as child:
+            with self._otel_tracer.start_as_current_span("llm.chat", context=ctx) as child:
                 child.set_attribute("llm.model", model or "")
                 child.set_attribute("llm.tokens_input", int(tokens_input or 0))
                 child.set_attribute("llm.tokens_output", int(tokens_output or 0))
@@ -183,7 +181,7 @@ class OTLPSpan:
                     child.set_attribute("llm.messages", _safe_json(messages))
                 if response is not None:
                     child.set_attribute("llm.response", _safe_json(response))
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     def add_tool_call(
@@ -199,9 +197,7 @@ class OTLPSpan:
             from opentelemetry import trace  # type: ignore
 
             ctx = trace.set_span_in_context(self._otel_span)
-            with self._otel_tracer.start_as_current_span(
-                f"tool.{tool_name}", context=ctx
-            ) as child:
+            with self._otel_tracer.start_as_current_span(f"tool.{tool_name}", context=ctx) as child:
                 child.set_attribute("tool.name", tool_name)
                 if arguments is not None:
                     child.set_attribute("tool.arguments", _safe_json(arguments))
@@ -214,7 +210,7 @@ class OTLPSpan:
 
                     child.set_attribute("tool.error", error)
                     child.set_status(Status(StatusCode.ERROR, error))
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
 
@@ -235,12 +231,12 @@ class OTLPTracer:
     ) -> None:
         # 延迟 import：OTel SDK 仅在真用时加载
         from opentelemetry import trace  # type: ignore
-        from opentelemetry.sdk.resources import Resource  # type: ignore
-        from opentelemetry.sdk.trace import TracerProvider  # type: ignore
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor  # type: ignore
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import (  # type: ignore
             OTLPSpanExporter,
         )
+        from opentelemetry.sdk.resources import Resource  # type: ignore
+        from opentelemetry.sdk.trace import TracerProvider  # type: ignore
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor  # type: ignore
 
         attrs = {"service.name": service_name}
         if resource_attributes:
@@ -291,27 +287,27 @@ class OTLPTracer:
                     otel_span.set_attribute("app.parent_span_id", parent_span_id)
                 if node_id:
                     otel_span.set_attribute("dag.node_id", node_id)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
             wrapped = OTLPSpan(otel_span, self._tracer)
             try:
                 yield wrapped
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 wrapped.set_error(e)
                 raise
             finally:
                 duration_ms = int((time.monotonic() - started) * 1000)
                 try:
                     otel_span.set_attribute("agent.duration_ms", duration_ms)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
 
     def shutdown(self) -> None:
         """flush + 关闭 BatchSpanProcessor。优雅退出用。"""
         try:
             self._provider.shutdown()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
 
@@ -342,9 +338,7 @@ def build_tracer_from_env(
         _logger.info("no OTLP endpoint configured, using NullTracer")
         return NullTracer()
 
-    effective_name = (
-        service_name or os.getenv("OTEL_SERVICE_NAME") or "competitive-analysis-agent"
-    )
+    effective_name = service_name or os.getenv("OTEL_SERVICE_NAME") or "competitive-analysis-agent"
     try:
         return OTLPTracer(
             service_name=effective_name,
@@ -352,7 +346,7 @@ def build_tracer_from_env(
             if effective_endpoint.endswith("/v1/traces")
             else None,  # endpoint 不带路径时让 SDK 自己拼
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         # OTel SDK 安装异常 / endpoint 不可达不应阻塞 Agent 启动
         _logger.warning("OTLPTracer init failed (%s), falling back to NullTracer", e)
         return NullTracer()

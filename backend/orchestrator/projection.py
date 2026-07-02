@@ -13,9 +13,11 @@ contract：
 - ``state["outputs"]`` 是 ``{ref_str: output_dict}``。
 - 返回 ``(DAGPlan, {node_id: output_dict})``。
 """
+
 from __future__ import annotations
 
 from datetime import datetime
+
 from ulid import ULID
 
 from backend.schemas import DAGEdge, DAGNode, DAGPlan, NodeStatus, NodeType, Project
@@ -90,9 +92,7 @@ def run_state_to_dagplan(state: dict, *, project: Project) -> tuple[DAGPlan, dic
         by_stage.setdefault(node_name, []).append((nid, product, round_))
 
         run_status: str = run.get("status", "")
-        dag_status = (
-            NodeStatus.SUCCESS if run_status in _SUCCESS_STATUSES else NodeStatus.FAILED
-        )
+        dag_status = NodeStatus.SUCCESS if run_status in _SUCCESS_STATUSES else NodeStatus.FAILED
 
         # 修订节点(round>1)指向同阶段同产品的上一轮节点,前端据 parent_node_id
         # 把它渲染成 feedback 子节点(v1↔v2 回放)
@@ -137,9 +137,7 @@ def run_state_to_dagplan(state: dict, *, project: Project) -> tuple[DAGPlan, dic
     return plan, out_map
 
 
-def _build_pipeline_edges(
-    by_stage: dict[str, list[tuple[str, str | None, int]]]
-) -> list[DAGEdge]:
+def _build_pipeline_edges(by_stage: dict[str, list[tuple[str, str | None, int]]]) -> list[DAGEdge]:
     """据各阶段节点重建流水线主链边,让前端 DAG 视图能正确分层布局。
 
     边语义(仅取每阶段 round=1 的"基"节点连主链;修订节点靠 parent_node_id):

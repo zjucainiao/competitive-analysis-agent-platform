@@ -16,9 +16,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable, Pattern
-
+from re import Pattern
 
 # ---------- 模式定义 ----------
 
@@ -63,7 +63,9 @@ DEFAULT_PII_PATTERNS: tuple[PIIPattern, ...] = (
     # 中国身份证 18 位（末位可能是 X）
     PIIPattern(
         name="id_card_cn",
-        regex=_c(r"\b[1-9]\d{5}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]\b"),
+        regex=_c(
+            r"\b[1-9]\d{5}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]\b"
+        ),
     ),
     # 中国手机号：1 开头 11 位，第二位 3-9
     PIIPattern(
@@ -145,11 +147,15 @@ class Sanitizer:
         if not text:
             return text, stats
         for p in self._patterns:
-            replacement = self._replacement_for(p)
-
-            def _sub(_m: re.Match[str], _name: str = p.name) -> str:
+            # 与 _name 同理：默认参数在定义时求值，把本轮的 replacement 一并固定，
+            # 避免闭包晚绑定拿到后续迭代的值（B023）
+            def _sub(
+                _m: re.Match[str],
+                _name: str = p.name,
+                _repl: str = self._replacement_for(p),
+            ) -> str:
                 stats.record(_name)
-                return replacement
+                return _repl
 
             text = p.regex.sub(_sub, text)
         return text, stats

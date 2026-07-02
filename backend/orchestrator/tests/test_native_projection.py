@@ -5,10 +5,10 @@ contract: run_state_to_dagplan 接受 RunState.model_dump() 产出的 dict
 Stage D 后 projection 不再对前端暴露，但仍是 orchestrator metrics 的内部依赖，
 故本测试保留。
 """
+
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -17,9 +17,7 @@ from backend.orchestrator.run_state import NodeRun, RunState
 from backend.schemas import Project
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_DEMO_PROJECT_FILE = (
-    _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
-)
+_DEMO_PROJECT_FILE = _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
 
 
 # ---------- fixtures ----------
@@ -30,9 +28,7 @@ def two_product_project() -> Project:
     """加载 demo 项目,设置两产品 Notion + Asana。"""
     data = json.loads(_DEMO_PROJECT_FILE.read_text(encoding="utf-8"))
     proj = Project.model_validate(data)
-    return proj.model_copy(
-        update={"target_product": "Notion", "competitors": ["Asana"]}
-    )
+    return proj.model_copy(update={"target_product": "Notion", "competitors": ["Asana"]})
 
 
 def _make_node_run(
@@ -63,10 +59,8 @@ def sample_final_state(two_product_project: Project) -> dict:
     包含 collect.Notion、extract.Notion、analyst、reporter、qa 五类节点。
     """
     history = [
-        _make_node_run("collect", "collector", product="Notion",
-                       output_ref="collect.Notion"),
-        _make_node_run("extract", "extractor", product="Notion",
-                       output_ref="extract.Notion"),
+        _make_node_run("collect", "collector", product="Notion", output_ref="collect.Notion"),
+        _make_node_run("extract", "extractor", product="Notion", output_ref="extract.Notion"),
         _make_node_run("analyst", "analyst", output_ref="analyst"),
         _make_node_run("reporter", "reporter", output_ref="reporter"),
         _make_node_run("qa", "qa", output_ref="qa"),
@@ -95,10 +89,8 @@ def rework_final_state(two_product_project: Project) -> dict:
     history 里有两条 reporter NodeRun：round=1 和 round=2。
     """
     history = [
-        _make_node_run("collect", "collector", product="Notion",
-                       output_ref="collect.Notion"),
-        _make_node_run("extract", "extractor", product="Notion",
-                       output_ref="extract.Notion"),
+        _make_node_run("collect", "collector", product="Notion", output_ref="collect.Notion"),
+        _make_node_run("extract", "extractor", product="Notion", output_ref="extract.Notion"),
         _make_node_run("analyst", "analyst", output_ref="analyst"),
         # reporter 首跑
         _make_node_run("reporter", "reporter", round_=1, output_ref="reporter"),
@@ -150,7 +142,7 @@ def test_projection_reporter_revisions_map_to_versioned_nodes(
     """返工终态：两轮 reporter → reporter + reporter_v2（前端 v1↔v2 回放保留）。"""
     from backend.orchestrator.projection import run_state_to_dagplan
 
-    plan, outputs = run_state_to_dagplan(rework_final_state, project=two_product_project)
+    plan, _outputs = run_state_to_dagplan(rework_final_state, project=two_product_project)
     ids = {n.node_id for n in plan.nodes}
     assert "reporter" in ids, f"reporter missing; got {ids}"
     assert "reporter_v2" in ids, f"reporter_v2 missing; got {ids}"
@@ -183,8 +175,8 @@ def test_projection_timestamps_propagated_to_dag_nodes(
     - 缺失时间戳的 NodeRun → DAGNode.started_at/ended_at 为 None（无 crash）。
     - _compute_duration 对带时间戳的投影 plan 返回非零值。
     """
-    from backend.orchestrator.projection import run_state_to_dagplan
     from backend.orchestrator.metrics import _compute_duration
+    from backend.orchestrator.projection import run_state_to_dagplan
 
     t_start = "2026-06-07T10:00:00+00:00"
     t_end = "2026-06-07T10:01:30+00:00"  # 90 秒后

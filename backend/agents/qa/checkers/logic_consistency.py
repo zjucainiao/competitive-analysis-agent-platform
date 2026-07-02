@@ -57,9 +57,7 @@ class LogicConsistencyChecker(BaseChecker):
         para_loc: dict[str, str] = {}
         for s_idx, section in enumerate(ctx.draft.sections):
             for p_idx, para in enumerate(section.paragraphs):
-                para_loc[para.paragraph_id] = (
-                    f"report.sections[{s_idx}].paragraphs[{p_idx}]"
-                )
+                para_loc[para.paragraph_id] = f"report.sections[{s_idx}].paragraphs[{p_idx}]"
 
         contradiction_count = 0
 
@@ -67,14 +65,11 @@ class LogicConsistencyChecker(BaseChecker):
         if ctx.llm is not None and ctx.prompt_dir:
             try:
                 pairs = self._call_llm(ctx)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(
                     AgentError(
                         code="LLM_SCHEMA_INVALID",
-                        message=(
-                            f"logic_consistency LLM failed: "
-                            f"{type(e).__name__}: {e}"
-                        ),
+                        message=(f"logic_consistency LLM failed: {type(e).__name__}: {e}"),
                         severity="warn",
                         retriable=True,
                     )
@@ -85,16 +80,19 @@ class LogicConsistencyChecker(BaseChecker):
                 if loc_a is None:
                     continue
                 contradiction_count += 1
-                sev: str = pair.severity if pair.severity in {
-                    "minor",
-                    "major",
-                    "critical",
-                } else "major"
+                sev: str = (
+                    pair.severity
+                    if pair.severity
+                    in {
+                        "minor",
+                        "major",
+                        "critical",
+                    }
+                    else "major"
+                )
                 issues.append(
                     QAIssue(
-                        issue_id=(
-                            f"iss_lc_pair_{pair.paragraph_a}_{pair.paragraph_b}"
-                        ),
+                        issue_id=(f"iss_lc_pair_{pair.paragraph_a}_{pair.paragraph_b}"),
                         dimension=self.dimension,
                         severity=sev,  # type: ignore[arg-type]
                         location=loc_a,
@@ -103,8 +101,7 @@ class LogicConsistencyChecker(BaseChecker):
                             f"逻辑矛盾。{pair.rationale}"
                         ).strip(),
                         suggested_fix=(
-                            "Reporter 重写其中一段使两者一致；"
-                            "若上游 claim 本身打架，回到 Analyst。"
+                            "Reporter 重写其中一段使两者一致；若上游 claim 本身打架，回到 Analyst。"
                         ),
                         target_agent="reporter",
                         required_inputs={
@@ -122,9 +119,7 @@ class LogicConsistencyChecker(BaseChecker):
                 for product, plan, value in _extract_plan_prices(
                     para.text, set(ctx.profiles.keys())
                 ):
-                    price_records[(product, plan)].append(
-                        (para.paragraph_id, value)
-                    )
+                    price_records[(product, plan)].append((para.paragraph_id, value))
         for (product, plan), records in price_records.items():
             values = {round(v, 2) for _, v in records}
             if len(values) > 1:
@@ -141,8 +136,7 @@ class LogicConsistencyChecker(BaseChecker):
                             f"{sorted(values)}（段落 {pids}）。"
                         ),
                         suggested_fix=(
-                            "Reporter 校核所有提到该 plan 的段落，"
-                            "统一到 evidence 中的官方价格。"
+                            "Reporter 校核所有提到该 plan 的段落，统一到 evidence 中的官方价格。"
                         ),
                         target_agent="reporter",
                         required_inputs={
@@ -161,12 +155,8 @@ class LogicConsistencyChecker(BaseChecker):
         # ---- 规则 2：SWOT 中 S 与 W 同义反复 ----
         swot_section = _find_section_by_dimension(ctx, AnalysisDimension.SWOT)
         if swot_section is not None:
-            strengths = [
-                p for p in swot_section.paragraphs if _swot_role(p.text) == "strength"
-            ]
-            weaknesses = [
-                p for p in swot_section.paragraphs if _swot_role(p.text) == "weakness"
-            ]
+            strengths = [p for p in swot_section.paragraphs if _swot_role(p.text) == "strength"]
+            weaknesses = [p for p in swot_section.paragraphs if _swot_role(p.text) == "weakness"]
             for s in strengths:
                 for w in weaknesses:
                     if _token_overlap(s.text, w.text) >= 0.6:
@@ -195,16 +185,13 @@ class LogicConsistencyChecker(BaseChecker):
                         )
                         break  # 同一 strength 只配一条 issue
 
-        penalty = sum(
-            self.PENALTY_BY_SEVERITY.get(i.severity, 0.10) for i in issues
-        )
+        penalty = sum(self.PENALTY_BY_SEVERITY.get(i.severity, 0.10) for i in issues)
         score = max(0.0, 1.0 - penalty)
         pass_ = score >= self.OVERALL_PASS_THRESHOLD and not any(
             i.severity == "critical" for i in issues
         )
-        notes = (
-            f"检出 {contradiction_count} 处逻辑冲突。"
-            + (" (LLM 未启用，仅规则)" if ctx.llm is None else "")
+        notes = f"检出 {contradiction_count} 处逻辑冲突。" + (
+            " (LLM 未启用，仅规则)" if ctx.llm is None else ""
         )
         return CheckerResult(
             dimension=self.dimension,
@@ -222,9 +209,7 @@ class LogicConsistencyChecker(BaseChecker):
         prompt_path = Path(ctx.prompt_dir) / "contradiction.md"
         if not prompt_path.exists():
             return []
-        system, user_template = _split_prompt(
-            prompt_path.read_text(encoding="utf-8")
-        )
+        system, user_template = _split_prompt(prompt_path.read_text(encoding="utf-8"))
         paragraphs = [
             {
                 "paragraph_id": p.paragraph_id,
@@ -266,9 +251,7 @@ _PRICE_PATTERN = re.compile(
 )
 
 
-def _extract_plan_prices(
-    text: str, known_products: set[str]
-) -> list[tuple[str, str, float]]:
+def _extract_plan_prices(text: str, known_products: set[str]) -> list[tuple[str, str, float]]:
     """从段落抽取 (product, plan_name, price_usd) 三元组。"""
     out: list[tuple[str, str, float]] = []
     for m in _PRICE_PATTERN.finditer(text):
@@ -370,9 +353,7 @@ def _coerce(resp: object, model: type[BaseModel]) -> BaseModel:
         return model.model_validate(resp)
     if hasattr(resp, "model_dump"):
         return model.model_validate(resp.model_dump())
-    raise ValueError(
-        f"cannot coerce response to {model.__name__}: {type(resp).__name__}"
-    )
+    raise ValueError(f"cannot coerce response to {model.__name__}: {type(resp).__name__}")
 
 
 __all__ = ["LogicConsistencyChecker"]

@@ -14,12 +14,11 @@ import pickle
 from typing import Any
 
 from backend.schemas.agent_io import AgentOutputBase
+from backend.schemas.analyst import AnalystOutput
 from backend.schemas.collector import CollectorOutput
 from backend.schemas.extractor import ExtractorOutput
-from backend.schemas.analyst import AnalystOutput
-from backend.schemas.reporter import ReporterOutput
 from backend.schemas.qa import QAOutput
-
+from backend.schemas.reporter import ReporterOutput
 
 _OUTPUT_REGISTRY: dict[str, type[AgentOutputBase]] = {
     "collector": CollectorOutput,
@@ -47,10 +46,7 @@ def load_output(payload: dict[str, Any]) -> AgentOutputBase:
         raise ValueError("payload missing 'agent_name'; cannot infer AgentOutput subtype")
     model = _OUTPUT_REGISTRY.get(agent_name)
     if model is None:
-        raise ValueError(
-            f"unknown agent_name={agent_name!r}; "
-            f"known: {sorted(_OUTPUT_REGISTRY)}"
-        )
+        raise ValueError(f"unknown agent_name={agent_name!r}; known: {sorted(_OUTPUT_REGISTRY)}")
     return model.model_validate(payload)
 
 

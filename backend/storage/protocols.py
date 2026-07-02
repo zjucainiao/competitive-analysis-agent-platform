@@ -10,11 +10,10 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Sequence
 from typing import (
     Any,
-    AsyncIterator,
     Protocol,
-    Sequence,
     runtime_checkable,
 )
 
@@ -37,7 +36,6 @@ from .checkpoint_types import (
     CheckpointMetadata,
     CheckpointTuple,
 )
-
 
 # ---------- Checkpointer ----------
 
@@ -126,9 +124,7 @@ class StateStoreProtocol(Protocol):
         offset: int = 0,
     ) -> list[Project]: ...
 
-    async def update_project_status(
-        self, project_id: str, status: ProjectStatus
-    ) -> None: ...
+    async def update_project_status(self, project_id: str, status: ProjectStatus) -> None: ...
 
     # ----- DAGPlan -----
 
@@ -140,9 +136,7 @@ class StateStoreProtocol(Protocol):
         """取该 project 最新一份 plan。"""
         ...
 
-    async def update_node_status(
-        self, project_id: str, node_id: str, status: NodeStatus
-    ) -> None:
+    async def update_node_status(self, project_id: str, node_id: str, status: NodeStatus) -> None:
         """直接更新 DAGPlan.nodes[node_id].status，无需重写整份 plan。"""
         ...
 
@@ -186,9 +180,7 @@ class StateStoreProtocol(Protocol):
 
     # ----- LLMCallRecord（每节点完成后持久化其 LLM 调用流水，重启可查） -----
 
-    async def append_llm_calls(
-        self, project_id: str, calls: list[dict]
-    ) -> None:
+    async def append_llm_calls(self, project_id: str, calls: list[dict]) -> None:
         """追加一批 LLM 调用记录（dict 形态，见 observability.LLMCallRecord）。"""
         ...
 
@@ -209,9 +201,7 @@ class StateStoreProtocol(Protocol):
         """upsert：(project_id, run_id) 复合主键。"""
         ...
 
-    async def get_run_snapshot(
-        self, project_id: str, run_id: str
-    ) -> RunSnapshot | None: ...
+    async def get_run_snapshot(self, project_id: str, run_id: str) -> RunSnapshot | None: ...
 
     async def list_run_snapshots(self, project_id: str) -> list[RunSnapshot]:
         """按 captured_at 倒序。"""

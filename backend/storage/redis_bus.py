@@ -12,7 +12,7 @@ v2 升级 Redis Stream 时新增 `replay(channel, since=...)` 方法，不破现
 from __future__ import annotations
 
 import contextlib
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from redis.asyncio import Redis
 from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -47,9 +47,7 @@ class RedisEventBus:
             # 撞上 5s 超时，又能让真实消息亚秒级投递；空闲读超时被吞掉继续等。
             while True:
                 try:
-                    msg = await pubsub.get_message(
-                        ignore_subscribe_messages=True, timeout=1.0
-                    )
+                    msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                 except RedisTimeoutError:
                     # 空闲读超时不是错误：保持订阅，继续等下一条
                     continue

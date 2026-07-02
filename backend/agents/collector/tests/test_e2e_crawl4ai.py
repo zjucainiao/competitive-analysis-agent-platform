@@ -3,7 +3,7 @@
 跑法（需要联网 + 已装 chromium）::
 
     python -m playwright install chromium  # 一次性
-    pytest backend/agents/collector/tests/test_e2e_crawl4ai.py -v -s
+    pytest backend/agents/collector/tests/test_e2e_crawl4ai.py -m e2e -v -s
 
 目标：
 1. 直接 vs 抓取对比 — 同一 SPA 页（notion.com 首页），httpx 抠 < 100 字，crawl4ai > 300 字
@@ -28,7 +28,15 @@ from backend.schemas import AgentStatus, CollectDimension
 
 pytestmark = pytest.mark.e2e
 
-load_dotenv(".env")
+
+@pytest.fixture(autouse=True, scope="module")
+def _load_env() -> None:
+    """e2e 被显式选中执行时才读 .env 补 key。
+
+    不能放模块级：收集阶段 import 就会执行，泄漏开发者 .env 的
+    POSTGRES_DSN / REDIS_URL，破坏 storage 测试的自动 skip。
+    """
+    load_dotenv(".env", override=False)
 
 
 def _network_or_skip() -> None:

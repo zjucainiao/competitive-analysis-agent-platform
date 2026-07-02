@@ -102,9 +102,7 @@ class SchemaCompletenessChecker(BaseChecker):
                             issue_id=f"iss_sc_ext_{_slug(product_name)}",
                             dimension=self.dimension,
                             severity="minor",
-                            location=(
-                                f"profiles[{product_name!r}].industry_extension"
-                            ),
+                            location=(f"profiles[{product_name!r}].industry_extension"),
                             problem=(
                                 f"{product_name} 的行业扩展字段填充率 "
                                 f"{ext_fill:.0%} 低于阈值 "
@@ -124,18 +122,16 @@ class SchemaCompletenessChecker(BaseChecker):
             # field_status 中 unverified 占比
             statuses = list(profile.field_status.values())
             if statuses:
-                unverified_ratio = sum(
-                    1 for s in statuses if s is FieldStatus.UNVERIFIED
-                ) / len(statuses)
+                unverified_ratio = sum(1 for s in statuses if s is FieldStatus.UNVERIFIED) / len(
+                    statuses
+                )
                 if unverified_ratio > self.UNVERIFIED_RATIO_THRESHOLD:
                     issues.append(
                         QAIssue(
                             issue_id=f"iss_sc_unverified_{_slug(product_name)}",
                             dimension=self.dimension,
                             severity="major",
-                            location=(
-                                f"profiles[{product_name!r}].field_status"
-                            ),
+                            location=(f"profiles[{product_name!r}].field_status"),
                             problem=(
                                 f"{product_name} 字段状态中 unverified 占比 "
                                 f"{unverified_ratio:.0%} 超过阈值 "
@@ -200,8 +196,7 @@ class SchemaCompletenessChecker(BaseChecker):
             and not any(i.severity in ("major", "critical") for i in issues)
         )
         notes = (
-            f"必填均值 {req_avg:.0%}，行业扩展均值 {ext_avg:.0%}，"
-            f"覆盖 {len(ctx.profiles)} 个产品。"
+            f"必填均值 {req_avg:.0%}，行业扩展均值 {ext_avg:.0%}，覆盖 {len(ctx.profiles)} 个产品。"
         )
         return CheckerResult(
             dimension=self.dimension,

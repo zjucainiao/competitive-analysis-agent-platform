@@ -13,6 +13,7 @@
   在所有同名 worker 完成后只跑一次,看到合并后的全局 state。
 - ``analyst → reporter → qa``:线性主链。
 """
+
 from __future__ import annotations
 
 from typing import Any

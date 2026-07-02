@@ -25,6 +25,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from backend.agents._authority import authority_for
 from backend.agents._base import (
     AgentRunError,
     BaseAgent,
@@ -32,9 +33,7 @@ from backend.agents._base import (
     ToolRegistryProtocol,
     TracerProtocol,
 )
-from backend.agents._authority import authority_for
 from backend.agents._progress import emit_collect_progress
-from backend.tools.injection_guard import scan as _scan_injection
 from backend.schemas import (
     AgentError,
     AgentStatus,
@@ -44,6 +43,7 @@ from backend.schemas import (
     RawSourceDoc,
 )
 from backend.schemas.evidence import IdentityStatus
+from backend.tools.injection_guard import scan as _scan_injection
 
 from .fixtures import get_mock_sources
 from .tools import (
@@ -168,7 +168,9 @@ class _ReviewsFinding(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     overall_rating: float | None = Field(
-        default=None, ge=0, le=5,
+        default=None,
+        ge=0,
+        le=5,
         description="0-5 综合评分；多源时取算术平均；找不到必须填 null",
     )
     review_count: int | None = Field(default=None, description="评论总数（可选）")
@@ -342,9 +344,7 @@ def _heuristic_authority(
 ) -> float:
     """来源权威度（**相对维度**，矩阵见 backend.agents._authority）：同一来源换个维度，
     权威度可能反转——官网在 pricing=0.95、在 user_reviews=0.5；评论站在 user_reviews=0.92。"""
-    return authority_for(
-        _source_class(url, product_name, official_url), dimension
-    )
+    return authority_for(_source_class(url, product_name, official_url), dimension)
 
 
 def _short_text(text: str) -> bool:
@@ -406,9 +406,7 @@ def _seed_from_official_url(
     for path in hints:
         full = urljoin(base, path) if path else base
         title = f"{product_name} {dimension.value}".strip()
-        seeds.append(
-            SearchHit(url=full, title=title, snippet=None, provider="seed.official_url")
-        )
+        seeds.append(SearchHit(url=full, title=title, snippet=None, provider="seed.official_url"))
     return seeds
 
 
@@ -564,9 +562,7 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
         )
         robots = self.tools.get("robots_checker") if self.tools.has("robots_checker") else None
         limiter = (
-            self.tools.get("domain_rate_limiter")
-            if self.tools.has("domain_rate_limiter")
-            else None
+            self.tools.get("domain_rate_limiter") if self.tools.has("domain_rate_limiter") else None
         )
 
         errors: list[AgentError] = []
@@ -591,12 +587,10 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             results = [_run_dimension(d) for d in dims]
         else:
             contexts = [contextvars.copy_context() for _ in dims]
-            with ThreadPoolExecutor(
-                max_workers=min(len(dims), self.MAX_DIMENSION_WORKERS)
-            ) as pool:
+            with ThreadPoolExecutor(max_workers=min(len(dims), self.MAX_DIMENSION_WORKERS)) as pool:
                 futures = [
                     pool.submit(ctx.run, _run_dimension, dim)
-                    for dim, ctx in zip(dims, contexts)
+                    for dim, ctx in zip(dims, contexts, strict=True)
                 ]
                 # 按提交顺序取结果 → all_sources 维度顺序与串行一致（确定性）
                 results = [f.result() for f in futures]
@@ -1249,10 +1243,7 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             errors.append(
                 AgentError(
                     code="NO_RELEVANT_RESULTS",
-                    message=(
-                        f"LLM web search yielded no review data for "
-                        f"{inp.product_name}"
-                    ),
+                    message=(f"LLM web search yielded no review data for {inp.product_name}"),
                     severity="warn",
                     retriable=True,
                 )
@@ -1299,8 +1290,7 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             common_lines.append("Negative themes: " + "; ".join(finding.negative_themes))
         if finding.sample_quotes:
             common_lines.append(
-                "Sample reviews:\n"
-                + "\n".join(f"- {q}" for q in finding.sample_quotes)
+                "Sample reviews:\n" + "\n".join(f"- {q}" for q in finding.sample_quotes)
             )
         common_text = "\n".join(common_lines)
 
@@ -1322,9 +1312,12 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             if not text.strip():
                 continue
             try:
-                source_id = "src_" + hashlib.sha1(
-                    f"{inp.product_name}|reviews|{src.url}|{inp.task_id}".encode()
-                ).hexdigest()[:12]
+                source_id = (
+                    "src_"
+                    + hashlib.sha1(
+                        f"{inp.product_name}|reviews|{src.url}|{inp.task_id}".encode()
+                    ).hexdigest()[:12]
+                )
                 _taint = _scan_injection(text)
                 doc = RawSourceDoc(
                     source_id=source_id,
@@ -1401,9 +1394,12 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
         identity_status: IdentityStatus = "unvalidated",
     ) -> RawSourceDoc:
         url = scrape.final_url or scrape.url
-        source_id = "src_" + hashlib.sha1(
-            f"{inp.product_name}|{dimension.value}|{url}|{inp.task_id}".encode()
-        ).hexdigest()[:12]
+        source_id = (
+            "src_"
+            + hashlib.sha1(
+                f"{inp.product_name}|{dimension.value}|{url}|{inp.task_id}".encode()
+            ).hexdigest()[:12]
+        )
         outdated = scrape.detected_outdated
         taint = _scan_injection(scrape.text)
         return RawSourceDoc(
@@ -1456,9 +1452,7 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
         评论聚合站在 user_reviews 维度是预期源——付费墙(需登录)/短文本是其固有特征，
         视为可用（相对语义豁免）。其余：短文本/付费墙/抓错产品(mismatch) → 不可用。
         """
-        if s.dimension is CollectDimension.REVIEWS and _is_review_host(
-            str(s.source_url)
-        ):
+        if s.dimension is CollectDimension.REVIEWS and _is_review_host(str(s.source_url)):
             return True
         if _short_text(s.raw_text):
             return False
@@ -1521,8 +1515,7 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
         thin = [
             d.value
             for d in dimensions
-            if coverage[d] > 0
-            and not any(s.dimension is d and self._is_usable(s) for s in sources)
+            if coverage[d] > 0 and not any(s.dimension is d and self._is_usable(s) for s in sources)
         ]
         if thin:
             actionable.append(f"维度有源但无可用内容(全部抓取受限): {', '.join(thin)}")
@@ -1554,9 +1547,7 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
 
     # ----- 工具注入辅助 -----
 
-    def _collect_enabled(
-        self, names: tuple[str, ...], _expected: type[Any]
-    ) -> list[Any]:
+    def _collect_enabled(self, names: tuple[str, ...], _expected: type[Any]) -> list[Any]:
         """从 registry 拉一组工具，过滤掉 enabled=False 的。"""
         out: list[Any] = []
         if self.tools is None:
@@ -1621,7 +1612,11 @@ def _render_simple(template: str, vars: dict[str, Any]) -> str:
             left, right = (s.strip() for s in expr.split(" or ", 1))
             value = _resolve(left, vars)
             if not value:
-                value = _resolve(right.strip("\"' "), vars) if not (right.startswith('"') or right.startswith("'")) else right.strip("\"'")
+                value = (
+                    _resolve(right.strip("\"' "), vars)
+                    if not (right.startswith('"') or right.startswith("'"))
+                    else right.strip("\"'")
+                )
             return str(value if value is not None else "")
         value = _resolve(expr, vars)
         return "" if value is None else str(value)

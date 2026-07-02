@@ -21,6 +21,7 @@ import { useWorkspaceApi } from "@/lib/workspace-api-context";
 import { renderReportAsMarkdown, downloadMarkdown } from "@/lib/report-export";
 import {
   EvidenceLookupProvider,
+  useEvidenceLookup,
 } from "@/lib/evidence-context";
 import { patchParagraph } from "@/lib/api/client";
 import { revalidate } from "@/lib/api/hooks";
@@ -318,8 +319,12 @@ function ReportHeader({
   reviewMode: boolean;
   onToggleReview: () => void;
 }) {
+  /* 导出用「屏幕上正在展示的 report」+ 同一 evidence 查找（API 模式为真实
+   * draft + ApiEvidence，demo 模式为 mock），保证导出的 = 看到的，不回退 mock */
+  const lookupEvidence = useEvidenceLookup();
+
   const handleDownload = () => {
-    const md = renderReportAsMarkdown(localEdits, showV2);
+    const md = renderReportAsMarkdown(report, localEdits, showV2, lookupEvidence);
     const filename = `report-${report.id}-${
       showV2 ? "v2-preview" : "v1"
     }${Object.keys(localEdits).length ? "-edited" : ""}.md`;
@@ -331,7 +336,7 @@ function ReportHeader({
   };
 
   const handleCopy = () => {
-    const md = renderReportAsMarkdown(localEdits, showV2);
+    const md = renderReportAsMarkdown(report, localEdits, showV2, lookupEvidence);
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       navigator.clipboard.writeText(md);
     }

@@ -13,7 +13,8 @@ DSN 示例：`postgresql+asyncpg://app:app@localhost:5432/app`。
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Sequence
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -50,7 +51,6 @@ from .serde import (
     unpickle_checkpoint,
     unpickle_value,
 )
-
 
 # ---------- StateStore ----------
 
@@ -170,9 +170,7 @@ class PostgresStateStore:
             rows = (await conn.execute(sql, params)).all()
         return [Project.model_validate(_as_dict(r[0])) for r in rows]
 
-    async def update_project_status(
-        self, project_id: str, status: ProjectStatus
-    ) -> None:
+    async def update_project_status(self, project_id: str, status: ProjectStatus) -> None:
         sql = text(
             """
             UPDATE projects
@@ -183,9 +181,7 @@ class PostgresStateStore:
             """
         )
         async with self._engine.begin() as conn:
-            result = await conn.execute(
-                sql, {"pid": project_id, "status": status.value}
-            )
+            result = await conn.execute(sql, {"pid": project_id, "status": status.value})
             if result.rowcount == 0:
                 raise KeyError(f"project not found: {project_id}")
 
@@ -226,9 +222,7 @@ class PostgresStateStore:
             return None
         return DAGPlan.model_validate(_as_dict(row[0]))
 
-    async def update_node_status(
-        self, project_id: str, node_id: str, status: NodeStatus
-    ) -> None:
+    async def update_node_status(self, project_id: str, node_id: str, status: NodeStatus) -> None:
         # 读 - 改 - 写：单 plan 拿出来改一个节点的 status 字段再 upsert
         plan = await self.get_dag_plan(project_id)
         if plan is None:
@@ -283,8 +277,7 @@ class PostgresStateStore:
     # (SELECT max(run_id) ...)`` —— max 忽略 NULL，全是老行(run_id=NULL)时退化为匹配
     # NULL 行，故对未迁移数据向后兼容。
     _RUN_SCOPE = (
-        "run_id IS NOT DISTINCT FROM "
-        "(SELECT max(run_id) FROM node_outputs WHERE project_id = :pid)"
+        "run_id IS NOT DISTINCT FROM (SELECT max(run_id) FROM node_outputs WHERE project_id = :pid)"
     )
 
     async def get_node_output(
@@ -308,10 +301,7 @@ class PostgresStateStore:
         self, project_id: str, *, run_id: str | None = None
     ) -> dict[str, AgentOutputBase]:
         scope = "run_id = :run_id" if run_id is not None else self._RUN_SCOPE
-        sql = text(
-            "SELECT node_id, payload FROM node_outputs "
-            f"WHERE project_id = :pid AND {scope}"
-        )
+        sql = text(f"SELECT node_id, payload FROM node_outputs WHERE project_id = :pid AND {scope}")
         params = {"pid": project_id}
         if run_id is not None:
             params["run_id"] = run_id
@@ -377,9 +367,7 @@ class PostgresStateStore:
 
     # ----- LLMCallRecord -----
 
-    async def append_llm_calls(
-        self, project_id: str, calls: list[dict]
-    ) -> None:
+    async def append_llm_calls(self, project_id: str, calls: list[dict]) -> None:
         if not calls:
             return
         sql = text(
@@ -455,17 +443,10 @@ class PostgresStateStore:
                 },
             )
 
-    async def get_run_snapshot(
-        self, project_id: str, run_id: str
-    ) -> RunSnapshot | None:
-        sql = text(
-            "SELECT payload FROM run_snapshots "
-            "WHERE project_id = :pid AND run_id = :rid"
-        )
+    async def get_run_snapshot(self, project_id: str, run_id: str) -> RunSnapshot | None:
+        sql = text("SELECT payload FROM run_snapshots WHERE project_id = :pid AND run_id = :rid")
         async with self._engine.connect() as conn:
-            row = (
-                await conn.execute(sql, {"pid": project_id, "rid": run_id})
-            ).first()
+            row = (await conn.execute(sql, {"pid": project_id, "rid": run_id})).first()
         if row is None:
             return None
         return RunSnapshot.model_validate(_as_dict(row[0]))
@@ -540,11 +521,7 @@ class PostgresCheckpointer:
                  ORDER BY task_id, idx
                 """
             )
-            writes_rows = (
-                await conn.execute(
-                    writes_sql, {"tid": tid, "ns": ns, "cid": cid}
-                )
-            ).all()
+            writes_rows = (await conn.execute(writes_sql, {"tid": tid, "ns": ns, "cid": cid})).all()
 
         pending = [
             (task_id, channel, unpickle_value(value))
@@ -552,9 +529,7 @@ class PostgresCheckpointer:
         ]
         cfg = make_config(tid, checkpoint_ns=ns, checkpoint_id=cid)
         parent_cfg = (
-            make_config(tid, checkpoint_ns=ns, checkpoint_id=parent_cid)
-            if parent_cid
-            else None
+            make_config(tid, checkpoint_ns=ns, checkpoint_id=parent_cid) if parent_cid else None
         )
         return CheckpointTuple(
             config=cfg,
@@ -644,12 +619,10 @@ class PostgresCheckpointer:
         async with self._engine.connect() as conn:
             rows = (await conn.execute(sql, params)).all()
 
-        for (tid, ns, cid, parent_cid, cp_bytes, metadata_raw) in rows:
+        for tid, ns, cid, parent_cid, cp_bytes, metadata_raw in rows:
             cfg = make_config(tid, checkpoint_ns=ns, checkpoint_id=cid)
             parent_cfg = (
-                make_config(tid, checkpoint_ns=ns, checkpoint_id=parent_cid)
-                if parent_cid
-                else None
+                make_config(tid, checkpoint_ns=ns, checkpoint_id=parent_cid) if parent_cid else None
             )
             yield CheckpointTuple(
                 config=cfg,

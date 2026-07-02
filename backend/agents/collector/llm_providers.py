@@ -40,7 +40,6 @@ from json_repair import repair_json
 from openai import BadRequestError, OpenAI
 from pydantic import BaseModel, ValidationError
 
-
 _SCHEMA_TOOL_NAME = "submit_result"
 
 
@@ -54,6 +53,7 @@ def _estimate_cost(model: str, tokens_in: int, tokens_out: int) -> float:
     from backend.llm.pricing import estimate_cost
 
     return estimate_cost(model, tokens_in, tokens_out)
+
 
 # ----- 每次 LLM 调用的可观测日志 -----
 #
@@ -124,7 +124,7 @@ def _log_llm_call(
             prompt_preview=prompt_preview,
             response_preview=response_preview,
         )
-    except Exception:  # noqa: BLE001 — 观测层永远不能搞挂主流程
+    except Exception:
         pass
 
 
@@ -140,7 +140,7 @@ def _preview_messages(messages: list[dict[str, Any]], *, limit: int = 1200) -> s
         content = msg.get("content", "")
         if isinstance(content, list):
             content = " ".join(str(x) for x in content)
-        parts.append(f"{role}: {str(content)}")
+        parts.append(f"{role}: {content!s}")
     text = "\n\n".join(parts).strip()
     if len(text) <= limit:
         return text
@@ -192,14 +192,12 @@ class OpenAICompatibleLLM:
     _client: OpenAI = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._client = OpenAI(
-            api_key=self.api_key, base_url=self.base_url, timeout=self.timeout
-        )
+        self._client = OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=self.timeout)
 
     # ---------- 工厂：从 .env / os.environ 选可用 provider ----------
 
     @classmethod
-    def from_env(cls) -> "OpenAICompatibleLLM | None":
+    def from_env(cls) -> OpenAICompatibleLLM | None:
         """按 DOUBAO > DEEPSEEK > OPENAI 优先级选可用的 provider。都没有返回 None。
 
         豆包（火山方舟）：API key 通常是 EP（Endpoint）形式，挂在 `DOUBAO_API_KEY`；
@@ -210,9 +208,7 @@ class OpenAICompatibleLLM:
         if doubao_key:
             return cls(
                 api_key=doubao_key,
-                base_url=os.getenv(
-                    "DOUBAO_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"
-                ),
+                base_url=os.getenv("DOUBAO_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
                 model=os.getenv("DOUBAO_MODEL", "doubao-seed-1-6"),
                 supports_json_mode=False,
             )
@@ -271,7 +267,7 @@ class OpenAICompatibleLLM:
                 if resp.parsed is not None:
                     return resp
                 # tool_call 拿到了 args 但内容没通过 schema 校验 —— 直接走 L3 修复
-            except _ToolCallUnsupported:
+            except _ToolCallUnsupportedError:
                 pass  # provider 不支持，落到 L2
 
         # L2：schema 注入 prompt + json-repair
@@ -281,9 +277,7 @@ class OpenAICompatibleLLM:
             tools=tools,
             max_tokens=max_tokens,
             temperature=temperature,
-            response_format_param=(
-                {"type": "json_object"} if self.supports_json_mode else None
-            ),
+            response_format_param=({"type": "json_object"} if self.supports_json_mode else None),
             schema_cls=response_format,
         )
         if resp.parsed is not None:
@@ -307,9 +301,7 @@ class OpenAICompatibleLLM:
             tools=tools,
             max_tokens=max_tokens,
             temperature=temperature,
-            response_format_param=(
-                {"type": "json_object"} if self.supports_json_mode else None
-            ),
+            response_format_param=({"type": "json_object"} if self.supports_json_mode else None),
             schema_cls=response_format,
         )
         # 三层都失败时返回的 resp.parsed 仍是 None，调用方据此报 LLM_SCHEMA_INVALID
@@ -351,9 +343,7 @@ class OpenAICompatibleLLM:
                 },
             }
         ]
-        full_messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system}
-        ]
+        full_messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
         full_messages.extend(messages)
 
         _t0 = time.monotonic()
@@ -366,16 +356,12 @@ class OpenAICompatibleLLM:
                     "type": "function",
                     "function": {"name": _SCHEMA_TOOL_NAME},
                 },
-                temperature=(
-                    temperature if temperature is not None else self.default_temperature
-                ),
-                max_tokens=(
-                    max_tokens if max_tokens is not None else self.default_max_tokens
-                ),
+                temperature=(temperature if temperature is not None else self.default_temperature),
+                max_tokens=(max_tokens if max_tokens is not None else self.default_max_tokens),
             )
         except BadRequestError as e:
             # 服务端不支持强制 tool_choice / 不支持 tools / schema 过大等
-            raise _ToolCallUnsupported(str(e)[:500]) from e
+            raise _ToolCallUnsupportedError(str(e)[:500]) from e
 
         _duration = time.monotonic() - _t0
         choice = completion.choices[0]
@@ -398,9 +384,7 @@ class OpenAICompatibleLLM:
 
         if not tool_calls:
             # 模型在强制 tool_choice 下竟然没产出 tool_call —— 罕见但有可能（小模型）
-            raise _ToolCallUnsupported(
-                "model returned no tool_calls under forced tool_choice"
-            )
+            raise _ToolCallUnsupportedError("model returned no tool_calls under forced tool_choice")
 
         parsed = _parse_with_repair(args_json, schema_cls)
         return LLMResponse(
@@ -426,20 +410,14 @@ class OpenAICompatibleLLM:
         schema_cls: type[BaseModel] | None,
     ) -> LLMResponse:
         """通用 chat.completions 调用 + json-repair 解析（L2 / L3 共用 / 无 schema 也走这）。"""
-        full_messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system}
-        ]
+        full_messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
         full_messages.extend(messages)
 
         call_kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": full_messages,
-            "temperature": (
-                temperature if temperature is not None else self.default_temperature
-            ),
-            "max_tokens": (
-                max_tokens if max_tokens is not None else self.default_max_tokens
-            ),
+            "temperature": (temperature if temperature is not None else self.default_temperature),
+            "max_tokens": (max_tokens if max_tokens is not None else self.default_max_tokens),
         }
         if response_format_param is not None:
             call_kwargs["response_format"] = response_format_param
@@ -469,8 +447,10 @@ class OpenAICompatibleLLM:
         _tokens_in = getattr(usage, "prompt_tokens", 0) if usage else 0
         _tokens_out = getattr(usage, "completion_tokens", 0) if usage else 0
         # phase 区分 L2 (schema 注入 + json_mode) / freeform / L3 retry
-        _phase = "json_mode" if response_format_param is not None else (
-            "freeform_schema" if schema_cls is not None else "freeform"
+        _phase = (
+            "json_mode"
+            if response_format_param is not None
+            else ("freeform_schema" if schema_cls is not None else "freeform")
         )
         _log_llm_call(
             model=self.model,
@@ -510,7 +490,7 @@ class OpenAICompatibleLLM:
 # ============================================================
 
 
-class _ToolCallUnsupported(RuntimeError):
+class _ToolCallUnsupportedError(RuntimeError):
     """L1 失败信号：provider 不支持 tool_choice 强制、或模型没产 tool_call。"""
 
 
@@ -542,7 +522,7 @@ def _parse_with_repair(content: str, model: type[BaseModel]) -> Any:
                 # repair_json 解析不出来时返回空骨架，视为失败
                 return None
             data = json.loads(repaired)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
     if not isinstance(data, dict):

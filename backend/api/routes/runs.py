@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -32,9 +32,7 @@ def _is_native() -> bool:
     return os.getenv("ORCH_ENGINE", "native") == "native"
 
 
-async def _read_native_run_state(
-    orch: Orchestrator, project: Project
-) -> dict | None:
+async def _read_native_run_state(orch: Orchestrator, project: Project) -> dict | None:
     """从 LangGraph checkpoint 读取该项目最近一次 native run 的 RunState。
 
     重建同一张 native 图（挂同一 checkpointer）后 ``aget_state`` 只读 checkpoint、
@@ -57,10 +55,8 @@ async def _read_native_run_state(
         run_id = project.runs[-1].run_id if project.runs else None
         config = native_thread_config(project.project_id, run_id)
         snapshot = await graph.aget_state(config)
-    except Exception:  # noqa: BLE001
-        _log.exception(
-            "read native checkpoint failed project=%s", project.project_id
-        )
+    except Exception:
+        _log.exception("read native checkpoint failed project=%s", project.project_id)
         return None
 
     values: dict[str, Any] = getattr(snapshot, "values", None) or {}
@@ -70,14 +66,12 @@ async def _read_native_run_state(
     # model_validate→model_dump 归一为装配器契约要求的 dict 形态。
     try:
         return RunState.model_validate(values).model_dump()
-    except Exception:  # noqa: BLE001
+    except Exception:
         # 兼容极端情况：直接退回原始 values（装配器对 dict/对象都健壮）。
         return values
 
 
-async def read_native_run_history(
-    orch: Orchestrator, project: Project
-) -> list[dict]:
+async def read_native_run_history(orch: Orchestrator, project: Project) -> list[dict]:
     """读取 native checkpoint 里 RunState.history 的 dict 列表（供 RunSnapshot 落库）。
 
     无 checkpoint 或读取失败时返回空列表（best-effort，不阻塞快照持久化）。
@@ -109,14 +103,17 @@ async def start_run(
 
     plan = orch.plan(project)
     run_id = f"run_{ULID()}"
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
 
     # 把这次 run 的 metadata 追加到 project.runs（前端可看 run 历史时间线）
     new_run = RunRef(
-        run_id=run_id, plan_id=plan.plan_id, started_at=started_at, final_status=None,
+        run_id=run_id,
+        plan_id=plan.plan_id,
+        started_at=started_at,
+        final_status=None,
     )
     project_with_run = project.model_copy(
-        update={"runs": list(project.runs) + [new_run], "status": ProjectStatus.RUNNING}
+        update={"runs": [*project.runs, new_run], "status": ProjectStatus.RUNNING}
     )
     await storage.state_store.save_project(project_with_run)
 
@@ -126,7 +123,7 @@ async def start_run(
             # 复用本次 run_id，让 native RunState.run_id 与 RunRef/快照/URL 一致(P2-a)
             async for _ in orch.run(plan, project_with_run, run_id=run_id):
                 pass
-        except Exception:  # noqa: BLE001
+        except Exception:
             _log.exception("orchestrator run failed for project_id=%s", project_id)
             final_status = "failed"
 
@@ -139,16 +136,14 @@ async def start_run(
                     updated_runs.append(
                         r.model_copy(
                             update={
-                                "ended_at": datetime.now(timezone.utc),
+                                "ended_at": datetime.now(UTC),
                                 "final_status": final_status,
                             }
                         )
                     )
                 else:
                     updated_runs.append(r)
-            new_status = (
-                ProjectStatus.DONE if final_status == "done" else ProjectStatus.FAILED
-            )
+            new_status = ProjectStatus.DONE if final_status == "done" else ProjectStatus.FAILED
             await storage.state_store.save_project(
                 latest.model_copy(update={"runs": updated_runs, "status": new_status})
             )
@@ -169,7 +164,7 @@ async def start_run(
                 if _is_native():
                     try:
                         history = await read_native_run_history(orch, project_with_run)
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         _log.exception(
                             "read native history for snapshot failed project=%s",
                             project_id,
@@ -178,18 +173,16 @@ async def start_run(
                     snapshot = RunSnapshot(
                         project_id=project_id,
                         run_id=run_id,
-                        captured_at=datetime.now(timezone.utc),
+                        captured_at=datetime.now(UTC),
                         plan=final_plan,
-                        outputs={
-                            nid: dump_output(out) for nid, out in final_outputs.items()
-                        },
+                        outputs={nid: dump_output(out) for nid, out in final_outputs.items()},
                         verdicts=final_verdicts,
                         metrics=latest.metrics,
                         final_status=final_status,
                         history=history,
                     )
                     await storage.state_store.save_run_snapshot(snapshot)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 _log.exception(
                     "save_run_snapshot failed (non-fatal) project=%s run=%s",
                     project_id,
@@ -280,15 +273,18 @@ def _history_from_snapshot_plan(snapshot: RunSnapshot) -> list[dict]:
         nid = node.node_id
         # 解析逻辑阶段 + 产品 + 轮次
         stage = next(
-            (p for p in _VIEW_STAGE_PREFIXES if nid == p or nid.startswith(p + ".")
-             or nid.startswith(p + "_v")),
+            (
+                p
+                for p in _VIEW_STAGE_PREFIXES
+                if nid == p or nid.startswith(p + ".") or nid.startswith(p + "_v")
+            ),
             None,
         )
         if stage is None:
             continue
         product: str | None = None
         round_ = 1
-        rest = nid[len(stage):]
+        rest = nid[len(stage) :]
         if rest.startswith("."):
             tail = rest[1:]
             if "_v" in tail:
@@ -299,9 +295,7 @@ def _history_from_snapshot_plan(snapshot: RunSnapshot) -> list[dict]:
         elif rest.startswith("_v"):
             ver = rest[2:]
             round_ = int(ver) if ver.isdigit() else 1
-        status_str = (
-            "success" if node.status.value in ("success",) else node.status.value
-        )
+        status_str = "success" if node.status.value in ("success",) else node.status.value
         history.append(
             {
                 "node": stage,
@@ -394,9 +388,7 @@ async def get_run_view(
         "outputs": dict(snapshot.outputs),
         "history": history,
         "verdicts": [v.model_dump(mode="json") for v in snapshot.verdicts],
-        "qa_round": sum(1 for v in snapshot.verdicts) - 1
-        if len(snapshot.verdicts) > 1
-        else 0,
+        "qa_round": sum(1 for v in snapshot.verdicts) - 1 if len(snapshot.verdicts) > 1 else 0,
         "aborted": snapshot.final_status == "aborted",
         "abort_reason": "",
     }

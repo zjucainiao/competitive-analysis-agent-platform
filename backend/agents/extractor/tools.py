@@ -21,7 +21,6 @@ from pydantic import BaseModel
 
 from backend.schemas import EvidenceLocation, RawSourceDoc
 
-
 # ---------- TextChunker ----------
 
 
@@ -336,9 +335,7 @@ def coerce_pydantic(resp: Any, model: type[BaseModel]) -> Any:
         return model.model_validate(resp)
     if hasattr(resp, "model_dump"):
         return model.model_validate(resp.model_dump())
-    raise ValueError(
-        f"cannot coerce LLM response to {model.__name__}: {type(resp).__name__}"
-    )
+    raise ValueError(f"cannot coerce LLM response to {model.__name__}: {type(resp).__name__}")
 
 
 # ---------- Evidence ID / hash helpers ----------
@@ -355,12 +352,12 @@ def content_hash_for(content: str) -> str:
 
 __all__ = [
     "Chunk",
-    "TextChunker",
     "EvidenceLinker",
     "LinkResult",
-    "split_prompt",
-    "render",
+    "TextChunker",
     "coerce_pydantic",
-    "evidence_id_for",
     "content_hash_for",
+    "evidence_id_for",
+    "render",
+    "split_prompt",
 ]

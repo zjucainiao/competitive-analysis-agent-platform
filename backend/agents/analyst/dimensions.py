@@ -172,9 +172,9 @@ def _filter_pool(eids: Iterable[str], pool: set[str]) -> list[str]:
 
 def _paid_plans(profile: CompetitorProfile) -> list[PricingPlan]:
     return [
-        p for p in profile.pricing.plans
-        if p.price_per_seat_monthly_usd is not None
-        and p.price_per_seat_monthly_usd > 0
+        p
+        for p in profile.pricing.plans
+        if p.price_per_seat_monthly_usd is not None and p.price_per_seat_monthly_usd > 0
     ]
 
 
@@ -232,9 +232,7 @@ def analyze_pricing_comparison(
 
     # 1. entry 档最低价
     if len(entry_meta) >= 2:
-        cheap_p, (cheap_price, cheap_plan, _) = min(
-            entry_meta.items(), key=lambda x: x[1][0]
-        )
+        cheap_p, (cheap_price, cheap_plan, _) = min(entry_meta.items(), key=lambda x: x[1][0])
         cited = _dedup(eid for _, _, ev in entry_meta.values() for eid in ev)
         if cited:
             claims.append(
@@ -252,12 +250,8 @@ def analyze_pricing_comparison(
 
     # 2. advanced 档溢价
     if len(advanced_meta) >= 2:
-        high_p, (high_price, high_plan, _) = max(
-            advanced_meta.items(), key=lambda x: x[1][0]
-        )
-        low_p, (low_price, _, _) = min(
-            advanced_meta.items(), key=lambda x: x[1][0]
-        )
+        high_p, (high_price, high_plan, _) = max(advanced_meta.items(), key=lambda x: x[1][0])
+        low_p, (low_price, _, _) = min(advanced_meta.items(), key=lambda x: x[1][0])
         if high_price > low_price * 1.2:  # 显著溢价才下结论
             cited = _dedup(eid for _, _, ev in advanced_meta.values() for eid in ev)
             if cited:
@@ -316,7 +310,11 @@ def analyze_pricing_comparison(
                         confidence=0.88,
                     )
                 )
-            if advanced is not None and advanced.price_per_seat_monthly_usd is not None and ev_target:
+            if (
+                advanced is not None
+                and advanced.price_per_seat_monthly_usd is not None
+                and ev_target
+            ):
                 claims.append(
                     AnalysisClaim(
                         claim_id="cl_price_self_advanced",
@@ -363,9 +361,7 @@ def analyze_pricing_comparison(
     )
 
 
-def _build_pricing_summary(
-    entry: dict[str, float], advanced: dict[str, float]
-) -> str:
+def _build_pricing_summary(entry: dict[str, float], advanced: dict[str, float]) -> str:
     parts: list[str] = []
     if entry:
         items = ", ".join(f"{p} ${v:g}" for p, v in entry.items())
@@ -502,8 +498,7 @@ def analyze_feature_comparison(
                 )
 
     summary = (
-        f"覆盖 {len(matrix)} 个能力维度的横向对比，"
-        f"其中 {len(claims)} 处存在显著强弱差异。"
+        f"覆盖 {len(matrix)} 个能力维度的横向对比，其中 {len(claims)} 处存在显著强弱差异。"
         if matrix
         else (
             f"列出 {target_product} 自身 {len(claims)} 项能力点。"
@@ -580,7 +575,9 @@ def analyze_swot(
                     continue
                 if _MATURITY_RANK.get(cms.maturity_level, 0) - target_rank >= 2:
                     beaters.append(comp)
-                    beater_ev.extend(_filter_pool(_industry_field_evidence(cprof, field), valid_pool))
+                    beater_ev.extend(
+                        _filter_pool(_industry_field_evidence(cprof, field), valid_pool)
+                    )
                     if not beater_ev:
                         beater_ev.extend(_filter_pool(_feature_evidence(cprof), valid_pool))
             if beaters and beater_ev:

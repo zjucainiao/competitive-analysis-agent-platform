@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import ClassVar, Protocol, runtime_checkable
 
 from backend.agents._base import LLMProviderProtocol
@@ -44,7 +44,7 @@ class CheckerContext:
     prior_verdicts: list[QAVerdict] = field(default_factory=list)
     llm: LLMProviderProtocol | None = None
     prompt_dir: str | None = None
-    now: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    now: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -65,8 +65,7 @@ class Checker(Protocol):
 
     dimension: ClassVar[QADimension]
 
-    def run(self, ctx: CheckerContext) -> CheckerResult:
-        ...
+    def run(self, ctx: CheckerContext) -> CheckerResult: ...
 
 
 class BaseChecker(ABC):

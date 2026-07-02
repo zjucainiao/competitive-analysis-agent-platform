@@ -19,8 +19,6 @@ from __future__ import annotations
 
 import os
 import re
-from functools import lru_cache
-
 
 # (input_per_1m_usd, output_per_1m_usd)
 PriceTuple = tuple[float, float]

@@ -50,7 +50,7 @@ class ProjectMetricsSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     captured_at: datetime
-    metrics: "ProjectMetrics"
+    metrics: ProjectMetrics
 
 
 class RunRef(BaseModel):
@@ -159,7 +159,7 @@ class RunSnapshot(BaseModel):
     plan: DAGPlan
     outputs: dict[str, dict[str, Any]]
     verdicts: list[QAVerdict]
-    metrics: "ProjectMetrics | None" = None
+    metrics: ProjectMetrics | None = None
     final_status: str
     # native 引擎 RunState.history 的 dict 投影(回放真相源)。Stage A 仅占位默认空,
     # 端到端写入(RunStateView)由 Stage B 落地;此处保持向后兼容(已有快照无此字段)。

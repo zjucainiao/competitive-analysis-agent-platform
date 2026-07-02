@@ -19,7 +19,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -124,9 +124,7 @@ def test_real_full_draft_runs_all_dimensions() -> None:
     fc = out.verdict.dimension_results[QADimension.FACT_CONSISTENCY]
     assert fc.pass_ is False, "无 LLM 时事实一致性应降级未核验，而非 fail-open 通过"
     assert "未核验" in fc.notes
-    fc_issues = [
-        i for i in out.verdict.issues if i.dimension is QADimension.FACT_CONSISTENCY
-    ]
+    fc_issues = [i for i in out.verdict.issues if i.dimension is QADimension.FACT_CONSISTENCY]
     assert fc_issues, "降级应补发一条说明未核验的 issue"
     assert all(i.severity == "minor" for i in fc_issues), "降级 issue 非阻塞(minor)"
     # freshness：fixture 全无日期 → 不计入评分、默认通过(1.0)，不再永久卡 0.7。
@@ -134,9 +132,7 @@ def test_real_full_draft_runs_all_dimensions() -> None:
     fr = out.verdict.dimension_results[QADimension.FRESHNESS]
     assert fr.score == pytest.approx(1.0, abs=1e-3)
     assert fr.pass_ is True
-    fr_issues = [
-        i for i in out.verdict.issues if i.dimension is QADimension.FRESHNESS
-    ]
+    fr_issues = [i for i in out.verdict.issues if i.dimension is QADimension.FRESHNESS]
     assert not fr_issues, "全无日期不应再补发 freshness issue（无日期≠过期）"
     # overall 不到 REJECT
     assert out.verdict.overall_status is not QAStatus.REJECT
@@ -161,8 +157,7 @@ def test_evidence_completeness_flags_missing_citation() -> None:
     para_issues = [
         i
         for i in out.verdict.issues
-        if i.dimension is QADimension.EVIDENCE_COMPLETENESS
-        and i.target_agent == "reporter"
+        if i.dimension is QADimension.EVIDENCE_COMPLETENESS and i.target_agent == "reporter"
     ]
     assert para_issues, "expected reporter-targeted evidence_completeness issue"
     assert any("sec_features" in i.required_inputs.get("section_id", "") for i in para_issues)
@@ -175,9 +170,7 @@ def test_evidence_completeness_empty_dimension_routes_to_collector() -> None:
     agent = QA(llm=NullLLM(), tracer=NullTracer())
     inp = load_demo_input()
     swot = inp.analysis.dimensions[
-        __import__(
-            "backend.schemas", fromlist=["AnalysisDimension"]
-        ).AnalysisDimension.SWOT
+        __import__("backend.schemas", fromlist=["AnalysisDimension"]).AnalysisDimension.SWOT
     ]
     for claim in swot.claims:
         claim.evidence_ids = []
@@ -204,8 +197,7 @@ def test_schema_completeness_flags_missing_required_field() -> None:
     sc_issues = [
         i
         for i in out.verdict.issues
-        if i.dimension is QADimension.SCHEMA_COMPLETENESS
-        and i.target_agent == "extractor"
+        if i.dimension is QADimension.SCHEMA_COMPLETENESS and i.target_agent == "extractor"
     ]
     assert sc_issues
     # must_address 必须告诉 Extractor 缺哪些字段
@@ -234,9 +226,7 @@ def test_freshness_flags_stale_pricing_evidence() -> None:
 
     fr = out.verdict.dimension_results[QADimension.FRESHNESS]
     assert fr.pass_ is False
-    stale_issues = [
-        i for i in out.verdict.issues if i.dimension is QADimension.FRESHNESS
-    ]
+    stale_issues = [i for i in out.verdict.issues if i.dimension is QADimension.FRESHNESS]
     assert stale_issues
     # 至少一个回到 collector
     assert any(i.target_agent == "collector" for i in stale_issues)
@@ -255,22 +245,18 @@ def test_freshness_passes_when_all_evidence_undated() -> None:
     fr = out.verdict.dimension_results[QADimension.FRESHNESS]
     assert fr.score == pytest.approx(1.0, abs=1e-3)
     assert fr.pass_ is True
-    fr_issues = [
-        i for i in out.verdict.issues if i.dimension is QADimension.FRESHNESS
-    ]
+    fr_issues = [i for i in out.verdict.issues if i.dimension is QADimension.FRESHNESS]
     assert not fr_issues, "全无日期不应补发 freshness issue"
     assert "无日期" in fr.notes
 
 
 def test_freshness_drops_when_six_months_old_publish_date() -> None:
     """敏感字段引用了 6 个月前发布的 evidence → 分数明显下降并开 collector 路由。"""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     inp = load_demo_input()
     old_db = load_evidence_db()
-    six_months_ago = (
-        datetime.now(timezone.utc) - timedelta(days=180)
-    ).isoformat()
+    six_months_ago = (datetime.now(UTC) - timedelta(days=180)).isoformat()
     dated = {
         eid: Evidence.model_validate(
             {
@@ -286,9 +272,7 @@ def test_freshness_drops_when_six_months_old_publish_date() -> None:
     # 敏感字段（定价段）超过 SENSITIVE_MAX_DAYS=90 天 → stale
     assert fr.score < 0.85, f"expected score < 0.85 for 6-month-old refs, got {fr.score}"
     assert fr.pass_ is False
-    stale_issues = [
-        i for i in out.verdict.issues if i.dimension is QADimension.FRESHNESS
-    ]
+    stale_issues = [i for i in out.verdict.issues if i.dimension is QADimension.FRESHNESS]
     assert any(i.target_agent == "collector" for i in stale_issues)
 
 
@@ -307,9 +291,7 @@ def test_logic_consistency_passes_one_soft_conflict() -> None:
         evidence_db={},
     )
     # 构造 1 处 minor 价格冲突（同 product+plan 两个不同值）
-    sec_pricing = next(
-        s for s in inp.draft.sections if s.section_id == "sec_pricing"
-    )
+    sec_pricing = next(s for s in inp.draft.sections if s.section_id == "sec_pricing")
     sec_pricing.paragraphs.append(
         _mk_paragraph("p_pr_dup", "Notion Plus $11 比 ClickUp Unlimited $7 贵一点。")
     )
@@ -331,9 +313,7 @@ def test_logic_consistency_fails_two_hard_conflicts() -> None:
         profiles=inp.profiles,
         evidence_db={},
     )
-    sec_pricing = next(
-        s for s in inp.draft.sections if s.section_id == "sec_pricing"
-    )
+    sec_pricing = next(s for s in inp.draft.sections if s.section_id == "sec_pricing")
     sec_pricing.paragraphs.append(
         _mk_paragraph("p_pr_dup_a", "Notion Plus $11 比 ClickUp Unlimited $7 贵一点。")
     )
@@ -402,9 +382,7 @@ def test_expression_flags_banned_terms_and_first_person() -> None:
     sec.paragraphs[0].text = "我们认为 Notion 是行业唯一的完美方案。"
     out = agent.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id)
 
-    ex_issues = [
-        i for i in out.verdict.issues if i.dimension is QADimension.EXPRESSION
-    ]
+    ex_issues = [i for i in out.verdict.issues if i.dimension is QADimension.EXPRESSION]
     banned_problems = [i for i in ex_issues if "绝对化" in i.problem]
     fp_problems = [i for i in ex_issues if "第一人称" in i.problem]
     assert banned_problems, "expected banned-terms issue"
@@ -419,9 +397,7 @@ def test_expression_flags_banned_terms_and_first_person() -> None:
 def test_logic_consistency_flags_price_conflict() -> None:
     agent = QA(llm=NullLLM(), tracer=NullTracer())
     inp = load_demo_input()
-    sec_pricing = next(
-        s for s in inp.draft.sections if s.section_id == "sec_pricing"
-    )
+    sec_pricing = next(s for s in inp.draft.sections if s.section_id == "sec_pricing")
     # 在 pricing 章节插入和 p_pr_01 矛盾的段落
     sec_pricing.paragraphs.append(
         ReportParagraph(
@@ -435,17 +411,12 @@ def test_logic_consistency_flags_price_conflict() -> None:
     )
     out = agent.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id)
 
-    lc_issues = [
-        i for i in out.verdict.issues
-        if i.dimension is QADimension.LOGIC_CONSISTENCY
-    ]
+    lc_issues = [i for i in out.verdict.issues if i.dimension is QADimension.LOGIC_CONSISTENCY]
     assert lc_issues, "expected logic_consistency issue for price conflict"
     assert any("Notion" in i.problem and "Plus" in i.problem for i in lc_issues)
     # WI-3：同 product+plan 出现 ≥2 个不同价格是**确定性**子发现（正则/数值比对，非 LLM），
     # 可定位、可复核 → 标 hard_block，使其在「LLM 维度默认 advisory」后仍能 gate 控制流。
-    price_issue = next(
-        (i for i in lc_issues if i.issue_id.startswith("iss_lc_price_")), None
-    )
+    price_issue = next((i for i in lc_issues if i.issue_id.startswith("iss_lc_price_")), None)
     assert price_issue is not None, "expected deterministic price-conflict issue"
     assert price_issue.required_inputs.get("hard_block") is True
 
@@ -488,7 +459,10 @@ def test_downgrade_repeated_issues() -> None:
     prior = [prior_v for _ in range(SAME_ISSUE_MAX_OCCURRENCES - 1)]
     prior_counts = count_prior_issue_occurrences(prior)
     new_issue = _mk_issue(
-        "iss_repeat", QADimension.EXPRESSION, "major", "reporter",
+        "iss_repeat",
+        QADimension.EXPRESSION,
+        "major",
+        "reporter",
         location="report.sections[0].paragraphs[0]",
     )
     adjusted, downgraded = downgrade_repeated_issues([new_issue], prior_counts)
@@ -508,9 +482,7 @@ def test_mark_unresolved_from_prior_escalates_second_occurrence() -> None:
     ]
     prior_counts = count_prior_issue_occurrences(prior)  # 该 key 计 1 次
 
-    recurring = _mk_issue(
-        "iss_x", QADimension.LOGIC_CONSISTENCY, "major", "reporter", location=loc
-    )
+    recurring = _mk_issue("iss_x", QADimension.LOGIC_CONSISTENCY, "major", "reporter", location=loc)
     fresh = _mk_issue(
         "iss_y",
         QADimension.FACT_CONSISTENCY,
@@ -535,9 +507,7 @@ def test_mark_unresolved_skips_downgrade_threshold() -> None:
     )
     prior = [pv for _ in range(SAME_ISSUE_MAX_OCCURRENCES - 1)]  # 计 2 次
     prior_counts = count_prior_issue_occurrences(prior)
-    issue = _mk_issue(
-        "iss_z", QADimension.LOGIC_CONSISTENCY, "major", "reporter", location=loc
-    )
+    issue = _mk_issue("iss_z", QADimension.LOGIC_CONSISTENCY, "major", "reporter", location=loc)
     out = mark_unresolved_from_prior([issue], prior_counts)
     assert out[0].required_inputs.get("unresolved_from_prior_round") is None
 
@@ -589,20 +559,18 @@ def test_aggregate_verdict_reject_when_many_criticals() -> None:
 
 def _mk_dim(dim: QADimension, score: float, pass_: bool) -> QADimensionResult:
     return QADimensionResult(
-        dimension=dim, score=score, **{"pass": pass_}  # type: ignore[arg-type]
+        dimension=dim,
+        score=score,
+        **{"pass": pass_},  # type: ignore[arg-type]
     )
 
 
 def test_synthesize_surfaces_subthreshold_dims_without_issue() -> None:
     """低分但无 issue 的维度补发；通过的 / 已有 issue 的不补。"""
     dims = {
-        QADimension.EVIDENCE_COMPLETENESS: _mk_dim(
-            QADimension.EVIDENCE_COMPLETENESS, 0.4, False
-        ),
+        QADimension.EVIDENCE_COMPLETENESS: _mk_dim(QADimension.EVIDENCE_COMPLETENESS, 0.4, False),
         QADimension.FRESHNESS: _mk_dim(QADimension.FRESHNESS, 0.7, False),
-        QADimension.FACT_CONSISTENCY: _mk_dim(
-            QADimension.FACT_CONSISTENCY, 0.99, True
-        ),
+        QADimension.FACT_CONSISTENCY: _mk_dim(QADimension.FACT_CONSISTENCY, 0.99, True),
         QADimension.EXPRESSION: _mk_dim(QADimension.EXPRESSION, 0.3, False),
     }
     existing = [_mk_issue("iss_x", QADimension.EXPRESSION, "minor", "reporter")]
@@ -623,9 +591,7 @@ def test_synthesize_surfaces_subthreshold_dims_without_issue() -> None:
 def test_core_dimension_fail_forces_blocking() -> None:
     """核心维度(evidence)不及格 → 即便 issue 权重为 0 也强制 needs_revision + blocking。"""
     dims = {
-        QADimension.EVIDENCE_COMPLETENESS: _mk_dim(
-            QADimension.EVIDENCE_COMPLETENESS, 0.5, False
-        )
+        QADimension.EVIDENCE_COMPLETENESS: _mk_dim(QADimension.EVIDENCE_COMPLETENESS, 0.5, False)
     }
     res = aggregate_verdict([], prior_count=0, dimension_results=dims)
     assert res.status is QAStatus.NEEDS_REVISION
@@ -642,13 +608,9 @@ def test_noncore_subthreshold_does_not_force_blocking() -> None:
 def test_core_blocking_not_forced_after_max_retry() -> None:
     """已触顶（max_retry）时核心维度不及格也不再强制阻塞 → 触顶放行兜底。"""
     dims = {
-        QADimension.EVIDENCE_COMPLETENESS: _mk_dim(
-            QADimension.EVIDENCE_COMPLETENESS, 0.5, False
-        )
+        QADimension.EVIDENCE_COMPLETENESS: _mk_dim(QADimension.EVIDENCE_COMPLETENESS, 0.5, False)
     }
-    res = aggregate_verdict(
-        [], prior_count=MAX_RETRY_VERDICTS, dimension_results=dims
-    )
+    res = aggregate_verdict([], prior_count=MAX_RETRY_VERDICTS, dimension_results=dims)
     assert res.blocking is False
 
 
@@ -661,11 +623,7 @@ def test_schema_completeness_is_core_dimension() -> None:
 
 def test_schema_fail_forces_blocking_first_round() -> None:
     """schema 首次不及格（无历史）→ 强制 needs_revision + blocking（触发一轮返工）。"""
-    dims = {
-        QADimension.SCHEMA_COMPLETENESS: _mk_dim(
-            QADimension.SCHEMA_COMPLETENESS, 0.65, False
-        )
-    }
+    dims = {QADimension.SCHEMA_COMPLETENESS: _mk_dim(QADimension.SCHEMA_COMPLETENESS, 0.65, False)}
     res = aggregate_verdict([], prior_count=0, dimension_results=dims)
     assert res.status is QAStatus.NEEDS_REVISION
     assert res.blocking is True
@@ -689,32 +647,20 @@ def test_core_fail_not_reblocked_after_prior_failure() -> None:
     给每个核心维度仅一次阻塞返工机会；返工没修好就落回权重判级，交 best-round。
     issue 权重为 0 → 落回非阻塞 needs_revision，不再回灌。
     """
-    dims = {
-        QADimension.SCHEMA_COMPLETENESS: _mk_dim(
-            QADimension.SCHEMA_COMPLETENESS, 0.65, False
-        )
-    }
+    dims = {QADimension.SCHEMA_COMPLETENESS: _mk_dim(QADimension.SCHEMA_COMPLETENESS, 0.65, False)}
     prior = [_mk_prior_verdict(QADimension.SCHEMA_COMPLETENESS)]
-    res = aggregate_verdict(
-        [], prior_count=1, dimension_results=dims, prior_verdicts=prior
-    )
+    res = aggregate_verdict([], prior_count=1, dimension_results=dims, prior_verdicts=prior)
     assert res.blocking is False
 
 
 def test_core_fail_still_blocks_when_other_core_dim_newly_fails() -> None:
     """复发护栏是按维度独立的：schema 失败过被豁免，但 evidence 首次失败仍阻塞。"""
     dims = {
-        QADimension.SCHEMA_COMPLETENESS: _mk_dim(
-            QADimension.SCHEMA_COMPLETENESS, 0.65, False
-        ),
-        QADimension.EVIDENCE_COMPLETENESS: _mk_dim(
-            QADimension.EVIDENCE_COMPLETENESS, 0.5, False
-        ),
+        QADimension.SCHEMA_COMPLETENESS: _mk_dim(QADimension.SCHEMA_COMPLETENESS, 0.65, False),
+        QADimension.EVIDENCE_COMPLETENESS: _mk_dim(QADimension.EVIDENCE_COMPLETENESS, 0.5, False),
     }
     prior = [_mk_prior_verdict(QADimension.SCHEMA_COMPLETENESS)]
-    res = aggregate_verdict(
-        [], prior_count=1, dimension_results=dims, prior_verdicts=prior
-    )
+    res = aggregate_verdict([], prior_count=1, dimension_results=dims, prior_verdicts=prior)
     assert res.blocking is True
 
 
@@ -776,9 +722,7 @@ def test_fact_consistency_contradicted_marks_hard_block() -> None:
 
     resp = _EntailmentResponse(
         verdicts=[
-            _EntailmentVerdict(
-                paragraph_id=target_pid, label="contradicted", note="与证据冲突"
-            )
+            _EntailmentVerdict(paragraph_id=target_pid, label="contradicted", note="与证据冲突")
         ]
     )
     llm = FakeLLM(responses={"entailment": resp})
@@ -791,9 +735,7 @@ def test_fact_consistency_contradicted_marks_hard_block() -> None:
         prompt_dir=str(PROMPT_DIR),
     )
     res = FactConsistencyChecker().run(ctx)
-    contra = [
-        i for i in res.issues if i.issue_id == f"iss_fc_contra_{target_pid}"
-    ]
+    contra = [i for i in res.issues if i.issue_id == f"iss_fc_contra_{target_pid}"]
     assert contra, "应为 contradicted 段落开 issue"
     assert contra[0].severity == "major"
     assert contra[0].required_inputs.get("hard_block") is True
@@ -869,9 +811,7 @@ def test_llm_advisory_criticals_do_not_block_without_hard_block() -> None:
 
 def test_deterministic_criticals_still_block() -> None:
     """对照（回归保住）：确定性维度(evidence_completeness)的 critical 仍进判级 → 阻塞。"""
-    issues = [
-        _mk_issue("iss_ec_crit", QADimension.EVIDENCE_COMPLETENESS, "critical", "reporter")
-    ]
+    issues = [_mk_issue("iss_ec_crit", QADimension.EVIDENCE_COMPLETENESS, "critical", "reporter")]
     res = aggregate_verdict(issues, prior_count=0)
     assert res.blocking is True
 
@@ -907,24 +847,26 @@ def _ec_checker():
 def test_low_authority_does_not_flip_evidence_pass() -> None:
     """权威 issue 在 pass_ 之后 append——压低全部证据 authority 不改本维度 score/pass_，
     只额外浮出权威 issue（消费 source_authority，但不经 core 路径强制阻塞）。"""
-    CheckerContext, EvidenceCompletenessChecker = _ec_checker()
+    CheckerContext, EvidenceCompletenessChecker = _ec_checker()  # noqa: N806
     inp = load_demo_input()
     db = load_evidence_db()
     base = EvidenceCompletenessChecker().run(
         CheckerContext(
-            draft=inp.draft, analysis=inp.analysis, profiles=inp.profiles,
+            draft=inp.draft,
+            analysis=inp.analysis,
+            profiles=inp.profiles,
             evidence_db=db,
         )
     )
     low_db = {
-        eid: Evidence.model_validate(
-            {**e.model_dump(mode="json"), "source_authority": 0.5}
-        )
+        eid: Evidence.model_validate({**e.model_dump(mode="json"), "source_authority": 0.5})
         for eid, e in db.items()
     }
     low = EvidenceCompletenessChecker().run(
         CheckerContext(
-            draft=inp.draft, analysis=inp.analysis, profiles=inp.profiles,
+            draft=inp.draft,
+            analysis=inp.analysis,
+            profiles=inp.profiles,
             evidence_db=low_db,
         )
     )
@@ -933,9 +875,7 @@ def test_low_authority_does_not_flip_evidence_pass() -> None:
     assert low.score == base.score
     # 但确实浮出了权威 issue（消费了 source_authority）
     auth = [
-        i
-        for i in low.issues
-        if i.issue_id in ("iss_ec_low_authority", "iss_ec_low_authority_key")
+        i for i in low.issues if i.issue_id in ("iss_ec_low_authority", "iss_ec_low_authority_key")
     ]
     assert auth, "压低 authority 后应浮出权威 issue"
     assert all(i.target_agent == "collector" for i in auth)
@@ -944,7 +884,7 @@ def test_low_authority_does_not_flip_evidence_pass() -> None:
 def test_cross_dimension_authority_correction_flags_review_in_pricing() -> None:
     """评论类证据(存值 0.92)用到**定价**段落 → 跨维度重算为 0.6(<0.7) → 标关键弱源。
     证明 QA 是按「段落主题维度」重算，而非沿用证据采集时的 source_authority。"""
-    CheckerContext, EvidenceCompletenessChecker = _ec_checker()
+    CheckerContext, EvidenceCompletenessChecker = _ec_checker()  # noqa: N806
     inp = load_demo_input()
     db = load_evidence_db()
     sec = next(s for s in inp.draft.sections if "pricing" in s.section_id.lower())
@@ -965,7 +905,9 @@ def test_cross_dimension_authority_correction_flags_review_in_pricing() -> None:
             )
     res = EvidenceCompletenessChecker().run(
         CheckerContext(
-            draft=inp.draft, analysis=inp.analysis, profiles=inp.profiles,
+            draft=inp.draft,
+            analysis=inp.analysis,
+            profiles=inp.profiles,
             evidence_db=mod_db,
         )
     )
@@ -978,10 +920,10 @@ def test_cross_dimension_authority_correction_flags_review_in_pricing() -> None:
 
 def test_multi_source_class_corroboration_exempts() -> None:
     """同段落证据来自 ≥2 个不同 source_class（多源互证）→ 即便都低权威也豁免。"""
-    CheckerContext, EvidenceCompletenessChecker = _ec_checker()
+    CheckerContext, EvidenceCompletenessChecker = _ec_checker()  # noqa: N806
     inp = load_demo_input()
     db = load_evidence_db()
-    sec = next(s for s in inp.draft.sections if "pricing" in s.section_id.lower())
+    next(s for s in inp.draft.sections if "pricing" in s.section_id.lower())
     # 注入一个引用 2 条不同 source_class 证据的定价量化段
     eids = [e for e in db][:2]
     assert len(eids) == 2
@@ -1006,7 +948,9 @@ def test_multi_source_class_corroboration_exempts() -> None:
     )
     res = EvidenceCompletenessChecker().run(
         CheckerContext(
-            draft=inp.draft, analysis=inp.analysis, profiles=inp.profiles,
+            draft=inp.draft,
+            analysis=inp.analysis,
+            profiles=inp.profiles,
             evidence_db=mod_db,
         )
     )
@@ -1138,9 +1082,7 @@ def _verdict_with_issue(
         verdict_id=verdict_id,
         overall_status=QAStatus.NEEDS_REVISION,
         dimension_results={},
-        issues=[
-            _mk_issue(issue_id, dim, severity, target, location=location)
-        ],
+        issues=[_mk_issue(issue_id, dim, severity, target, location=location)],
         routing=[],
         blocking=True,
     )

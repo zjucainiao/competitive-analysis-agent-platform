@@ -7,7 +7,6 @@ from langgraph.graph import END
 from backend.orchestrator.routing import decide_qa_route
 from backend.schemas import QADimension, QAIssue, QARouting, QAStatus, QAVerdict
 
-
 # ---------- helpers ----------
 
 
@@ -66,7 +65,7 @@ def test_cap_aborts() -> None:
 
 def test_no_routing_ends() -> None:
     """routing 列表为空时直接结束，无需重做。"""
-    goto, upd = decide_qa_route(
+    goto, _upd = decide_qa_route(
         _verdict(routing=[], blocking=False),
         qa_round=0,
         max_rounds=3,
@@ -180,7 +179,9 @@ def test_qa_feedback_by_node_reporter_key() -> None:
     )
     assert goto == "reporter"
     fb = upd.get("qa_feedback_by_node", {})
-    assert "reporter" in fb, f"expected 'reporter' key in qa_feedback_by_node, got {list(fb.keys())}"
+    assert "reporter" in fb, (
+        f"expected 'reporter' key in qa_feedback_by_node, got {list(fb.keys())}"
+    )
     payload = fb["reporter"]
     assert "from_verdict_id" in payload, (
         f"expected 'from_verdict_id' in reporter payload, got {list(payload.keys())}"

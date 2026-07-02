@@ -34,11 +34,8 @@ from backend.schemas import (
 )
 from backend.schemas.evidence import CollectDimension
 
-
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_DEMO_PROJECT_FILE = (
-    _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
-)
+_DEMO_PROJECT_FILE = _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
 
 
 def _load_demo_project() -> Project:
@@ -85,9 +82,7 @@ def executor(registry: AgentRegistry, project: Project) -> Executor:
 # ---------- 控制节点（不调用 Agent） ----------
 
 
-async def test_start_node_returns_success_immediately(
-    plan: DAGPlan, executor: Executor
-) -> None:
+async def test_start_node_returns_success_immediately(plan: DAGPlan, executor: Executor) -> None:
     start = _node_by_id(plan, "start")
     result = await executor.execute(start, outputs={})
     assert result.status == NodeStatus.SUCCESS
@@ -101,9 +96,7 @@ async def test_end_node_returns_success(plan: DAGPlan, executor: Executor) -> No
     assert result.status == NodeStatus.SUCCESS
 
 
-async def test_parallel_join_returns_success(
-    plan: DAGPlan, executor: Executor
-) -> None:
+async def test_parallel_join_returns_success(plan: DAGPlan, executor: Executor) -> None:
     join = _node_by_id(plan, "join_extract")
     assert join.node_type == NodeType.PARALLEL_JOIN
     result = await executor.execute(join, outputs={})
@@ -113,9 +106,7 @@ async def test_parallel_join_returns_success(
 # ---------- input 解包（不实际调用 Agent） ----------
 
 
-async def test_collector_input_dimensions_from_metadata(
-    plan: DAGPlan, executor: Executor
-) -> None:
+async def test_collector_input_dimensions_from_metadata(plan: DAGPlan, executor: Executor) -> None:
     """构造的 CollectorInput 应读 metadata 里的 collect_dimensions。"""
     node = _node_by_id(plan, "collect.notion")
     inp = executor._build_collector_input(node, qa_feedback=None)
@@ -171,18 +162,14 @@ async def test_extractor_industry_schema_id_derived(
     assert inp.industry_schema_id == "collaboration_saas_v1"
 
 
-async def test_extractor_missing_upstream_input_fails(
-    plan: DAGPlan, executor: Executor
-) -> None:
+async def test_extractor_missing_upstream_input_fails(plan: DAGPlan, executor: Executor) -> None:
     extractor_node = _node_by_id(plan, "extract.notion")
     result = await executor.execute(extractor_node, outputs={})
     assert result.status == NodeStatus.FAILED
     assert result.error.code == "INPUT_BUILD_FAILED"
 
 
-async def test_reporter_input_requires_analyst(
-    plan: DAGPlan, executor: Executor
-) -> None:
+async def test_reporter_input_requires_analyst(plan: DAGPlan, executor: Executor) -> None:
     from backend.orchestrator.executor import BuildInputError
 
     reporter_node = _node_by_id(plan, "reporter")
@@ -201,9 +188,7 @@ async def test_latest_output_helper_picks_highest_revision() -> None:
     assert picked.task_id == "analyst_v3"
 
 
-async def test_qa_input_collects_prior_verdicts(
-    plan: DAGPlan, executor: Executor
-) -> None:
+async def test_qa_input_collects_prior_verdicts(plan: DAGPlan, executor: Executor) -> None:
     qa_node = _node_by_id(plan, "qa")
     outputs = _build_synthetic_outputs()
     outputs["qa_v1"] = _make_qa_output(verdict_id="vd_old")
@@ -216,23 +201,29 @@ async def test_qa_input_collects_prior_verdicts(
 # ---------- 重试 / 超时（用桩 agent 直接塞 registry._cache） ----------
 
 
-async def test_node_timeout_triggers_retry_then_failure(
+async def test_node_timeout_fails_without_retry(
     project: Project, plan: DAGPlan, registry: AgentRegistry
 ) -> None:
-    """超时 max_retries 次后失败；非 hybrid 模式不降级（hybrid 已移除）。"""
+    """超时立即失败、不重试；非 hybrid 模式不降级（hybrid 已移除）。
+
+    同步 invoke 在超时后仍在后台线程跑完（僵尸线程），重试会与它并发
+    执行同一 agent。用调用计数验证不发生第二次 invoke。
+    """
+    import asyncio
+    import time
 
     class _SlowAgent:
         name = "collector"
+        calls = 0
 
         def invoke(self, inp: Any, **kwargs: Any) -> Any:
-            import time
-
-            time.sleep(0.5)
+            _SlowAgent.calls += 1
+            time.sleep(0.3)
             raise RuntimeError("unreachable")
 
     registry._cache["collector"] = _SlowAgent()  # type: ignore[assignment]
     node = _node_by_id(plan, "collect.notion").model_copy(
-        update={"timeout_ms": 50, "max_retries": 1}
+        update={"timeout_ms": 50, "max_retries": 3}
     )
 
     proj_real = project.model_copy(update={"mode": "real"})
@@ -240,8 +231,13 @@ async def test_node_timeout_triggers_retry_then_failure(
     result = await ex.execute(node, outputs={})
     assert result.status == NodeStatus.FAILED
     assert result.error.code == "LLM_TIMEOUT"
-    # max_retries=1 → 2 次尝试
-    assert result.metadata["attempts"] == 2
+    assert "timed out" in result.error.message
+    assert result.error.retriable is False
+    # 超时不重试 → 只有 1 次尝试
+    assert result.metadata["attempts"] == 1
+    # 等僵尸线程跑完再断言：确认之后也没有第二次 invoke 被调度
+    await asyncio.sleep(0.4)
+    assert _SlowAgent.calls == 1
 
 
 # ---------- helpers ----------

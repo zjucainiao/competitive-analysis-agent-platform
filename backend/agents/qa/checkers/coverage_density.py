@@ -29,8 +29,8 @@ from ._base import BaseChecker, CheckerContext, CheckerResult
 from .evidence_completeness import _section_dimension
 
 # 多 claim 维度判"密度偏低"的阈值
-THIN_CLAIM_FLOOR = 3          # claim 达到此数才评估密度（少于此数短属正常）
-THIN_DENSITY_RATIO = 0.5      # 实质段落 / 带证据 claim 数 低于此值 → 偏薄
+THIN_CLAIM_FLOOR = 3  # claim 达到此数才评估密度（少于此数短属正常）
+THIN_DENSITY_RATIO = 0.5  # 实质段落 / 带证据 claim 数 低于此值 → 偏薄
 OVERALL_PASS_THRESHOLD = 0.80
 
 

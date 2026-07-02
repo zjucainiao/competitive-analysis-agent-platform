@@ -23,7 +23,6 @@ from backend.storage.protocols import (
     StateStoreProtocol,
 )
 
-
 # ---------- Protocol conformance ----------
 
 
@@ -66,15 +65,16 @@ async def test_checkpointer_parent_chain():
     cfg = make_config("thread-1")
     cfg1 = await cp.aput(cfg, {"v": 1, "channel_values": {"a": 1}}, {"step": 0}, {})
     # child checkpoint：把 cfg1 当作 parent
-    cfg2 = await cp.aput(
-        cfg1, {"v": 1, "channel_values": {"a": 2}}, {"step": 1}, {}
-    )
+    cfg2 = await cp.aput(cfg1, {"v": 1, "channel_values": {"a": 2}}, {"step": 1}, {})
     got = await cp.aget_tuple(cfg2)
     assert got is not None
     assert got.parent_config is not None
-    assert got.parent_config["configurable"]["checkpoint_id"] == cfg1["configurable"][  # type: ignore[index]
-        "checkpoint_id"
-    ]
+    assert (
+        got.parent_config["configurable"]["checkpoint_id"]
+        == cfg1["configurable"][  # type: ignore[index]
+            "checkpoint_id"
+        ]
+    )
 
 
 async def test_checkpointer_alist_orders_desc():
@@ -166,9 +166,7 @@ async def test_state_store_update_node_status(make_project, make_dag_plan):
     assert n1.status == NodeStatus.SUCCESS
 
 
-async def test_state_store_node_output_polymorphic(
-    make_project, make_collector_output
-):
+async def test_state_store_node_output_polymorphic(make_project, make_collector_output):
     ss = InMemoryStateStore()
     project = make_project()
     await ss.save_project(project)
@@ -208,9 +206,7 @@ async def test_node_outputs_run_scoped_excludes_stale_prior_run(
     assert set(await ss.list_node_outputs(pid, run_id="run_B")) == {"n1"}
 
 
-async def test_state_store_qa_verdicts_ordered_desc(
-    make_project, make_qa_verdict
-):
+async def test_state_store_qa_verdicts_ordered_desc(make_project, make_qa_verdict):
     ss = InMemoryStateStore()
     project = make_project()
     await ss.save_project(project)
@@ -249,9 +245,10 @@ async def test_state_store_llm_calls_append_list_filter():
     all_p1 = await ss.list_llm_calls("p1")
     assert [c["node_id"] for c in all_p1] == ["reporter_v2", "reporter", "collect.coda"]
     assert await ss.list_llm_calls("p1", node_id="reporter_v2") != []
-    assert {
-        c["node_id"] for c in await ss.list_llm_calls("p1", agent_name="reporter")
-    } == {"reporter", "reporter_v2"}
+    assert {c["node_id"] for c in await ss.list_llm_calls("p1", agent_name="reporter")} == {
+        "reporter",
+        "reporter_v2",
+    }
     assert len(await ss.list_llm_calls("p2")) == 1
     assert len(await ss.list_llm_calls("p1", limit=1)) == 1
 
@@ -269,12 +266,8 @@ async def test_event_bus_publish_after_subscribe():
             if len(received) == 2:
                 break
 
-    payload1 = NodeExecutionResult(
-        project_id="p1", node_id="n1", status=NodeStatus.SUCCESS
-    )
-    payload2 = NodeExecutionResult(
-        project_id="p1", node_id="n2", status=NodeStatus.RUNNING
-    )
+    payload1 = NodeExecutionResult(project_id="p1", node_id="n1", status=NodeStatus.SUCCESS)
+    payload2 = NodeExecutionResult(project_id="p1", node_id="n2", status=NodeStatus.RUNNING)
 
     task = asyncio.create_task(consumer())
     # 给 subscriber 注册（包括 await q.get() 阻塞下来）一些时间
@@ -298,9 +291,7 @@ async def test_event_bus_fan_out_to_multiple_subscribers():
 
     tasks = [asyncio.create_task(consumer(i)) for i in range(2)]
     await asyncio.sleep(0.05)
-    payload = NodeExecutionResult(
-        project_id="p1", node_id="n1", status=NodeStatus.SUCCESS
-    )
+    payload = NodeExecutionResult(project_id="p1", node_id="n1", status=NodeStatus.SUCCESS)
     await bus.publish("ch", payload)
     await bus.publish("ch", payload)
     await asyncio.gather(*tasks)
@@ -310,9 +301,7 @@ async def test_event_bus_fan_out_to_multiple_subscribers():
 async def test_event_bus_no_replay():
     """订阅前的消息不该被新 subscriber 看到。"""
     bus = InMemoryEventBus()
-    payload = NodeExecutionResult(
-        project_id="p1", node_id="n1", status=NodeStatus.SUCCESS
-    )
+    payload = NodeExecutionResult(project_id="p1", node_id="n1", status=NodeStatus.SUCCESS)
     await bus.publish("ch", payload)  # 没人订阅，丢弃
 
     received: list[NodeExecutionResult] = []
@@ -333,9 +322,7 @@ async def test_event_bus_no_replay():
 async def test_event_bus_close_blocks_publish():
     bus = InMemoryEventBus()
     await bus.close()
-    payload = NodeExecutionResult(
-        project_id="p1", node_id="n1", status=NodeStatus.SUCCESS
-    )
+    payload = NodeExecutionResult(project_id="p1", node_id="n1", status=NodeStatus.SUCCESS)
     with pytest.raises(RuntimeError):
         await bus.publish("ch", payload)
 

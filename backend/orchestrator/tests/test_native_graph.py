@@ -8,6 +8,7 @@ extractor mock fixtures),保证经 build_*_input 后能在图里流转。
 桩 Agent 的 invoke 签名与 run_agent_node 契约一致:
 ``invoke(input_obj, *, trace_id, span_id, node_id) -> AgentOutputBase``。
 """
+
 from __future__ import annotations
 
 import json
@@ -38,9 +39,7 @@ from backend.schemas import (
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_DEMO_PROJECT_FILE = (
-    _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
-)
+_DEMO_PROJECT_FILE = _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
 
 
 def _load_demo_project(*, products: list[str]) -> Project:
@@ -325,9 +324,7 @@ async def test_qa_cycle_produces_reporter_v2() -> None:
     products = ["Notion"]
     project = _load_demo_project(products=products)
     # round 1: block→reporter; round 2: pass
-    registry = _FakeRegistry(
-        _StubQA([_block_reporter_verdict(), _pass_verdict()])
-    )
+    registry = _FakeRegistry(_StubQA([_block_reporter_verdict(), _pass_verdict()]))
     app = build_native_graph(registry, project=project)
 
     final = await _run(app, project, products, "cycle")
@@ -463,9 +460,7 @@ async def test_extract_one_failsoft_when_collector_output_none() -> None:
     """
     project = _load_demo_project(products=["Notion"])
     nodes = make_nodes(_FakeRegistry(_StubQA([_pass_verdict()])), project=project)
-    out = await nodes["extract_one"](
-        {"product": "Notion", "collector_output": None, "round": 1}
-    )
+    out = await nodes["extract_one"]({"product": "Notion", "collector_output": None, "round": 1})
     assert out["outputs"] == {}
     assert len(out["history"]) == 1
     run = out["history"][0]
@@ -499,7 +494,7 @@ async def test_collect_one_passes_prompt_override_to_agent(
     captured: dict[str, Any] = {}
     real = nodes_mod.run_agent_node
 
-    async def _spy(registry, agent_name, inp, **kw):  # noqa: ANN001, ANN202
+    async def _spy(registry, agent_name, inp, **kw):
         captured["override"] = kw.get("user_prompt_override")
         return await real(registry, agent_name, inp, **kw)
 

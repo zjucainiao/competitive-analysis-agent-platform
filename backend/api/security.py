@@ -3,8 +3,11 @@
 设计：
 - 密码用 bcrypt（自带盐，慢哈希抗暴力）。
 - JWT(HS256) 里只放 ``sub``=user_id 与 ``exp``，不放任何敏感字段。
-- 密钥从 ``JWT_SECRET`` 读；缺省给一个**仅供本地开发**的弱默认值并告警，
-  生产部署必须在环境里显式设置（阶段③ compose 会注入）。
+- 密钥从 ``JWT_SECRET`` 读；缺失时按部署形态区别对待：
+  - memory（重启即丢的本地试用默认）→ 回退开发默认值并告警，保持低摩擦；
+  - postgres（持久化 = 生产形态，prod compose 强制注入 ``STORAGE_MODE=postgres``）
+    → 直接拒绝启动（``ensure_jwt_secret``），杜绝用仓库里公开的字符串伪造 token。
+  本地 postgres 验证（localdb 等）可显式设 ``JWT_ALLOW_INSECURE_DEV=1`` 豁免。
 
 get_current_user 依赖在 deps.py，依赖本模块的 decode_access_token。
 """
@@ -13,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
@@ -26,12 +29,46 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_TTL_HOURS = int(os.getenv("JWT_TTL_HOURS", "168"))
 
 
+_MISSING_SECRET_HINT = (
+    "JWT_SECRET 未配置：生产形态（postgres 持久化）拒绝使用仓库内置的开发密钥启动，"
+    "否则任何人都能用公开字符串伪造任意用户 token。"
+    "请在 .env.prod 里设置 JWT_SECRET（生成：openssl rand -hex 32）后重启；"
+    "纯本地调试确需跳过时，可显式设 JWT_ALLOW_INSECURE_DEV=1（自担风险）。"
+)
+
+
+def _dev_fallback_allowed(storage_mode: str) -> bool:
+    """JWT_SECRET 缺失时是否允许回退到开发默认值。
+
+    取舍：以 storage 形态为生产判据（prod compose 强制 ``STORAGE_MODE=postgres``，
+    仓库没有单独的 APP_ENV），memory 即本地试用、自动豁免；本地 postgres 验证
+    属于少数场景，用显式环境变量豁免，避免误伤真生产。
+    """
+    if storage_mode == "memory":
+        return True
+    return os.getenv("JWT_ALLOW_INSECURE_DEV") == "1"
+
+
+def ensure_jwt_secret(storage_mode: str) -> None:
+    """启动期闸门：生产形态缺 JWT_SECRET 直接抛错拒启（create_app 的 lifespan 调用）。
+
+    这是唯一强制点：生产形态过不了它 app 就起不来，签发/校验 token 的路由
+    自然不可达，所以 ``_secret`` 里无需再按 env 二次判断（那会跟测试显式传
+    的 mode 脱节、误伤本地 memory 用例）。
+    """
+    if os.getenv("JWT_SECRET"):
+        return
+    if not _dev_fallback_allowed(storage_mode):
+        raise RuntimeError(_MISSING_SECRET_HINT)
+    logger.warning("JWT_SECRET 未设置，使用不安全的开发默认值。生产部署必须设置 JWT_SECRET。")
+
+
 def _secret() -> str:
     secret = os.getenv("JWT_SECRET")
     if not secret:
-        logger.warning(
-            "JWT_SECRET 未设置，使用不安全的开发默认值。生产部署必须设置 JWT_SECRET。"
-        )
+        # 生产形态在启动闸门（ensure_jwt_secret）就已拒启；能走到这里的只有
+        # 开发/测试形态，回退开发默认值并持续告警，避免弱密钥被无感使用。
+        logger.warning("JWT_SECRET 未设置，使用不安全的开发默认值。生产部署必须设置 JWT_SECRET。")
         return _DEV_FALLBACK_SECRET
     return secret
 
@@ -91,7 +128,7 @@ class TokenError(Exception):
 
 def create_access_token(user_id: str) -> str:
     """签发 access token，sub=user_id。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": user_id,
         "iat": int(now.timestamp()),
@@ -115,12 +152,13 @@ def decode_access_token(token: str) -> str:
 
 
 __all__ = [
-    "hash_password",
-    "verify_password",
+    "ACCESS_TOKEN_TTL_HOURS",
+    "TokenError",
+    "allowed_emails",
     "create_access_token",
     "decode_access_token",
-    "TokenError",
-    "ACCESS_TOKEN_TTL_HOURS",
-    "allowed_emails",
+    "ensure_jwt_secret",
+    "hash_password",
     "is_email_allowed",
+    "verify_password",
 ]

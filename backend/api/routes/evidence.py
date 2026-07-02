@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -123,13 +122,9 @@ async def patch_evidence(
     manual_edits = metrics.manual_edits + 1
     total_paragraphs = _latest_report_total_paragraphs(outputs)
     edit_rate = (
-        min(manual_edits / total_paragraphs, 1.0)
-        if total_paragraphs > 0
-        else metrics.edit_rate
+        min(manual_edits / total_paragraphs, 1.0) if total_paragraphs > 0 else metrics.edit_rate
     )
-    new_metrics = metrics.model_copy(
-        update={"manual_edits": manual_edits, "edit_rate": edit_rate}
-    )
+    new_metrics = metrics.model_copy(update={"manual_edits": manual_edits, "edit_rate": edit_rate})
     await storage.state_store.save_project(project.model_copy(update={"metrics": new_metrics}))
 
     # ----- 自动联动重审 -----
@@ -164,35 +159,23 @@ async def patch_evidence(
 
         run_id = run_project.runs[-1].run_id if run_project.runs else None
         await storage.state_store.save_qa_verdict(project_id, verdict, run_id=run_id)
-        fb = _build_qa_feedback_by_node(
-            verdict, chosen="reporter", rework=[], qa_round=1
-        )
+        fb = _build_qa_feedback_by_node(verdict, chosen="reporter", rework=[], qa_round=1)
         triggered = False
         if not busy and fb:
 
             async def _rework_bg() -> None:
                 try:
-                    async for _ in orch.rework_native(
-                        run_project, qa_feedback_by_node=fb
-                    ):
+                    async for _ in orch.rework_native(run_project, qa_feedback_by_node=fb):
                         pass
-                    await storage.state_store.update_project_status(
-                        project_id, ProjectStatus.DONE
-                    )
-                except Exception:  # noqa: BLE001
-                    _log.exception(
-                        "evidence-auto-rework(native) failed project=%s", project_id
-                    )
+                    await storage.state_store.update_project_status(project_id, ProjectStatus.DONE)
+                except Exception:
+                    _log.exception("evidence-auto-rework(native) failed project=%s", project_id)
                     await storage.state_store.update_project_status(
                         project_id, ProjectStatus.FAILED
                     )
 
-            await storage.state_store.update_project_status(
-                project_id, ProjectStatus.RUNNING
-            )
-            task = asyncio.create_task(
-                _rework_bg(), name=f"evidence-rework-{project_id}-{ULID()}"
-            )
+            await storage.state_store.update_project_status(project_id, ProjectStatus.RUNNING)
+            task = asyncio.create_task(_rework_bg(), name=f"evidence-rework-{project_id}-{ULID()}")
             running_tasks[project_id] = task
             triggered = True
 
@@ -238,23 +221,13 @@ async def patch_evidence(
             try:
                 async for _ in orch.run(new_plan, run_project):
                     pass
-                await storage.state_store.update_project_status(
-                    project_id, ProjectStatus.DONE
-                )
-            except Exception:  # noqa: BLE001
-                _log.exception(
-                    "evidence-auto-rework run failed for project=%s", project_id
-                )
-                await storage.state_store.update_project_status(
-                    project_id, ProjectStatus.FAILED
-                )
+                await storage.state_store.update_project_status(project_id, ProjectStatus.DONE)
+            except Exception:
+                _log.exception("evidence-auto-rework run failed for project=%s", project_id)
+                await storage.state_store.update_project_status(project_id, ProjectStatus.FAILED)
 
-        await storage.state_store.update_project_status(
-            project_id, ProjectStatus.RUNNING
-        )
-        task = asyncio.create_task(
-            _resume_in_bg(), name=f"evidence-rework-{project_id}-{ULID()}"
-        )
+        await storage.state_store.update_project_status(project_id, ProjectStatus.RUNNING)
+        task = asyncio.create_task(_resume_in_bg(), name=f"evidence-rework-{project_id}-{ULID()}")
         running_tasks[project_id] = task
         triggered = True
 
@@ -277,9 +250,7 @@ async def patch_evidence(
 
 def _latest_report_total_paragraphs(outputs: dict) -> int:
     """最新 reporter draft 的段落总数（把 manual_edits 换算成 edit_rate 用）。"""
-    versioned = sorted(
-        (k for k in outputs if k.startswith("reporter_v")), reverse=True
-    )
+    versioned = sorted((k for k in outputs if k.startswith("reporter_v")), reverse=True)
     final_key = versioned[0] if versioned else "reporter"
     reporter_out = outputs.get(final_key)
     if not isinstance(reporter_out, ReporterOutput) or reporter_out.draft is None:
@@ -287,13 +258,9 @@ def _latest_report_total_paragraphs(outputs: dict) -> int:
     return sum(len(s.paragraphs) for s in reporter_out.draft.sections)
 
 
-def _find_paragraphs_citing(
-    outputs: dict, evidence_id: str
-) -> list[str]:
+def _find_paragraphs_citing(outputs: dict, evidence_id: str) -> list[str]:
     """从 outputs 里最新 reporter draft 找引用 evidence_id 的段落 id 列表。"""
-    versioned = sorted(
-        (k for k in outputs if k.startswith("reporter_v")), reverse=True
-    )
+    versioned = sorted((k for k in outputs if k.startswith("reporter_v")), reverse=True)
     final_key = versioned[0] if versioned else "reporter"
     reporter_out = outputs.get(final_key)
     if not isinstance(reporter_out, ReporterOutput) or reporter_out.draft is None:

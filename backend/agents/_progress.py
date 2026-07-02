@@ -12,10 +12,12 @@ Collector 在抓取过程中**逐条**产出来源时调 ``emit_collect_progress
 ``run_coroutine_threadsafe`` 调回主 loop）。未注入 emitter 时 ``emit_collect_progress``
 是 no-op，且任何异常都被吞掉——实时进度是纯观测，绝不影响采集主流程。
 """
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextvars import ContextVar, Token
-from typing import Any, Callable
+from typing import Any
 
 _emitter: ContextVar[Callable[[dict[str, Any]], None] | None] = ContextVar(
     "collect_progress_emitter", default=None
@@ -32,7 +34,7 @@ def set_collect_progress_emitter(
 def reset_collect_progress_emitter(token: Token) -> None:
     try:
         _emitter.reset(token)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -43,7 +45,7 @@ def emit_collect_progress(payload: dict[str, Any]) -> None:
         return
     try:
         fn(payload)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 

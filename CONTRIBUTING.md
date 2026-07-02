@@ -21,23 +21,26 @@ ruff check backend            # lint
 ruff format --check backend   # 代码风格
 mypy backend                  # 类型检查（尽量通过；遗留告警可在 PR 说明）
 
-# 不发 LLM 请求的单元 + 集成测试（秒过，必跑）
-pytest backend/orchestrator/tests backend/api/tests \
-       backend/storage/tests/test_memory.py backend/storage/tests/test_serde.py -q
+# 单元 + 集成测试（秒过，必跑）。默认反选 e2e（pyproject 里 addopts = '-m "not e2e"'），
+# 不发真实网络/LLM 请求；缺 POSTGRES_DSN / REDIS_URL 时 PG/Redis 用例自动 skip
+pytest -q
 ```
 
 前端：
 
 ```bash
 cd frontend
+npx tsc --noEmit              # 类型检查
 npm run lint
 npm run build                 # 确保能产出
 ```
 
-涉及真实链路的改动，建议另跑（需 API key，约 5–10 分钟）：
+push 到 `main` 与所有 PR 会自动跑同样的检查（`.github/workflows/ci.yml`）。
+
+涉及真实链路的改动，建议另跑（需 API key，约 5–10 分钟；e2e 测试须显式带 `-m e2e`）：
 
 ```bash
-RUN_REAL_LLM_TESTS=1 pytest backend/api/tests/test_real_full_chain.py -v -s
+RUN_REAL_LLM_TESTS=1 pytest backend/api/tests/test_real_full_chain.py -m e2e -v -s
 ```
 
 ## 代码与文档约定

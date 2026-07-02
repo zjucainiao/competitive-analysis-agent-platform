@@ -22,11 +22,9 @@ from backend.schemas import (
     DAGEdge,
     DAGNode,
     DAGPlan,
-    NodeStatus,
     NodeType,
     Project,
     ProjectStatus,
-    QADimension,
     QAStatus,
     QAVerdict,
 )
@@ -131,11 +129,19 @@ def make_qa_verdict():
 
 # ----- e2e markers -----
 
+# 在 conftest 加载期（pytest 启动即加载初始 conftest，早于任何测试模块 import）
+# 快照 PG/Redis 环境变量：api 测试模块 import backend.api 会触发其模块级
+# load_dotenv()，把开发者 .env 的 POSTGRES_DSN / REDIS_URL 侧效应注入
+# os.environ；若等到 modifyitems 时才读，会误判「环境已配好」而不 skip。
+# 只认 shell 显式导出的变量，与单独跑 backend/storage/tests 时的行为一致。
+_PG_DSN_AT_LOAD = os.getenv("POSTGRES_DSN")
+_REDIS_URL_AT_LOAD = os.getenv("REDIS_URL")
+
 
 def pytest_collection_modifyitems(config, items):
     """e2e tests 在缺 POSTGRES_DSN / REDIS_URL 时自动 skip。"""
-    skip_pg = not os.getenv("POSTGRES_DSN")
-    skip_redis = not os.getenv("REDIS_URL")
+    skip_pg = not _PG_DSN_AT_LOAD
+    skip_redis = not _REDIS_URL_AT_LOAD
     pg_marker = pytest.mark.skip(reason="POSTGRES_DSN not set; skipping PG e2e tests")
     redis_marker = pytest.mark.skip(reason="REDIS_URL not set; skipping Redis e2e tests")
     for item in items:

@@ -4,6 +4,7 @@ QA 的 identity issue 带 mismatch_source_urls → decide_qa_route 装配
 collect.{product} 反馈 → build_collector_input 解出 exclude_source_urls →
 collector 重采时跳过这些跑题页面，使返工真正收敛（不再抓回同一坏源）。
 """
+
 from __future__ import annotations
 
 from backend.agents.qa.routing import build_routing
@@ -58,9 +59,7 @@ def test_identity_route_threads_exclude_urls_into_collector_input() -> None:
     bad_url = "https://thirdparty.com/dingtalk-vs-lark"
     verdict = _mismatch_verdict(product, bad_url)
 
-    goto, update = decide_qa_route(
-        verdict, qa_round=0, max_rounds=3, products=[product]
-    )
+    goto, update = decide_qa_route(verdict, qa_round=0, max_rounds=3, products=[product])
     # 路由回 collector 入口，且按 required_inputs.product 收窄到该产品
     assert goto == "collect_dispatch"
     assert update["rework_target"] == "collector"

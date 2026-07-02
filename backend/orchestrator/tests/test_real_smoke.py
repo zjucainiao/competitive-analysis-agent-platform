@@ -1,15 +1,17 @@
 """真实 LLM smoke 测试 —— 验证 ``AgentRegistry.from_env()`` 装配
 出的 Agent 可以发起并完成一次真实 LLM 调用。
 
-默认 skip：必须显式设置 ``RUN_REAL_LLM_TESTS=1`` 才跑（避免 CI 烧 token）。
-跑之前 ``DEEPSEEK_API_KEY`` / ``OPENAI_API_KEY`` 至少有一个非空，否则自动 skip。
+显式 opt-in（双重门控）::
+
+    RUN_REAL_LLM_TESTS=1 pytest backend/orchestrator/tests/test_real_smoke.py -m e2e -v -s
+
+必须 ``RUN_REAL_LLM_TESTS=1``（避免 CI 烧 token）且 ``DEEPSEEK_API_KEY`` /
+``OPENAI_API_KEY`` 至少有一个非空，否则 skip；默认 ``pytest`` 反选 e2e。
 """
 
 from __future__ import annotations
 
-import json
 import os
-from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
@@ -18,17 +20,16 @@ from backend.agents.analyst.fixtures import load_demo_input
 from backend.orchestrator import AgentRegistry
 from backend.schemas import AgentStatus
 
-load_dotenv()
-
-
 # ---------- gating ----------
+
+# 显式开启真实 e2e 时才读 .env 补 LLM key；模块级无条件 load_dotenv 会在收集
+# 阶段泄漏开发者 .env 的 POSTGRES_DSN / REDIS_URL，破坏 storage 测试的自动 skip
+if os.getenv("RUN_REAL_LLM_TESTS") == "1":
+    load_dotenv(override=False)
 
 
 def _has_any_llm_key() -> bool:
-    return any(
-        os.getenv(k)
-        for k in ("DOUBAO_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY")
-    )
+    return any(os.getenv(k) for k in ("DOUBAO_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY"))
 
 
 def _real_llm_disabled() -> bool:
@@ -37,12 +38,15 @@ def _real_llm_disabled() -> bool:
     return not _has_any_llm_key()
 
 
-pytestmark = pytest.mark.skipif(
-    _real_llm_disabled(),
-    reason=(
-        "set RUN_REAL_LLM_TESTS=1 + DOUBAO_API_KEY (or DEEPSEEK/OPENAI) to run real LLM smoke"
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.skipif(
+        _real_llm_disabled(),
+        reason=(
+            "set RUN_REAL_LLM_TESTS=1 + DOUBAO_API_KEY (or DEEPSEEK/OPENAI) to run real LLM smoke"
+        ),
     ),
-)
+]
 
 
 # ---------- smoke ----------
@@ -60,9 +64,7 @@ def test_real_analyst_invocation_succeeds() -> None:
     out = analyst.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id)
 
     # 容忍 PARTIAL/NEEDS_REWORK，但绝不能是 FAILED
-    assert out.status != AgentStatus.FAILED, (
-        f"analyst FAILED with errors: {out.errors}"
-    )
+    assert out.status != AgentStatus.FAILED, f"analyst FAILED with errors: {out.errors}"
     # 结果必须有维度且每个维度都有 LLM 生成的 claim
     assert out.result.dimensions, "real analyst returned empty dimensions"
     total_claims = sum(len(d.claims) for d in out.result.dimensions.values())

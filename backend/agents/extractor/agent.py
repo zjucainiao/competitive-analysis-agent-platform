@@ -216,9 +216,7 @@ def _safe_integration(value: Any) -> Integration | None:
         return None
 
 
-def _safe_feedback_theme(
-    value: Any, *, default_sentiment: str
-) -> FeedbackTheme | None:
+def _safe_feedback_theme(value: Any, *, default_sentiment: str) -> FeedbackTheme | None:
     if isinstance(value, str):
         return FeedbackTheme(theme=value, sentiment=default_sentiment)  # type: ignore[arg-type]
     if not isinstance(value, dict) or not value.get("theme"):
@@ -334,9 +332,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
 
     # collab_saas 的"无证据"占位 MaturityScore：QA schema_completeness 把 None 视为缺失，
     # 改成显式 has_capability=False + maturity_level=none 才能算"已填"。
-    COLLAB_SAAS_NO_EVIDENCE_NOTE: ClassVar[str] = (
-        "无明确证据；本次采集来源未涵盖此能力"
-    )
+    COLLAB_SAAS_NO_EVIDENCE_NOTE: ClassVar[str] = "无明确证据；本次采集来源未涵盖此能力"
 
     def __init__(
         self,
@@ -350,9 +346,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         super().__init__(llm=llm, tools=tools, tracer=tracer, mock=mock)
         self.chunker = TextChunker()
         self.linker = EvidenceLinker()
-        self.max_claims_per_source = (
-            max_claims_per_source or self.DEFAULT_MAX_CLAIMS_PER_SOURCE
-        )
+        self.max_claims_per_source = max_claims_per_source or self.DEFAULT_MAX_CLAIMS_PER_SOURCE
 
     # ----- Mock -----
 
@@ -396,9 +390,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         confidence = max(profile.field_confidence.values(), default=0.9)
         # mock profile 已经预填了 field_confidence；整体 confidence 取均值更稳
         if profile.field_confidence:
-            confidence = sum(profile.field_confidence.values()) / len(
-                profile.field_confidence
-            )
+            confidence = sum(profile.field_confidence.values()) / len(profile.field_confidence)
 
         status = AgentStatus.SUCCESS
         if confidence < self.SELF_CRITIQUE_THRESHOLD:
@@ -457,13 +449,11 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
             source: RawSourceDoc,
         ) -> tuple[RawSourceDoc, _SourceExtraction | None, int, int, AgentError | None]:
             try:
-                extraction, t_in, t_out = self._extract_from_source(
-                    source=source, inp=inp
-                )
+                extraction, t_in, t_out = self._extract_from_source(source=source, inp=inp)
                 return source, extraction, t_in, t_out, None
             except AgentRunError:
                 raise
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return (
                     source,
                     None,
@@ -487,12 +477,10 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
             # 每 source copy_context()：把 LLM trace contextvar 带进 worker 线程，
             # 否则并发 LLM call 丢失 node 归属（同 collector / analyst）。
             contexts = [contextvars.copy_context() for _ in sources]
-            with ThreadPoolExecutor(
-                max_workers=min(len(sources), self.MAX_SOURCE_WORKERS)
-            ) as pool:
+            with ThreadPoolExecutor(max_workers=min(len(sources), self.MAX_SOURCE_WORKERS)) as pool:
                 futures = [
                     pool.submit(ctx.run, _extract_one, s)
-                    for s, ctx in zip(sources, contexts)
+                    for s, ctx in zip(sources, contexts, strict=True)
                 ]
                 # 按提交顺序取结果 → all_claims 顺序与串行一致（确定性）
                 source_results = [f.result() for f in futures]
@@ -523,7 +511,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
                     placeholder = inp.raw_sources[0]
                     for cc in cons_claims:
                         all_claims.append((cc, placeholder))
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(
                     AgentError(
                         code="LLM_SCHEMA_INVALID",
@@ -562,13 +550,12 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
                     profile.industry_extension = ext
                     evidences.extend(ext_evs)
                     unmatched.extend(ext_unmatched)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(
                     AgentError(
                         code="LLM_SCHEMA_INVALID",
                         message=(
-                            f"collab_saas extension extraction failed: "
-                            f"{type(e).__name__}: {e}"
+                            f"collab_saas extension extraction failed: {type(e).__name__}: {e}"
                         ),
                         severity="warn",
                         retriable=True,
@@ -593,9 +580,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         # 各自的 dict，前面 _bind_and_assemble 已经写入了。
 
         # 4. 必填字段缺失 / unmatched 比例 → 错误码
-        missing_required = [
-            p for p in self.REQUIRED_SCALAR_PATHS if p not in field_status
-        ]
+        missing_required = [p for p in self.REQUIRED_SCALAR_PATHS if p not in field_status]
         for p in missing_required:
             errors.append(
                 AgentError(
@@ -690,10 +675,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         if out.schema_version != SCHEMA_VERSION:
             raise AgentRunError(
                 code="OUTPUT_TYPE_MISMATCH",
-                message=(
-                    f"output schema_version={out.schema_version} != "
-                    f"current {SCHEMA_VERSION}"
-                ),
+                message=(f"output schema_version={out.schema_version} != current {SCHEMA_VERSION}"),
                 retriable=False,
             )
         # 强约束 3：每条 evidence 都属于输入的 raw_sources 之一
@@ -845,9 +827,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         *,
         inp: ExtractorInput,
     ) -> tuple[CollaborationSaasExtension | None, list[Evidence], list[str], int, int]:
-        prompt = (PROMPT_DIR / "extract_industry_collab_saas.md").read_text(
-            encoding="utf-8"
-        )
+        prompt = (PROMPT_DIR / "extract_industry_collab_saas.md").read_text(encoding="utf-8")
         system, user_template = split_prompt(prompt)
         # 拼一组带 source_id 的 chunk（取每个 source 头部）
         bundle: list[dict[str, Any]] = []
@@ -876,9 +856,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
             temperature=0.0,
             max_tokens=1500,
         )
-        parsed: _CollabSaasMaturityClaims = coerce_pydantic(
-            resp, _CollabSaasMaturityClaims
-        )
+        parsed: _CollabSaasMaturityClaims = coerce_pydantic(resp, _CollabSaasMaturityClaims)
         t_in = getattr(resp, "tokens_input", 0) or 0
         t_out = getattr(resp, "tokens_output", 0) or 0
 
@@ -956,9 +934,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         unmatched_quotes: list[str] = []
 
         # field_path → [(claim, source, link)]
-        bucket: dict[str, list[tuple[_RawClaim, RawSourceDoc, LinkResult]]] = (
-            defaultdict(list)
-        )
+        bucket: dict[str, list[tuple[_RawClaim, RawSourceDoc, LinkResult]]] = defaultdict(list)
         # 用 content_hash 去重 evidence，命中同一片文本只入一次
         evidence_by_hash: dict[str, Evidence] = {}
 
@@ -989,18 +965,10 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
                 evidences.append(ev)
 
         # 装配各 section
-        basic_info, bi_conf, bi_status, bi_refs = self._assemble_basic_info(
-            inp, bucket, evidences
-        )
-        features, ft_conf, ft_status, ft_refs = self._assemble_features(
-            bucket, evidences
-        )
-        pricing, pr_conf, pr_status, pr_refs = self._assemble_pricing(
-            bucket, evidences
-        )
-        user_feedback, uf_conf, uf_status, uf_refs = self._assemble_user_feedback(
-            bucket, evidences
-        )
+        basic_info, bi_conf, bi_status, bi_refs = self._assemble_basic_info(inp, bucket, evidences)
+        features, ft_conf, ft_status, ft_refs = self._assemble_features(bucket, evidences)
+        pricing, pr_conf, pr_status, pr_refs = self._assemble_pricing(bucket, evidences)
+        user_feedback, uf_conf, uf_status, uf_refs = self._assemble_user_feedback(bucket, evidences)
 
         # 套回 evidence_refs（落在子模型内）
         basic_info = basic_info.model_copy(update={"evidence_refs": bi_refs})
@@ -1059,18 +1027,14 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
             if not entries:
                 return None
             best = max(entries, key=lambda x: (x[0].confidence, x[2].confidence))
-            self._record_field(
-                path, best, conf, status, refs, ev_by_quote
-            )
+            self._record_field(path, best, conf, status, refs, ev_by_quote)
             # 冲突检测：不同 value 出现 → conflicting
             values = {self._stringify(c.value) for c, _, _ in entries if c.value is not None}
             if len(values) > 1:
                 status[path] = FieldStatus.CONFLICTING
             return _trim(best[0].value)
 
-        category = _scalar("basic_info.category") or inp.industry_schema_id.replace(
-            "_", " "
-        )
+        category = _scalar("basic_info.category") or inp.industry_schema_id.replace("_", " ")
         positioning = _scalar("basic_info.positioning")
         company = _scalar("basic_info.company")
         founded_year = _coerce_optional_int(_scalar("basic_info.founded_year"))
@@ -1134,9 +1098,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         self,
         bucket: dict[str, list[tuple[_RawClaim, RawSourceDoc, LinkResult]]],
         evidences: list[Evidence],
-    ) -> tuple[
-        FeatureProfile, dict[str, float], dict[str, FieldStatus], dict[str, list[str]]
-    ]:
+    ) -> tuple[FeatureProfile, dict[str, float], dict[str, FieldStatus], dict[str, list[str]]]:
         ev_by_quote = self._evidence_lookup_table(evidences)
         conf: dict[str, float] = {}
         status: dict[str, FieldStatus] = {}
@@ -1155,9 +1117,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
                 if feat.name in by_name:
                     # 合并 tags
                     merged_tags = list(dict.fromkeys(by_name[feat.name].tags + feat.tags))
-                    by_name[feat.name] = by_name[feat.name].model_copy(
-                        update={"tags": merged_tags}
-                    )
+                    by_name[feat.name] = by_name[feat.name].model_copy(update={"tags": merged_tags})
                 else:
                     by_name[feat.name] = feat
                 sum_conf += c.confidence
@@ -1173,9 +1133,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
             return list(by_name.values())
 
         core = _collect_features("features.core_features[]", "core_features")
-        diff = _collect_features(
-            "features.differentiated_features[]", "differentiated_features"
-        )
+        diff = _collect_features("features.differentiated_features[]", "differentiated_features")
         integrations_entries = bucket.get("features.integration_capabilities[]", [])
         integrations: list[Integration] = []
         any_int = False
@@ -1215,9 +1173,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         self,
         bucket: dict[str, list[tuple[_RawClaim, RawSourceDoc, LinkResult]]],
         evidences: list[Evidence],
-    ) -> tuple[
-        PricingProfile, dict[str, float], dict[str, FieldStatus], dict[str, list[str]]
-    ]:
+    ) -> tuple[PricingProfile, dict[str, float], dict[str, FieldStatus], dict[str, list[str]]]:
         ev_by_quote = self._evidence_lookup_table(evidences)
         conf: dict[str, float] = {}
         status: dict[str, FieldStatus] = {}
@@ -1250,8 +1206,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
                 if (
                     existing.price_per_seat_monthly_usd is not None
                     and plan.price_per_seat_monthly_usd is not None
-                    and existing.price_per_seat_monthly_usd
-                    != plan.price_per_seat_monthly_usd
+                    and existing.price_per_seat_monthly_usd != plan.price_per_seat_monthly_usd
                 ):
                     status["pricing.plans"] = FieldStatus.CONFLICTING
                     if c.confidence > 0.7:
@@ -1262,8 +1217,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         if plan_entries:
             conf.setdefault(
                 "pricing.plans",
-                sum(c.confidence for c, _, _ in plan_entries)
-                / max(len(plan_entries), 1),
+                sum(c.confidence for c, _, _ in plan_entries) / max(len(plan_entries), 1),
             )
             status.setdefault(
                 "pricing.plans",
@@ -1293,9 +1247,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
 
         billing_cycle = self._collect_str_list(bucket, "pricing.billing_cycle[]")
         currencies = self._collect_str_list(bucket, "pricing.currency_supported[]")
-        enterprise_contact_entries = bucket.get(
-            "pricing.enterprise_contact_required", []
-        )
+        enterprise_contact_entries = bucket.get("pricing.enterprise_contact_required", [])
         best_ec = self._resolve_scalar(
             "pricing.enterprise_contact_required",
             enterprise_contact_entries,
@@ -1354,9 +1306,9 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
                     theme = theme.model_copy(update={"evidence_ids": ev_ids})
                 out.append(theme)
             if entries:
-                conf[path.replace("[]", "")] = sum(
-                    c.confidence for c, _, _ in entries
-                ) / max(len(entries), 1)
+                conf[path.replace("[]", "")] = sum(c.confidence for c, _, _ in entries) / max(
+                    len(entries), 1
+                )
                 status[path.replace("[]", "")] = (
                     FieldStatus.VERIFIED if any_matched else FieldStatus.UNVERIFIED
                 )
@@ -1384,20 +1336,12 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
             ev_by_quote,
         )
         review_count = (
-            _coerce_optional_int(best_review_count.value)
-            if best_review_count is not None
-            else None
+            _coerce_optional_int(best_review_count.value) if best_review_count is not None else None
         )
 
-        review_sources = self._collect_str_list(
-            bucket, "user_feedback.review_sources[]"
-        )
-        positive = _theme_section(
-            "user_feedback.positive_themes[]", "positive", "positive_themes"
-        )
-        negative = _theme_section(
-            "user_feedback.negative_themes[]", "negative", "negative_themes"
-        )
+        review_sources = self._collect_str_list(bucket, "user_feedback.review_sources[]")
+        positive = _theme_section("user_feedback.positive_themes[]", "positive", "positive_themes")
+        negative = _theme_section("user_feedback.negative_themes[]", "negative", "negative_themes")
 
         return (
             UserFeedbackProfile(
@@ -1441,9 +1385,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
     ) -> None:
         claim, _src, link = best
         conf[path] = float(claim.confidence)
-        status[path] = (
-            FieldStatus.VERIFIED if link.matched else FieldStatus.UNVERIFIED
-        )
+        status[path] = FieldStatus.VERIFIED if link.matched else FieldStatus.UNVERIFIED
         if link.matched:
             ev_ids = self._ev_ids_for(claim.source_quote, ev_by_quote)
             ref_key = path.split(".")[-1]
@@ -1470,9 +1412,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
             return None
         best = max(entries, key=lambda x: (x[0].confidence, x[2].confidence))
         self._record_field(path, best, conf, status, refs, ev_by_quote)
-        values = {
-            self._stringify(c.value) for c, _, _ in entries if c.value is not None
-        }
+        values = {self._stringify(c.value) for c, _, _ in entries if c.value is not None}
         if len(values) > 1:
             status[path] = FieldStatus.CONFLICTING
         return best[0]
@@ -1588,18 +1528,12 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         if not field_status:
             return 0.0
         total = len(field_status)
-        unverified = sum(
-            1 for s in field_status.values() if s is FieldStatus.UNVERIFIED
-        )
-        conflicting = sum(
-            1 for s in field_status.values() if s is FieldStatus.CONFLICTING
-        )
+        unverified = sum(1 for s in field_status.values() if s is FieldStatus.UNVERIFIED)
+        conflicting = sum(1 for s in field_status.values() if s is FieldStatus.CONFLICTING)
         score = self.BASE_CONFIDENCE
         unverified_ratio = unverified / total
         if unverified_ratio > self.UNVERIFIED_FIELD_THRESHOLD:
-            score -= self.PENALTY_UNVERIFIED * (
-                unverified_ratio / self.UNVERIFIED_FIELD_THRESHOLD
-            )
+            score -= self.PENALTY_UNVERIFIED * (unverified_ratio / self.UNVERIFIED_FIELD_THRESHOLD)
         if conflicting:
             score -= self.PENALTY_CONFLICTING * min(1.0, conflicting / max(total, 1) * 5)
         if missing_required:
@@ -1629,9 +1563,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
                 f"未匹配 evidence 的字段({len(unverified)}): {', '.join(unverified[:5])}"
                 + (" ..." if len(unverified) > 5 else "")
             )
-        conflicting = [
-            k for k, s in field_status.items() if s is FieldStatus.CONFLICTING
-        ]
+        conflicting = [k for k, s in field_status.items() if s is FieldStatus.CONFLICTING]
         if conflicting:
             lines.append(f"多源冲突: {', '.join(conflicting)}")
         if unmatched:
@@ -1640,9 +1572,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
         if warn_codes:
             lines.append(f"过程告警: {', '.join(warn_codes)}")
         if not lines:
-            return (
-                f"抽取正常完成，共记录 {len(field_status)} 个字段，全部有 evidence 支撑。"
-            )
+            return f"抽取正常完成，共记录 {len(field_status)} 个字段，全部有 evidence 支撑。"
         return " | ".join(lines)
 
 

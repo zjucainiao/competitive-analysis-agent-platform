@@ -70,7 +70,7 @@ vim .env.prod                 # 按下面清单填
 | `CORS_ORIGINS` | `https://yourdomain.com` |
 | `DEEPSEEK_API_KEY` | DeepSeek key |
 | `TAVILY_API_KEY` | Tavily key（或改用 `SERPER_API_KEY`） |
-| `JWT_SECRET` | `openssl rand -hex 32` 生成的强随机串 |
+| `JWT_SECRET` | `openssl rand -hex 32` 生成的强随机串（漏配后端会直接拒绝启动） |
 | `POSTGRES_PASSWORD` | 强密码 |
 
 > `STORAGE_MODE` / `POSTGRES_DSN` / `REDIS_URL` **不要**在 `.env.prod` 里设——

@@ -10,9 +10,9 @@ Storage 层不能 import langgraph（编排器选型不应该污染存储抽象�
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, TypedDict
-
 
 # ---------- TypedDicts ----------
 
@@ -64,8 +64,6 @@ class Checkpoint(TypedDict, total=False):
 
 # ---------- CheckpointTuple ----------
 # langgraph 的 CheckpointTuple 是 NamedTuple；我们用 dataclass 等价表达。
-
-from dataclasses import dataclass, field
 
 
 @dataclass

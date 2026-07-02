@@ -2,7 +2,8 @@
 
 负责编排层关切：resolve agent（reporter/qa 运行时注入 evidence）、重试/退避/
 超时、trace contextvar、节点级 prompt override。**不复制 agent 内部自检**——
-agent.invoke 自己跑 self-critique/_post_validate，这里只看 FAILED/超时决定重试。
+agent.invoke 自己跑 self-critique/_post_validate，这里只看 FAILED 决定重试；
+超时不重试（同步 invoke 无协作式取消，重试会与僵尸线程并发烧配额），直接失败。
 SUCCESS / PARTIAL / NEEDS_REWORK 都是"agent 跑完了，输出可用"，直接透传。
 """
 
@@ -10,8 +11,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from backend.orchestrator.inputs import new_span_id
 from backend.schemas import AgentError, AgentOutputBase, AgentStatus, Evidence
@@ -23,7 +24,7 @@ _BACKOFF_MULT = 4
 class AgentRunResult:
     """run_agent_node 的返回结构。
 
-    status   — 最终 AgentStatus（FAILED 表示重试耗尽或不可重试错误）。
+    status   — 最终 AgentStatus（FAILED 表示重试耗尽、超时或不可重试错误）。
     output   — 成功时的 AgentOutputBase；FAILED 时为 None。
     error    — 失败时的 AgentError；成功时为 None。
     attempts — 实际尝试次数（含最终失败那次）。
@@ -32,8 +33,8 @@ class AgentRunResult:
     """
 
     status: AgentStatus
-    output: Optional[AgentOutputBase]
-    error: Optional[AgentError]
+    output: AgentOutputBase | None
+    error: AgentError | None
     attempts: int
     span_id: str
     started_at: datetime
@@ -41,7 +42,7 @@ class AgentRunResult:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _collect_evidences(outputs: dict[str, AgentOutputBase]) -> dict[str, Evidence]:
@@ -73,9 +74,7 @@ def _resolve_agent(registry, agent_name: str, outputs: dict[str, AgentOutputBase
         from backend.agents.reporter.tools import StaticEvidenceProvider
 
         ev_db = _collect_evidences(outputs)
-        return registry.make_reporter(
-            evidence_provider=StaticEvidenceProvider(ev_db)
-        )
+        return registry.make_reporter(evidence_provider=StaticEvidenceProvider(ev_db))
     if agent_name == "qa":
         ev_db = _collect_evidences(outputs)
         return registry.make_qa(evidence_db=ev_db)
@@ -158,17 +157,30 @@ async def run_agent_node(
                     ),
                     timeout=timeout_ms / 1000.0,
                 )
-            except asyncio.TimeoutError:
-                last_error = AgentError(
-                    code="LLM_TIMEOUT",
-                    message=(
-                        f"node {node_id} attempt {attempt + 1} timed out "
-                        f"after {timeout_ms}ms"
+            except TimeoutError:
+                # 超时不重试：asyncio.wait_for 超时只取消这里的 await，
+                # to_thread 里的同步 agent.invoke 没有协作式取消、仍会在后台
+                # 线程跑完（僵尸线程）。此时若重试，会与僵尸线程并发执行同一
+                # agent——重复烧 LLM 配额、trace 交叉、线程池被占满。直接判
+                # 节点失败（fail-soft 链路会接住），最多只留 1 份僵尸线程。
+                return AgentRunResult(
+                    status=AgentStatus.FAILED,
+                    output=None,
+                    error=AgentError(
+                        code="LLM_TIMEOUT",
+                        message=(
+                            f"node {node_id} timed out after {timeout_ms}ms "
+                            f"(attempt {attempt + 1}; timeout is not retried)"
+                        ),
+                        severity="error",
+                        retriable=False,
                     ),
-                    severity="error",
-                    retriable=True,
+                    attempts=attempt + 1,
+                    span_id=span_id,
+                    started_at=started,
+                    ended_at=_now(),
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 last_error = AgentError(
                     code="UNEXPECTED",
                     message=f"{type(exc).__name__}: {exc}",
@@ -227,4 +239,4 @@ async def run_agent_node(
     )
 
 
-__all__ = ["run_agent_node", "AgentRunResult"]
+__all__ = ["AgentRunResult", "run_agent_node"]

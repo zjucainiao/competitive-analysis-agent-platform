@@ -20,6 +20,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -44,7 +47,6 @@ from backend.schemas import (
     ReportParagraph,
     ReportSection,
 )
-from datetime import UTC, datetime
 
 
 def _make_evidence(eid: str, content: str) -> Evidence:
@@ -314,11 +316,7 @@ def test_mock_investor_v1_handles_missing_dimension() -> None:
     assert "sec_overview" in section_ids
     assert "sec_source" in section_ids
     # 省略后序号连续重排，无跳号
-    nums = [
-        int(s.title.split(".", 1)[0])
-        for s in out.draft.sections
-        if s.title[:1].isdigit()
-    ]
+    nums = [int(s.title.split(".", 1)[0]) for s in out.draft.sections if s.title[:1].isdigit()]
     assert nums == list(range(1, len(nums) + 1))
 
 
@@ -756,9 +754,7 @@ def test_real_mode_with_hallucinating_llm_rejects_and_falls_back() -> None:
     # 启发式产出后通过 _post_validate
     assert out.status in (AgentStatus.SUCCESS, AgentStatus.PARTIAL)
     sec = next(s for s in out.draft.sections if s.section_id == "sec_features")
-    assert all(
-        all(e != "ev_hallucinated_xyz" for e in p.evidence_ids) for p in sec.paragraphs
-    )
+    assert all(all(e != "ev_hallucinated_xyz" for e in p.evidence_ids) for p in sec.paragraphs)
     # 应该记录 LLM citation fallback
     assert any(e.code in {"MISSING_CITATION", "LLM_SCHEMA_INVALID"} for e in out.errors)
 

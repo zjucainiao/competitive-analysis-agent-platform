@@ -6,10 +6,13 @@ asyncio_mode = "auto" (pyproject.toml)，@pytest.mark.asyncio 保留以明确意
 
 from __future__ import annotations
 
+import asyncio
 import time
+from typing import ClassVar
 
 import pytest
-from backend.orchestrator.run_agent import run_agent_node, AgentRunResult
+
+from backend.orchestrator.run_agent import run_agent_node
 from backend.schemas import AgentError, AgentStatus
 
 
@@ -30,7 +33,7 @@ class _FakeAgent:
         class _Out:
             status = AgentStatus.SUCCESS
             self_critique = None
-            errors = []
+            errors: ClassVar[list] = []
 
         return _Out()
 
@@ -47,8 +50,15 @@ class _Reg:
 async def test_retry_then_success():
     agent = _FakeAgent(fail_times=1)
     res = await run_agent_node(
-        _Reg(agent), "collector", object(), outputs={}, trace_id="t",
-        node_id="collect.x", max_retries=2, timeout_ms=2000, backoff_base=0.0,
+        _Reg(agent),
+        "collector",
+        object(),
+        outputs={},
+        trace_id="t",
+        node_id="collect.x",
+        max_retries=2,
+        timeout_ms=2000,
+        backoff_base=0.0,
     )
     assert res.status == AgentStatus.SUCCESS and agent.calls == 2
 
@@ -57,8 +67,15 @@ async def test_retry_then_success():
 async def test_all_retries_fail_returns_failed():
     agent = _FakeAgent(fail_times=5)
     res = await run_agent_node(
-        _Reg(agent), "collector", object(), outputs={}, trace_id="t",
-        node_id="collect.x", max_retries=1, timeout_ms=2000, backoff_base=0.0,
+        _Reg(agent),
+        "collector",
+        object(),
+        outputs={},
+        trace_id="t",
+        node_id="collect.x",
+        max_retries=1,
+        timeout_ms=2000,
+        backoff_base=0.0,
     )
     assert res.status == AgentStatus.FAILED and res.error is not None
 
@@ -68,41 +85,66 @@ async def test_attempts_count_on_failure():
     """max_retries=1 → total attempts must be exactly 2 (no off-by-one)."""
     agent = _FakeAgent(fail_times=5)  # always fails
     res = await run_agent_node(
-        _Reg(agent), "collector", object(), outputs={}, trace_id="t",
-        node_id="collect.x", max_retries=1, timeout_ms=2000, backoff_base=0.0,
+        _Reg(agent),
+        "collector",
+        object(),
+        outputs={},
+        trace_id="t",
+        node_id="collect.x",
+        max_retries=1,
+        timeout_ms=2000,
+        backoff_base=0.0,
     )
     assert res.status == AgentStatus.FAILED
     assert res.attempts == 2  # max_retries + 1
 
 
 @pytest.mark.asyncio
-async def test_timeout_then_success():
-    """First invoke blocks 0.3 s, tripping the 50 ms timeout; retry succeeds."""
+async def test_timeout_fails_without_retry():
+    """超时必须立即判失败、不发起第二次 invoke。
 
-    class _TimeoutThenSuccessAgent:
+    asyncio.wait_for 超时只取消 await，to_thread 里的同步 invoke 仍在后台
+    线程跑完（僵尸线程）；若重试会与它并发执行同一 agent。这里用调用计数
+    验证：超时后（含等僵尸线程跑完）invoke 只被调过 1 次。
+    """
+
+    class _SlowAgent:
         def __init__(self):
             self.calls = 0
 
         def invoke(self, inp, *, trace_id, span_id, node_id):
             self.calls += 1
-            if self.calls == 1:
-                # Block long enough to reliably trip asyncio.wait_for(timeout=0.05)
-                time.sleep(0.3)
+            # Block long enough to reliably trip asyncio.wait_for(timeout=0.05)
+            time.sleep(0.3)
 
             class _Out:
                 status = AgentStatus.SUCCESS
                 self_critique = None
-                errors = []
+                errors: ClassVar[list] = []
 
             return _Out()
 
-    agent = _TimeoutThenSuccessAgent()
+    agent = _SlowAgent()
     res = await run_agent_node(
-        _Reg(agent), "collector", object(), outputs={}, trace_id="t",
-        node_id="collect.x", max_retries=2, timeout_ms=50, backoff_base=0.0,
+        _Reg(agent),
+        "collector",
+        object(),
+        outputs={},
+        trace_id="t",
+        node_id="collect.x",
+        max_retries=2,
+        timeout_ms=50,
+        backoff_base=0.0,
     )
-    assert res.status == AgentStatus.SUCCESS
-    assert agent.calls == 2  # first timed out, second succeeded
+    assert res.status == AgentStatus.FAILED
+    assert res.attempts == 1
+    assert res.error is not None
+    assert res.error.code == "LLM_TIMEOUT"
+    assert "timed out" in res.error.message
+    assert res.error.retriable is False
+    # 等僵尸线程跑完再断言：确认之后也没有第二次 invoke 被调度
+    await asyncio.sleep(0.4)
+    assert agent.calls == 1
 
 
 @pytest.mark.asyncio
@@ -118,7 +160,7 @@ async def test_non_retriable_failed_returns_immediately():
 
             class _Out:
                 status = AgentStatus.FAILED
-                errors = [
+                errors: ClassVar[list] = [
                     AgentError(
                         code="INPUT_INVALID",
                         message="required field missing",
@@ -131,8 +173,15 @@ async def test_non_retriable_failed_returns_immediately():
 
     agent = _NonRetriableAgent()
     res = await run_agent_node(
-        _Reg(agent), "collector", object(), outputs={}, trace_id="t",
-        node_id="collect.x", max_retries=3, timeout_ms=2000, backoff_base=0.0,
+        _Reg(agent),
+        "collector",
+        object(),
+        outputs={},
+        trace_id="t",
+        node_id="collect.x",
+        max_retries=3,
+        timeout_ms=2000,
+        backoff_base=0.0,
     )
     assert res.status == AgentStatus.FAILED
     assert res.error is not None
@@ -154,14 +203,21 @@ async def test_partial_returned_as_is():
             class _Out:
                 status = AgentStatus.PARTIAL
                 self_critique = None
-                errors = []
+                errors: ClassVar[list] = []
 
             return _Out()
 
     agent = _PartialAgent()
     res = await run_agent_node(
-        _Reg(agent), "collector", object(), outputs={}, trace_id="t",
-        node_id="collect.x", max_retries=3, timeout_ms=2000, backoff_base=0.0,
+        _Reg(agent),
+        "collector",
+        object(),
+        outputs={},
+        trace_id="t",
+        node_id="collect.x",
+        max_retries=3,
+        timeout_ms=2000,
+        backoff_base=0.0,
     )
     assert res.status == AgentStatus.PARTIAL
     assert agent.calls == 1  # PARTIAL is terminal — no retry

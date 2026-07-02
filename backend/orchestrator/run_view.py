@@ -14,8 +14,8 @@ contract：
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from backend.schemas import Project, ProjectMetrics
 from backend.schemas.run_view import (
@@ -34,7 +34,7 @@ from .projection import _node_id
 _SUCCESS_STATUSES = frozenset({"success", "partial", "needs_rework"})
 
 
-def _metric_fields(out: Any) -> dict[str, Optional[float]]:
+def _metric_fields(out: Any) -> dict[str, float | None]:
     """从一个 AgentOutput（dict 或对象）取 token/cost/confidence/duration。
 
     缺字段时返回 None（前端按缺失渲染），不强行填 0。
@@ -62,9 +62,7 @@ def _metric_fields(out: Any) -> dict[str, Optional[float]]:
     }
 
 
-def _overall_status(
-    history: list[dict], *, aborted: bool, verdicts: list | None = None
-) -> str:
+def _overall_status(history: list[dict], *, aborted: bool, verdicts: list | None = None) -> str:
     """计算整体 run 状态：running / done / failed / aborted。
 
     规则（保守、健壮）：
@@ -85,7 +83,7 @@ def _overall_status(
         return "aborted"
 
     # 按 (node, product) 分组，取每组最后一条记录的状态：若最终态是 failed 则视为失败。
-    last_status_by_key: dict[tuple[str, Optional[str]], str] = {}
+    last_status_by_key: dict[tuple[str, str | None], str] = {}
     for run in history:
         key = (run.get("node"), run.get("product"))
         last_status_by_key[key] = run.get("status", "")
@@ -105,12 +103,12 @@ def _overall_status(
     if verdicts:
         last_v = verdicts[-1]
         blocking = (
-            last_v.get("blocking") if isinstance(last_v, dict)
+            last_v.get("blocking")
+            if isinstance(last_v, dict)
             else getattr(last_v, "blocking", None)
         )
         routing = (
-            last_v.get("routing") if isinstance(last_v, dict)
-            else getattr(last_v, "routing", None)
+            last_v.get("routing") if isinstance(last_v, dict) else getattr(last_v, "routing", None)
         ) or []
         if blocking and routing:
             return "running"
@@ -154,14 +152,10 @@ def run_state_to_view(
         runs = by_node[stage]
         if stage in PRODUCT_STAGES:
             instances = _build_instances(runs, outputs_by_ref, stage)
-            stages.append(
-                RunStageView(stage=stage, agent=STAGE_AGENT[stage], instances=instances)
-            )
+            stages.append(RunStageView(stage=stage, agent=STAGE_AGENT[stage], instances=instances))
         else:
             revisions = _build_revisions(runs, outputs_by_ref, stage)
-            stages.append(
-                RunStageView(stage=stage, agent=STAGE_AGENT[stage], revisions=revisions)
-            )
+            stages.append(RunStageView(stage=stage, agent=STAGE_AGENT[stage], revisions=revisions))
 
     aborted = bool(state.get("aborted", False))
     abort_reason = state.get("abort_reason") or None
@@ -179,7 +173,7 @@ def run_state_to_view(
         aborted=aborted,
         abort_reason=abort_reason,
         metrics=metrics,
-        computed_at=datetime.now(timezone.utc).isoformat(),
+        computed_at=datetime.now(UTC).isoformat(),
     )
 
 
@@ -201,9 +195,7 @@ def _outputs_by_run_ref(history: list[dict], outputs_by_ref: dict) -> dict[str, 
     return out_map
 
 
-def _build_instances(
-    runs: list[dict], outputs_by_ref: dict, stage: str
-) -> list[StageInstance]:
+def _build_instances(runs: list[dict], outputs_by_ref: dict, stage: str) -> list[StageInstance]:
     """产品阶段：每产品取「最新一轮」NodeRun，派生 StageInstance。
 
     同一产品可能有多轮（QA 返工触发 per-product 重做）；以 round 最大者为准，
@@ -240,9 +232,7 @@ def _build_instances(
     return instances
 
 
-def _build_revisions(
-    runs: list[dict], outputs_by_ref: dict, stage: str
-) -> list[StageRevision]:
+def _build_revisions(runs: list[dict], outputs_by_ref: dict, stage: str) -> list[StageRevision]:
     """全局阶段：每轮一条 StageRevision，按 round 升序。
 
     同一 round 若重复出现（理论上的 barrier 重放），取首条。

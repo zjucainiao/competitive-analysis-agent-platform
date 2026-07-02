@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -23,20 +23,18 @@ from backend.schemas import (
     ExtractorOutput,
     NodeStatus,
     NodeType,
-    ProductBasicInfo,
     PricingProfile,
+    ProductBasicInfo,
     QADimension,
     QADimensionResult,
     QAStatus,
     QAVerdict,
     RawSourceDoc,
 )
-from backend.schemas.competitor import CompetitorProfile
-from backend.schemas.competitor import PricingModel
+from backend.schemas.competitor import CompetitorProfile, PricingModel
 from backend.schemas.evidence import CollectDimension
 
-
-_T0 = datetime(2026, 6, 1, 10, 0, 0, tzinfo=timezone.utc)
+_T0 = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
 
 
 def _node(node_id: str, *, agent: str | None, start_offset: int, duration: int) -> DAGNode:
@@ -235,7 +233,10 @@ def test_full_run_metrics() -> None:
     ]
 
     m = compute_project_metrics(
-        plan=plan, outputs=outputs, verdicts=verdicts, qa_round_count=2,
+        plan=plan,
+        outputs=outputs,
+        verdicts=verdicts,
+        qa_round_count=2,
     )
 
     # 时间：从 t+0 (start) 到 t+185 (analyst 结束) = 185s
@@ -272,7 +273,8 @@ def test_metrics_handles_verdict_without_schema_dim() -> None:
     """如果 verdict 没 schema_completeness，coverage 应回退到 0。"""
     plan = _plan()
     m = compute_project_metrics(
-        plan=plan, outputs={},
+        plan=plan,
+        outputs={},
         verdicts=[_verdict({QADimension.FRESHNESS: 0.7})],
         qa_round_count=0,
     )

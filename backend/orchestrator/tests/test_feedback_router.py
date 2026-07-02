@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from backend.orchestrator.feedback_router import (
-    FeedbackOutcome,
     FeedbackRouter,
 )
 from backend.orchestrator.planner import Planner
@@ -25,11 +24,8 @@ from backend.schemas import (
     QAVerdict,
 )
 
-
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_DEMO_PROJECT_FILE = (
-    _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
-)
+_DEMO_PROJECT_FILE = _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
 
 
 # ---------- fixtures ----------
@@ -101,7 +97,7 @@ def test_aborts_when_no_routing_entries() -> None:
 
 def test_aborts_when_no_targets_match() -> None:
     """routing 指向不存在的 agent → 无匹配 → aborted。"""
-    plan = _make_plan()
+    _make_plan()
     # 用一个 plan 里没有节点的合法值（"collector" 有节点；尝试 plan 删 collector 模拟）
     # 简化：plan 拿 analyst 单一节点版本，再 routing 到 reporter——还在；那构造一个空 plan
     empty_plan = DAGPlan(
@@ -169,7 +165,7 @@ def test_analyst_rework_resets_all_downstream_status() -> None:
 
     expected_reset = {"reporter", "qa", "end"}
     assert set(outcome.node_status_resets) == expected_reset
-    for nid, status in outcome.node_status_resets.items():
+    for _nid, status in outcome.node_status_resets.items():
         assert status == NodeStatus.PENDING
 
 
@@ -314,9 +310,7 @@ def test_double_apply_increments_to_v3() -> None:
             "edges": plan.edges + outcome1.new_edges,
         }
     )
-    verdict2 = _make_verdict(
-        routings=[QARouting(target_agent="analyst", reason="r2")]
-    )
+    verdict2 = _make_verdict(routings=[QARouting(target_agent="analyst", reason="r2")])
     outcome2 = router.apply(verdict=verdict2, plan=plan2, qa_round_count=1)
     assert outcome2.new_nodes[0].node_id == "analyst_v3"
     assert outcome2.new_nodes[0].revision == 3

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.base import BaseCheckpointSaver  # type: ignore
 
 
-def to_langgraph_saver(impl: CheckpointerProtocol) -> "BaseCheckpointSaver":
+def to_langgraph_saver(impl: CheckpointerProtocol) -> BaseCheckpointSaver:
     """把 `CheckpointerProtocol` 实现包装成 langgraph 的 `BaseCheckpointSaver`。
 
     思路：动态子类化 `BaseCheckpointSaver`，把 a*-prefixed 方法委托给 impl。
@@ -87,9 +87,7 @@ def to_langgraph_saver(impl: CheckpointerProtocol) -> "BaseCheckpointSaver":
             metadata: Any,
             new_versions: Any,
         ) -> Any:
-            return asyncio.run(
-                self._inner.aput(config, checkpoint, metadata, new_versions)
-            )
+            return asyncio.run(self._inner.aput(config, checkpoint, metadata, new_versions))
 
         def list(
             self,

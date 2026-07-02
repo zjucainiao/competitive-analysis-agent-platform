@@ -23,16 +23,17 @@ _TRACE_CONTEXT: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
     "llm_trace_context", default=None
 )
 
+
 # 单条记录的 schema
 @dataclass(slots=True)
 class LLMCallRecord:
-    timestamp: float                 # epoch seconds
+    timestamp: float  # epoch seconds
     trace_id: str | None
     span_id: str | None
     node_id: str | None
     agent_name: str | None
     model: str
-    phase: str                       # tool_call / json_mode / freeform / retry
+    phase: str  # tool_call / json_mode / freeform / retry
     tokens_input: int
     tokens_output: int
     duration_s: float

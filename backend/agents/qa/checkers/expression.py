@@ -86,9 +86,7 @@ class ExpressionChecker(BaseChecker):
                             dimension=self.dimension,
                             severity="minor",
                             location=location,
-                            problem=(
-                                f"段落命中绝对化表述：{hits}"
-                            ),
+                            problem=(f"段落命中绝对化表述：{hits}"),
                             suggested_fix=(
                                 "Reporter 改写为软性表述，例如 '业内领先' "
                                 "→ '在 X 维度上明显领先于对比对象'。"
@@ -110,12 +108,8 @@ class ExpressionChecker(BaseChecker):
                             dimension=self.dimension,
                             severity="minor",
                             location=location,
-                            problem=(
-                                f"段落使用第一人称：{fp_hits}"
-                            ),
-                            suggested_fix=(
-                                "Reporter 将第一人称改写为第三人称客观叙述。"
-                            ),
+                            problem=(f"段落使用第一人称：{fp_hits}"),
+                            suggested_fix=("Reporter 将第一人称改写为第三人称客观叙述。"),
                             target_agent="reporter",
                             required_inputs={
                                 "paragraph_id": para.paragraph_id,
@@ -129,14 +123,11 @@ class ExpressionChecker(BaseChecker):
         if ctx.llm is not None and ctx.prompt_dir:
             try:
                 llm_resp = self._call_llm(ctx)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(
                     AgentError(
                         code="LLM_SCHEMA_INVALID",
-                        message=(
-                            f"expression LLM check failed: "
-                            f"{type(e).__name__}: {e}"
-                        ),
+                        message=(f"expression LLM check failed: {type(e).__name__}: {e}"),
                         severity="warn",
                         retriable=True,
                     )
@@ -166,12 +157,8 @@ class ExpressionChecker(BaseChecker):
                             issue_id=f"iss_ex_llm_{v.paragraph_id}",
                             dimension=self.dimension,
                             severity="minor",
-                            location=(
-                                f"report.sections[{s_idx}].paragraphs[{p_idx}]"
-                            ),
-                            problem=(
-                                f"LLM 检测到：{'、'.join(problems)}。{v.notes}"
-                            ).strip(),
+                            location=(f"report.sections[{s_idx}].paragraphs[{p_idx}]"),
+                            problem=(f"LLM 检测到：{'、'.join(problems)}。{v.notes}").strip(),
                             suggested_fix=(
                                 "Reporter 复写该段：开头补 1 句 topic sentence；"
                                 "把推断性结论加上 evidence 限定或 qualifier。"
@@ -213,9 +200,7 @@ class ExpressionChecker(BaseChecker):
         prompt_path = Path(ctx.prompt_dir) / "expression.md"
         if not prompt_path.exists():
             return None
-        system, user_template = _split_prompt(
-            prompt_path.read_text(encoding="utf-8")
-        )
+        system, user_template = _split_prompt(prompt_path.read_text(encoding="utf-8"))
         paragraphs = [
             {
                 "paragraph_id": p.paragraph_id,
@@ -300,9 +285,7 @@ def _coerce(resp: object, model: type[BaseModel]) -> BaseModel:
         return model.model_validate(resp)
     if hasattr(resp, "model_dump"):
         return model.model_validate(resp.model_dump())
-    raise ValueError(
-        f"cannot coerce response to {model.__name__}: {type(resp).__name__}"
-    )
+    raise ValueError(f"cannot coerce response to {model.__name__}: {type(resp).__name__}")
 
 
 __all__ = ["BANNED_TERMS", "ExpressionChecker"]

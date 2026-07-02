@@ -9,6 +9,7 @@
 
 桩 registry 复用 orchestrator 集成测试里的 _FakeRegistry / _StubQA，不触真实 LLM。
 """
+
 from __future__ import annotations
 
 import time
@@ -19,10 +20,10 @@ from fastapi.testclient import TestClient
 from backend.api import create_app
 from backend.orchestrator import Orchestrator
 from backend.orchestrator.tests.test_native_graph import (
-    _FakeRegistry,
-    _StubQA,
     _block_reporter_verdict,
+    _FakeRegistry,
     _pass_verdict,
+    _StubQA,
 )
 
 
@@ -43,9 +44,7 @@ def native_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         # 用一次返工序列的桩 QA：reporter 会跑 2 轮 → reporter 有 2 revisions。
         registry = _FakeRegistry(_StubQA([_block_reporter_verdict(), _pass_verdict()]))
         c.app.state.agent_registry = registry
-        c.app.state.orchestrator = Orchestrator(
-            registry=registry, storage=c.app.state.storage
-        )
+        c.app.state.orchestrator = Orchestrator(registry=registry, storage=c.app.state.storage)
         yield c
 
 
@@ -169,7 +168,7 @@ def test_run_state_overlays_node_output_edits(
     )
     store = native_client.app.state.storage.state_store
 
-    async def _fake_list(project_id: str):  # noqa: ANN202
+    async def _fake_list(project_id: str):
         return {"reporter": edited}
 
     monkeypatch.setattr(store, "list_node_outputs", _fake_list)
@@ -187,14 +186,10 @@ def test_run_view_historical_has_populated_history(native_client: TestClient) ->
     run_id = _run_to_completion(native_client, pid, headers)
 
     # 快照里 history 应已被 native checkpoint 填充
-    snap = native_client.get(
-        f"/api/projects/{pid}/runs/{run_id}/state", headers=headers
-    ).json()
+    snap = native_client.get(f"/api/projects/{pid}/runs/{run_id}/state", headers=headers).json()
     assert snap["history"], "RunSnapshot.history should be populated for native run"
 
-    r = native_client.get(
-        f"/api/projects/{pid}/runs/{run_id}/view", headers=headers
-    )
+    r = native_client.get(f"/api/projects/{pid}/runs/{run_id}/view", headers=headers)
     assert r.status_code == 200, r.text
     view = r.json()
     assert [s["stage"] for s in view["stages"]] == [
@@ -215,9 +210,7 @@ def test_run_view_historical_has_populated_history(native_client: TestClient) ->
 def test_run_state_view_unknown_run_404(native_client: TestClient) -> None:
     headers = _register(native_client, "carol@example.com")
     pid = _create_project(native_client, headers)
-    r = native_client.get(
-        f"/api/projects/{pid}/runs/run_nope/view", headers=headers
-    )
+    r = native_client.get(f"/api/projects/{pid}/runs/run_nope/view", headers=headers)
     assert r.status_code == 404
 
 
@@ -228,7 +221,4 @@ def test_run_state_view_requires_auth(native_client: TestClient) -> None:
     assert native_client.get(f"/api/projects/{pid}/run-state").status_code == 401
     # 别人项目 → 403
     other = _register(native_client, "eve@example.com")
-    assert (
-        native_client.get(f"/api/projects/{pid}/run-state", headers=other).status_code
-        == 403
-    )
+    assert native_client.get(f"/api/projects/{pid}/run-state", headers=other).status_code == 403

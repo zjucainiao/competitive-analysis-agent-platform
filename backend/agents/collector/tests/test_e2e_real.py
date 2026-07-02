@@ -4,12 +4,11 @@
 
     pytest backend/agents/collector/tests/test_e2e_real.py -m e2e -v -s
 
-默认 `pytest` 不带 `-m e2e` 时**会跳过**本文件，避免单元测试受外网影响。
+默认 `pytest`（pyproject 里 ``addopts = '-m "not e2e"'``）会**反选**本文件，
+避免单元测试受外网影响；必须显式带 ``-m e2e`` 才会执行。
 """
 
 from __future__ import annotations
-
-import os
 
 import pytest
 from dotenv import load_dotenv
@@ -24,7 +23,17 @@ from backend.schemas import AgentStatus, CollectDimension
 
 pytestmark = pytest.mark.e2e
 
-load_dotenv(".env")
+
+@pytest.fixture(autouse=True, scope="module")
+def _load_env() -> None:
+    """e2e 被显式选中执行时才读 .env 补 key。
+
+    不能放模块级：即便 `-m "not e2e"` 反选，收集阶段仍会 import 本模块，
+    模块级 load_dotenv 会把开发者 .env 的 POSTGRES_DSN / REDIS_URL 泄漏进
+    进程环境，破坏 storage 测试「无环境变量自动 skip」的约定。
+    override=False：不覆盖 shell 已导出的变量。
+    """
+    load_dotenv(".env", override=False)
 
 
 def _network_or_skip() -> None:
@@ -33,7 +42,7 @@ def _network_or_skip() -> None:
         import httpx
 
         httpx.get("https://duckduckgo.com/", timeout=5.0)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         pytest.skip(f"network unreachable: {e}")
 
 
@@ -153,9 +162,7 @@ def test_real_collect_notion_user_reviews_via_llm_websearch() -> None:
     for e in out.errors:
         print(f"  ! {e.severity} {e.code}: {e.message}")
 
-    assert review_docs, (
-        f"expected >=1 REVIEWS RawSourceDoc, got 0. errors={out.errors}"
-    )
+    assert review_docs, f"expected >=1 REVIEWS RawSourceDoc, got 0. errors={out.errors}"
     # 至少一条是 LLM 联网搜索产出（fetch_method='search'）
     llm_origin = [s for s in review_docs if s.fetch_method == "search"]
     assert llm_origin, (
@@ -164,10 +171,9 @@ def test_real_collect_notion_user_reviews_via_llm_websearch() -> None:
     )
     # Extractor 抽 overall_rating 的最小依赖：raw_text 里必须含一个 0-5 数字 + 平台名
     import re
+
     rating_pattern = re.compile(r"\b[0-5]([.,]\d)?\b")
-    platform_pattern = re.compile(
-        r"\b(G2|Capterra|TrustRadius|Software Advice|Gartner)\b", re.I
-    )
+    platform_pattern = re.compile(r"\b(G2|Capterra|TrustRadius|Software Advice|Gartner)\b", re.I)
     for s in llm_origin:
         assert rating_pattern.search(s.raw_text), (
             f"raw_text missing rating number: {s.raw_text[:200]!r}"

@@ -28,17 +28,17 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
-from .protocols import (
-    CheckpointerProtocol,
-    EventBusProtocol,
-    StateStoreProtocol,
-)
 from .checkpoint_types import (
     Checkpoint,
     CheckpointConfig,
     CheckpointMetadata,
     CheckpointTuple,
     make_config,
+)
+from .protocols import (
+    CheckpointerProtocol,
+    EventBusProtocol,
+    StateStoreProtocol,
 )
 
 
@@ -90,13 +90,9 @@ def build_storage(
         pg_dsn = pg_dsn or os.getenv("POSTGRES_DSN")
         redis_url = redis_url or os.getenv("REDIS_URL")
         if not pg_dsn:
-            raise ValueError(
-                "build_storage(mode='postgres') requires pg_dsn or $POSTGRES_DSN"
-            )
+            raise ValueError("build_storage(mode='postgres') requires pg_dsn or $POSTGRES_DSN")
         if not redis_url:
-            raise ValueError(
-                "build_storage(mode='postgres') requires redis_url or $REDIS_URL"
-            )
+            raise ValueError("build_storage(mode='postgres') requires redis_url or $REDIS_URL")
 
         from sqlalchemy.ext.asyncio import create_async_engine
 

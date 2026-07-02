@@ -7,8 +7,12 @@
           → DeepSeek API + Tavily/Serper 真采集
       → 轮询 GET /api/projects/{id}/run-state 直到整体终态(done/failed/aborted)
 
-显式 opt-in：必须 ``RUN_REAL_LLM_TESTS=1`` 且 ``DEEPSEEK_API_KEY`` 或
-``OPENAI_API_KEY`` 至少有一个非空，否则整文件 skip。
+显式 opt-in（双重门控）::
+
+    RUN_REAL_LLM_TESTS=1 pytest backend/api/tests/test_real_full_chain.py -m e2e -v -s
+
+必须 ``RUN_REAL_LLM_TESTS=1`` 且 ``DEEPSEEK_API_KEY`` 或 ``OPENAI_API_KEY``
+至少有一个非空，否则整文件 skip；默认 ``pytest``（addopts ``-m "not e2e"``）反选本文件。
 """
 
 from __future__ import annotations
@@ -22,14 +26,15 @@ from fastapi.testclient import TestClient
 
 from backend.api import create_app
 
-load_dotenv()
+# 显式开启真实链路时才读 .env 补 LLM key；模块级无条件 load_dotenv 会在收集
+# 阶段把开发者 .env 的 POSTGRES_DSN / REDIS_URL 泄漏进进程环境，
+# 破坏 storage 测试「无环境变量自动 skip」的约定。override=False：不覆盖已导出变量。
+if os.getenv("RUN_REAL_LLM_TESTS") == "1":
+    load_dotenv(override=False)
 
 
 def _has_any_llm_key() -> bool:
-    return any(
-        os.getenv(k)
-        for k in ("DOUBAO_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY")
-    )
+    return any(os.getenv(k) for k in ("DOUBAO_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY"))
 
 
 def _real_llm_disabled() -> bool:
@@ -38,13 +43,16 @@ def _real_llm_disabled() -> bool:
     return not _has_any_llm_key()
 
 
-pytestmark = pytest.mark.skipif(
-    _real_llm_disabled(),
-    reason=(
-        "real full-chain test: set RUN_REAL_LLM_TESTS=1 + "
-        "DOUBAO_API_KEY (or DEEPSEEK / OPENAI) to enable"
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.skipif(
+        _real_llm_disabled(),
+        reason=(
+            "real full-chain test: set RUN_REAL_LLM_TESTS=1 + "
+            "DOUBAO_API_KEY (or DEEPSEEK / OPENAI) to enable"
+        ),
     ),
-)
+]
 
 
 @pytest.fixture
@@ -120,28 +128,23 @@ def test_real_full_chain_end_to_end(client: TestClient) -> None:
     # 1. 5 个 Agent 类阶段至少各有一次完整 output(原生 run_ref 命名,大小写/产品后缀无关)
     for stage in ["collect", "extract", "analyst", "reporter", "qa"]:
         assert any(
-            k == stage or k.startswith(f"{stage}.") or k.startswith(f"{stage}_v")
-            for k in outputs
+            k == stage or k.startswith(f"{stage}.") or k.startswith(f"{stage}_v") for k in outputs
         ), f"stage {stage} produced no output (real chain failed at {stage})"
 
     # 2. Analyst 真出了 claim
     analyst_out = outputs["analyst"]
     analyst_status = analyst_out.get("status")
-    print(f"\n=== ANALYST DEBUG ===")
+    print("\n=== ANALYST DEBUG ===")
     print(f"  status: {analyst_status}")
     print(f"  confidence: {analyst_out.get('confidence')}")
     print(f"  errors[:3]: {analyst_out.get('errors', [])[:3]}")
     print(f"  self_critique: {(analyst_out.get('self_critique') or '')[:200]}")
     print(f"  has 'result' key: {'result' in analyst_out}")
     if analyst_status == "failed":
-        pytest.fail(
-            f"analyst status=failed; errors={analyst_out.get('errors')}"
-        )
+        pytest.fail(f"analyst status=failed; errors={analyst_out.get('errors')}")
     result = analyst_out.get("result")
     assert result, f"analyst missing 'result' field; output keys={list(analyst_out.keys())}"
-    total_claims = sum(
-        len(d.get("claims") or []) for d in result.get("dimensions", {}).values()
-    )
+    total_claims = sum(len(d.get("claims") or []) for d in result.get("dimensions", {}).values())
     assert total_claims > 0, f"analyst returned 0 claims; result={result}"
 
     # 3. Reporter 出了 section（最终版本）
@@ -163,10 +166,7 @@ def test_real_full_chain_end_to_end(client: TestClient) -> None:
     assert verdicts[0]["dimension_results"], "QA produced no dimension results"
 
     # 5. 早期节点（非 _v 派生）不允许 failed
-    early_failed = [
-        k for k, o in outputs.items()
-        if o.get("status") == "failed" and "_v" not in k
-    ]
+    early_failed = [k for k, o in outputs.items() if o.get("status") == "failed" and "_v" not in k]
     assert not early_failed, f"early nodes failed: {early_failed}"
 
     # 6. 报告几行预览（看到才放心）
@@ -176,14 +176,20 @@ def test_real_full_chain_end_to_end(client: TestClient) -> None:
 
     # 7. QA verdict 全量诊断（找 reject 真凶）
     last_v = verdicts[-1]
-    print(f"\n=== QA verdict (final) ===")
+    print("\n=== QA verdict (final) ===")
     print(f"  overall_status: {last_v.get('overall_status')}")
     print(f"  blocking: {last_v.get('blocking')}")
-    print(f"  dimensions:")
+    print("  dimensions:")
     for dim, res in (last_v.get("dimension_results") or {}).items():
         marker = "✓" if res.get("pass") else "✗"
-        print(f"    {marker} {dim}: score={res.get('score'):.2f}  notes={(res.get('notes') or '')[:120]}")
+        print(
+            f"    {marker} {dim}: score={res.get('score'):.2f}  notes={(res.get('notes') or '')[:120]}"
+        )
     print(f"  issues ({len(last_v.get('issues') or [])}):")
     for iss in (last_v.get("issues") or [])[:8]:
-        print(f"    [{iss.get('severity')}] {iss.get('dimension')} → {iss.get('target_agent')}: {(iss.get('problem') or '')[:120]}")
-    print(f"  routing: {[(r.get('target_agent'), (r.get('reason') or '')[:60]) for r in (last_v.get('routing') or [])]}")
+        print(
+            f"    [{iss.get('severity')}] {iss.get('dimension')} → {iss.get('target_agent')}: {(iss.get('problem') or '')[:120]}"
+        )
+    print(
+        f"  routing: {[(r.get('target_agent'), (r.get('reason') or '')[:60]) for r in (last_v.get('routing') or [])]}"
+    )

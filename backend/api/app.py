@@ -9,8 +9,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Literal
+from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -19,8 +20,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.orchestrator import AgentRegistry, Orchestrator
 from backend.schemas import SCHEMA_VERSION
 from backend.storage import build_storage, init_storage
-
-from .version import build_version_info
 
 from .routes import (
     auth,
@@ -33,6 +32,8 @@ from .routes import (
     reports,
     runs,
 )
+from .security import ensure_jwt_secret
+from .version import build_version_info
 
 # 仓库根目录 .env 在模块装载时加载，让 uvicorn 直接启动也能拿到 LLM key
 load_dotenv()
@@ -72,14 +73,18 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # 启动硬闸门：生产形态（postgres）缺 JWT_SECRET 直接拒启，
+        # 不给"打个 warning 继续跑弱密钥"的机会（详见 security.ensure_jwt_secret）。
+        # 放 lifespan 而非构造期：模块 import（默认 app 实例）不炸，行为与
+        # AgentRegistry.from_env 的"无 key 启动报错"一致。
+        ensure_jwt_secret(mode)
+
         storage = build_storage(mode=mode, pg_dsn=pg_dsn, redis_url=redis_url)
         await init_storage(storage)
 
         registry = AgentRegistry.from_env()
 
-        orch = Orchestrator(
-            registry=registry, storage=storage, max_parallel=max_parallel
-        )
+        orch = Orchestrator(registry=registry, storage=storage, max_parallel=max_parallel)
 
         app.state.storage = storage
         app.state.agent_registry = registry
@@ -96,12 +101,12 @@ def create_app(
             yield
         finally:
             tasks: dict[str, asyncio.Task] = app.state.running_tasks
-            for project_id, task in list(tasks.items()):
+            for _project_id, task in list(tasks.items()):
                 if not task.done():
                     task.cancel()
                     try:
                         await task
-                    except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                    except (asyncio.CancelledError, Exception):
                         pass
             await storage.close()
             _log.info("API shutdown complete")

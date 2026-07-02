@@ -8,8 +8,8 @@ from backend.schemas import (
     AgentStatus,
     CollectDimension,
     CollectorOutput,
-    ReporterOutput,
     ReportDraft,
+    ReporterOutput,
     ReportSection,
 )
 from backend.storage.serde import dump_output, load_output
@@ -51,11 +51,7 @@ def test_dump_load_reporter_output_roundtrip():
         report_id="rpt_1",
         version=1,
         template_id="standard_v1",
-        sections=[
-            ReportSection(
-                section_id="s1", title="overview", order=1, paragraphs=[]
-            )
-        ],
+        sections=[ReportSection(section_id="s1", title="overview", order=1, paragraphs=[])],
         summary="",
         metadata={},
     )

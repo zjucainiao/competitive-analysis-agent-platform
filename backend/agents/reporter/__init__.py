@@ -28,12 +28,12 @@ from .tools import (
 
 __all__ = [
     "BANNED_TERMS",
+    "TEMPLATES",
     "EvidenceProvider",
     "FixtureEvidenceProvider",
-    "Reporter",
     "ReportTemplate",
+    "Reporter",
     "StaticEvidenceProvider",
-    "TEMPLATES",
     "extract_quantities",
     "find_banned_terms",
     "get_template",

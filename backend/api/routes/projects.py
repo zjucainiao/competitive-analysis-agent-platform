@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from ulid import ULID
@@ -63,16 +63,13 @@ async def create_project(
     import re as _re
 
     _bad_names = [
-        n
-        for n in [req.target_product, *competitors]
-        if _re.search(r"_v\d+$", (n or "").strip())
+        n for n in [req.target_product, *competitors] if _re.search(r"_v\d+$", (n or "").strip())
     ]
     if _bad_names:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"产品名不能以 '_v<数字>' 结尾(与内部版本化键冲突): {_bad_names}；"
-                "请改用其他写法。"
+                f"产品名不能以 '_v<数字>' 结尾(与内部版本化键冲突): {_bad_names}；请改用其他写法。"
             ),
         )
 
@@ -80,7 +77,7 @@ async def create_project(
         project_id=f"proj_{ULID()}",
         project_name=req.project_name,
         owner=current_user.user_id,  # 归属强制来自 JWT，杜绝客户端伪造
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         target_product=req.target_product,
         competitors=competitors,
         analysis_mode=req.analysis_mode,
@@ -138,7 +135,7 @@ async def archive_project(
     updated = project.model_copy(
         update={
             "status": ProjectStatus.ARCHIVED,
-            "archived_at": datetime.now(timezone.utc),
+            "archived_at": datetime.now(UTC),
         }
     )
     await storage.state_store.save_project(updated)
@@ -173,7 +170,7 @@ async def delete_project(
     updated = project.model_copy(
         update={
             "status": ProjectStatus.DELETED,
-            "deleted_at": datetime.now(timezone.utc),
+            "deleted_at": datetime.now(UTC),
         }
     )
     await storage.state_store.save_project(updated)

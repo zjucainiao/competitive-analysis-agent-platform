@@ -10,8 +10,9 @@ import asyncio
 import contextlib
 import uuid
 from collections import defaultdict
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime
-from typing import Any, AsyncIterator, Sequence
+from typing import Any
 
 from backend.schemas import (
     AgentOutputBase,
@@ -38,7 +39,6 @@ from .checkpoint_types import (
     thread_id_of,
 )
 
-
 # ---------- Checkpointer ----------
 
 
@@ -54,9 +54,9 @@ class InMemoryCheckpointer:
         ] = {}
         # key: (thread_id, checkpoint_ns, checkpoint_id, task_id)
         # value: list of (idx, channel, value)
-        self._writes: dict[
-            tuple[str, str, str, str], list[tuple[int, str, Any]]
-        ] = defaultdict(list)
+        self._writes: dict[tuple[str, str, str, str], list[tuple[int, str, Any]]] = defaultdict(
+            list
+        )
         self._seq = 0
         self._lock = asyncio.Lock()
 
@@ -93,9 +93,7 @@ class InMemoryCheckpointer:
             ]
             cfg = make_config(tid, checkpoint_ns=ns, checkpoint_id=cid)
             parent_cfg = (
-                make_config(tid, checkpoint_ns=ns, checkpoint_id=parent_cid)
-                if parent_cid
-                else None
+                make_config(tid, checkpoint_ns=ns, checkpoint_id=parent_cid) if parent_cid else None
             )
             return CheckpointTuple(
                 config=cfg,
@@ -146,9 +144,7 @@ class InMemoryCheckpointer:
                 tid = thread_id_of(config)
                 ns = checkpoint_ns_of(config)
                 snapshot = [
-                    (k, v)
-                    for k, v in self._checkpoints.items()
-                    if k[0] == tid and k[1] == ns
+                    (k, v) for k, v in self._checkpoints.items() if k[0] == tid and k[1] == ns
                 ]
             before_seq: int | None = None
             if before is not None:
@@ -166,9 +162,7 @@ class InMemoryCheckpointer:
                 continue
             cfg = make_config(tid, checkpoint_ns=ns, checkpoint_id=cid)
             parent_cfg = (
-                make_config(tid, checkpoint_ns=ns, checkpoint_id=parent_cid)
-                if parent_cid
-                else None
+                make_config(tid, checkpoint_ns=ns, checkpoint_id=parent_cid) if parent_cid else None
             )
             yield CheckpointTuple(
                 config=cfg,
@@ -228,9 +222,9 @@ class InMemoryStateStore:
         # (project_id, node_id) -> (run_id, output)；run_id 用于「最新 run」作用域(P2-RUNSCOPE)
         self._node_outputs: dict[tuple[str, str], tuple[str | None, AgentOutputBase]] = {}
         # project_id -> [(ts, run_id, verdict)]
-        self._qa_verdicts: dict[
-            str, list[tuple[datetime, str | None, QAVerdict]]
-        ] = defaultdict(list)
+        self._qa_verdicts: dict[str, list[tuple[datetime, str | None, QAVerdict]]] = defaultdict(
+            list
+        )
         # project_id -> LLM 调用记录（dict）按追加顺序
         self._llm_calls: dict[str, list[dict]] = defaultdict(list)
         # (project_id, run_id) -> RunSnapshot
@@ -280,15 +274,12 @@ class InMemoryStateStore:
             items = [
                 (self._project_updated_at[p.project_id], p)
                 for p in self._projects.values()
-                if (owner is None or p.owner == owner)
-                and (status is None or p.status == status)
+                if (owner is None or p.owner == owner) and (status is None or p.status == status)
             ]
         items.sort(key=lambda kv: kv[0], reverse=True)
         return [p for _ts, p in items[offset : offset + limit]]
 
-    async def update_project_status(
-        self, project_id: str, status: ProjectStatus
-    ) -> None:
+    async def update_project_status(self, project_id: str, status: ProjectStatus) -> None:
         async with self._lock:
             p = self._projects.get(project_id)
             if p is None:
@@ -314,9 +305,7 @@ class InMemoryStateStore:
             bucket = self._plans_by_project.get(project_id, [])
             return bucket[-1] if bucket else None
 
-    async def update_node_status(
-        self, project_id: str, node_id: str, status: NodeStatus
-    ) -> None:
+    async def update_node_status(self, project_id: str, node_id: str, status: NodeStatus) -> None:
         async with self._lock:
             bucket = self._plans_by_project.get(project_id, [])
             if not bucket:
@@ -353,8 +342,7 @@ class InMemoryStateStore:
                 run_id
                 if run_id is not None
                 else _latest_run_id(
-                    r for (p, _n), (r, _o) in self._node_outputs.items()
-                    if p == project_id
+                    r for (p, _n), (r, _o) in self._node_outputs.items() if p == project_id
                 )
             )
             return out if rid == target else None
@@ -368,11 +356,7 @@ class InMemoryStateStore:
                 for (pid, node_id), (rid, out) in self._node_outputs.items()
                 if pid == project_id
             ]
-        target = (
-            run_id
-            if run_id is not None
-            else _latest_run_id(rid for _n, rid, _o in entries)
-        )
+        target = run_id if run_id is not None else _latest_run_id(rid for _n, rid, _o in entries)
         return {node_id: out for node_id, rid, out in entries if rid == target}
 
     # ---- QAVerdict ----
@@ -381,29 +365,21 @@ class InMemoryStateStore:
         self, project_id: str, verdict: QAVerdict, *, run_id: str | None = None
     ) -> None:
         async with self._lock:
-            self._qa_verdicts[project_id].append(
-                (datetime.utcnow(), run_id, verdict)
-            )
+            self._qa_verdicts[project_id].append((datetime.utcnow(), run_id, verdict))
 
     async def list_qa_verdicts(
         self, project_id: str, *, run_id: str | None = None
     ) -> list[QAVerdict]:
         async with self._lock:
             items = list(self._qa_verdicts.get(project_id, []))
-        target = (
-            run_id
-            if run_id is not None
-            else _latest_run_id(rid for _ts, rid, _v in items)
-        )
+        target = run_id if run_id is not None else _latest_run_id(rid for _ts, rid, _v in items)
         scoped = [(ts, v) for ts, rid, v in items if rid == target]
         scoped.sort(key=lambda kv: kv[0], reverse=True)
         return [v for _ts, v in scoped]
 
     # ---- LLMCallRecord ----
 
-    async def append_llm_calls(
-        self, project_id: str, calls: list[dict]
-    ) -> None:
+    async def append_llm_calls(self, project_id: str, calls: list[dict]) -> None:
         if not calls:
             return
         async with self._lock:
@@ -438,19 +414,13 @@ class InMemoryStateStore:
         async with self._lock:
             self._run_snapshots[(snapshot.project_id, snapshot.run_id)] = snapshot
 
-    async def get_run_snapshot(
-        self, project_id: str, run_id: str
-    ) -> RunSnapshot | None:
+    async def get_run_snapshot(self, project_id: str, run_id: str) -> RunSnapshot | None:
         async with self._lock:
             return self._run_snapshots.get((project_id, run_id))
 
     async def list_run_snapshots(self, project_id: str) -> list[RunSnapshot]:
         async with self._lock:
-            items = [
-                s
-                for (pid, _rid), s in self._run_snapshots.items()
-                if pid == project_id
-            ]
+            items = [s for (pid, _rid), s in self._run_snapshots.items() if pid == project_id]
         items.sort(key=lambda s: s.captured_at, reverse=True)
         return items
 
@@ -469,9 +439,7 @@ class InMemoryEventBus:
     """
 
     def __init__(self, *, queue_maxsize: int = 1024) -> None:
-        self._subscribers: dict[str, list[asyncio.Queue[NodeExecutionResult]]] = (
-            defaultdict(list)
-        )
+        self._subscribers: dict[str, list[asyncio.Queue[NodeExecutionResult]]] = defaultdict(list)
         self._queue_maxsize = queue_maxsize
         self._lock = asyncio.Lock()
         self._closed = False
@@ -488,9 +456,7 @@ class InMemoryEventBus:
     async def subscribe(self, channel: str) -> AsyncIterator[NodeExecutionResult]:
         if self._closed:
             raise RuntimeError("event bus closed")
-        q: asyncio.Queue[NodeExecutionResult] = asyncio.Queue(
-            maxsize=self._queue_maxsize
-        )
+        q: asyncio.Queue[NodeExecutionResult] = asyncio.Queue(maxsize=self._queue_maxsize)
         async with self._lock:
             self._subscribers[channel].append(q)
         try:

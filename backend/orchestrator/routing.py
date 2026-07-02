@@ -99,8 +99,7 @@ def decide_qa_route(
         return END, {
             "aborted": True,
             "abort_reason": (
-                f"qa_round+1={qa_round + 1} reached max_rounds={max_rounds}; "
-                "force-publish"
+                f"qa_round+1={qa_round + 1} reached max_rounds={max_rounds}; force-publish"
             ),
         }
 
@@ -186,9 +185,7 @@ def _build_qa_feedback_by_node(
     from backend.orchestrator.feedback_router import _build_qa_feedback_payload
 
     routing_list = getattr(verdict, "routing", None) or []
-    chosen_routing = next(
-        (r for r in routing_list if r.target_agent == chosen), None
-    )
+    chosen_routing = next((r for r in routing_list if r.target_agent == chosen), None)
     if chosen_routing is None:
         return {}
     payload = _build_qa_feedback_payload(verdict, chosen_routing, qa_round=qa_round)

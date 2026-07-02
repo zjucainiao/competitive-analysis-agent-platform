@@ -16,12 +16,21 @@ from .agent_io import (
     AgentOutputBase,
     AgentStatus,
 )
+from .analyst import (
+    AnalysisClaim,
+    AnalysisDimension,
+    AnalysisResult,
+    AnalystInput,
+    AnalystOutput,
+    DimensionAnalysis,
+)
 
-# Evidence & raw sources
-from .evidence import (
-    Evidence,
-    EvidenceLocation,
-    RawSourceDoc,
+# Per-agent IO
+from .collector import (
+    CollectConstraints,
+    CollectDimension,
+    CollectorInput,
+    CollectorOutput,
 )
 
 # Competitor profile (universal + extensions)
@@ -31,21 +40,40 @@ from .competitor import (
     Feature,
     FeatureModule,
     FeatureProfile,
+    FeedbackTheme,
     FieldStatus,
     FreeTrialInfo,
     Insight,
     Integration,
+    PainPoint,
     PlanAvailability,
     PricingModel,
     PricingPlan,
     PricingProfile,
     ProductBasicInfo,
     SecurityProfile,
+    TypicalReview,
     UserFeedbackProfile,
     UserSegment,
-    FeedbackTheme,
-    PainPoint,
-    TypicalReview,
+)
+from .dag import (
+    DAGEdge,
+    DAGNode,
+    DAGPlan,
+    DAGState,
+    NodeStatus,
+    NodeType,
+)
+
+# Evidence & raw sources
+from .evidence import (
+    Evidence,
+    EvidenceLocation,
+    RawSourceDoc,
+)
+from .extractor import (
+    ExtractorInput,
+    ExtractorOutput,
 )
 
 # Industry extensions
@@ -57,32 +85,18 @@ from .industry import (
     IndustryExtensionUnion,
     MaturityScore,
 )
-
-# Per-agent IO
-from .collector import (
-    CollectConstraints,
-    CollectDimension,
-    CollectorInput,
-    CollectorOutput,
+from .orchestrator import (
+    NodeExecutionRequest,
+    NodeExecutionResult,
 )
-from .extractor import (
-    ExtractorInput,
-    ExtractorOutput,
-)
-from .analyst import (
-    AnalysisClaim,
-    AnalysisDimension,
-    AnalysisResult,
-    AnalystInput,
-    AnalystOutput,
-    DimensionAnalysis,
-)
-from .reporter import (
-    ReportDraft,
-    ReportParagraph,
-    ReportSection,
-    ReporterInput,
-    ReporterOutput,
+from .project import (
+    AnalysisMode,
+    Project,
+    ProjectMetrics,
+    ProjectMetricsSnapshot,
+    ProjectStatus,
+    RunRef,
+    RunSnapshot,
 )
 from .qa import (
     QADimension,
@@ -96,33 +110,12 @@ from .qa import (
     QAVerdict,
     validate_qa_feedback,
 )
-
-# Infrastructure
-from .trace import (
-    LLMCallRecord,
-    ToolCallRecord,
-    TraceRecord,
-)
-from .dag import (
-    DAGEdge,
-    DAGNode,
-    DAGPlan,
-    DAGState,
-    NodeStatus,
-    NodeType,
-)
-from .project import (
-    AnalysisMode,
-    Project,
-    ProjectMetrics,
-    ProjectMetricsSnapshot,
-    ProjectStatus,
-    RunRef,
-    RunSnapshot,
-)
-from .orchestrator import (
-    NodeExecutionRequest,
-    NodeExecutionResult,
+from .reporter import (
+    ReportDraft,
+    ReporterInput,
+    ReporterOutput,
+    ReportParagraph,
+    ReportSection,
 )
 from .run_view import (
     PRODUCT_STAGES,
@@ -133,113 +126,120 @@ from .run_view import (
     StageInstance,
     StageRevision,
 )
+
+# Infrastructure
+from .trace import (
+    LLMCallRecord,
+    ToolCallRecord,
+    TraceRecord,
+)
 from .user import (
     User,
     UserPublic,
 )
 
 __all__ = [
+    # run_view
+    "PRODUCT_STAGES",
     "SCHEMA_VERSION",
-    # user / auth
-    "User",
-    "UserPublic",
+    "STAGE_AGENT",
+    "STATIC_STAGES",
     # agent_io
     "AgentError",
     "AgentInputBase",
     "AgentOutputBase",
     "AgentStatus",
-    # evidence
-    "Evidence",
-    "EvidenceLocation",
-    "RawSourceDoc",
+    # analyst
+    "AnalysisClaim",
+    "AnalysisDimension",
+    # project
+    "AnalysisMode",
+    "AnalysisResult",
+    "AnalystInput",
+    "AnalystOutput",
+    # industry
+    "CollaborationSaasExtension",
+    # collector
+    "CollectConstraints",
+    "CollectDimension",
+    "CollectorInput",
+    "CollectorOutput",
     # competitor
     "CompetitiveAnalysis",
     "CompetitorProfile",
+    "CrmSaasExtension",
+    "CrossBorderEcommerceSaasExtension",
+    # dag
+    "DAGEdge",
+    "DAGNode",
+    "DAGPlan",
+    "DAGState",
+    "DimensionAnalysis",
+    "EduSaasExtension",
+    # evidence
+    "Evidence",
+    "EvidenceLocation",
+    # extractor
+    "ExtractorInput",
+    "ExtractorOutput",
     "Feature",
     "FeatureModule",
     "FeatureProfile",
     "FeedbackTheme",
     "FieldStatus",
     "FreeTrialInfo",
+    "IndustryExtensionUnion",
     "Insight",
     "Integration",
+    # trace
+    "LLMCallRecord",
+    "MaturityScore",
+    # orchestrator
+    "NodeExecutionRequest",
+    "NodeExecutionResult",
+    "NodeStatus",
+    "NodeType",
     "PainPoint",
     "PlanAvailability",
     "PricingModel",
     "PricingPlan",
     "PricingProfile",
     "ProductBasicInfo",
-    "SecurityProfile",
-    "TypicalReview",
-    "UserFeedbackProfile",
-    "UserSegment",
-    # industry
-    "CollaborationSaasExtension",
-    "CrmSaasExtension",
-    "CrossBorderEcommerceSaasExtension",
-    "EduSaasExtension",
-    "IndustryExtensionUnion",
-    "MaturityScore",
-    # collector
-    "CollectConstraints",
-    "CollectDimension",
-    "CollectorInput",
-    "CollectorOutput",
-    # extractor
-    "ExtractorInput",
-    "ExtractorOutput",
-    # analyst
-    "AnalysisClaim",
-    "AnalysisDimension",
-    "AnalysisResult",
-    "AnalystInput",
-    "AnalystOutput",
-    "DimensionAnalysis",
-    # reporter
-    "ReportDraft",
-    "ReportParagraph",
-    "ReportSection",
-    "ReporterInput",
-    "ReporterOutput",
+    "Project",
+    "ProjectMetrics",
+    "ProjectMetricsSnapshot",
+    "ProjectStatus",
     # qa
     "QADimension",
     "QADimensionResult",
     "QAFeedback",
-    "validate_qa_feedback",
     "QAInput",
     "QAIssue",
     "QAOutput",
     "QARouting",
     "QAStatus",
     "QAVerdict",
-    # trace
-    "LLMCallRecord",
-    "ToolCallRecord",
-    "TraceRecord",
-    # dag
-    "DAGEdge",
-    "DAGNode",
-    "DAGPlan",
-    "DAGState",
-    "NodeStatus",
-    "NodeType",
-    # project
-    "AnalysisMode",
-    "Project",
-    "ProjectMetrics",
-    "ProjectMetricsSnapshot",
-    "ProjectStatus",
+    "RawSourceDoc",
+    # reporter
+    "ReportDraft",
+    "ReportParagraph",
+    "ReportSection",
+    "ReporterInput",
+    "ReporterOutput",
     "RunRef",
     "RunSnapshot",
-    # orchestrator
-    "NodeExecutionRequest",
-    "NodeExecutionResult",
-    # run_view
-    "PRODUCT_STAGES",
-    "STAGE_AGENT",
-    "STATIC_STAGES",
     "RunStageView",
     "RunStateView",
+    "SecurityProfile",
     "StageInstance",
     "StageRevision",
+    "ToolCallRecord",
+    "TraceRecord",
+    "TypicalReview",
+    # user / auth
+    "User",
+    "UserFeedbackProfile",
+    "UserPublic",
+    "UserSegment",
+    "validate_qa_feedback",
 ]

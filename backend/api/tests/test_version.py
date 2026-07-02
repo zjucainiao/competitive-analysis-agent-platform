@@ -23,9 +23,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         yield c
 
 
-def test_version_reflects_build_args(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_version_reflects_build_args(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """构建参数注入的 release tag / git SHA 原样出现在 /version。"""
     monkeypatch.setenv("APP_VERSION", "v9.9.9")
     monkeypatch.setenv("APP_GIT_SHA", "deadbee")

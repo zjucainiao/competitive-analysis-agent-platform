@@ -12,7 +12,7 @@ Executor 不感知 DAG 拓扑 / LangGraph state，仅按"一个节点 + 上游 o
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from backend.schemas import (
@@ -31,14 +31,13 @@ from backend.schemas import (
 from .agent_registry import AgentRegistry
 from .inputs import (
     BuildInputError,
-    new_span_id,
+    build_analyst_input,
     build_collector_input,
     build_extractor_input,
-    build_analyst_input,
-    build_reporter_input,
     build_qa_input,
+    build_reporter_input,
+    new_span_id,
 )
-
 
 # ---------- 常量 ----------
 
@@ -58,7 +57,7 @@ _CONTROL_NODE_TYPES = frozenset(
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Executor:
@@ -148,8 +147,10 @@ class Executor:
         # node.metadata['user_prompt_override']。所有重试共用同一个 override。
         user_override = node.metadata.get("user_prompt_override")
 
-        # 2. 重试循环
+        # 2. 重试循环（超时会提前 break，attempts 记录实际尝试次数）
+        attempts = 0
         for attempt in range(node.max_retries + 1):
+            attempts = attempt + 1
             span_id = new_span_id()
             ctx_token = set_trace_context(
                 trace_id=self.trace_id,
@@ -170,17 +171,25 @@ class Executor:
                         ),
                         timeout=node.timeout_ms / 1000.0,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
+                    # 超时不重试：asyncio.wait_for 超时只取消这里的 await，
+                    # to_thread 里的同步 agent.invoke 没有协作式取消、仍会在
+                    # 后台线程跑完（僵尸线程）。此时若重试，会与僵尸线程并发
+                    # 执行同一 agent——重复烧 LLM 配额、trace 交叉、线程池被
+                    # 占满。break 出重试循环直接判失败（保留 hybrid collector
+                    # 的 mock 降级路径），最多只留 1 份僵尸线程。
                     last_error = AgentError(
                         code="LLM_TIMEOUT",
                         message=(
-                            f"node {node.node_id} attempt {attempt + 1} timed out "
-                            f"after {node.timeout_ms}ms"
+                            f"node {node.node_id} timed out after "
+                            f"{node.timeout_ms}ms (attempt {attempt + 1}; "
+                            f"timeout is not retried)"
                         ),
                         severity="error",
-                        retriable=True,
+                        retriable=False,
                     )
-                except Exception as exc:  # noqa: BLE001
+                    break
+                except Exception as exc:
                     last_error = AgentError(
                         code="UNEXPECTED",
                         message=f"{type(exc).__name__}: {exc}",
@@ -204,25 +213,23 @@ class Executor:
                             )
                     else:
                         # SUCCESS / PARTIAL / NEEDS_REWORK 都视作"agent 跑完了"，由下游 QA / feedback 处理
-                        return self._success_result(
-                            node, output, started_at, attempts=attempt + 1
-                        )
+                        return self._success_result(node, output, started_at, attempts=attempt + 1)
             finally:
                 reset_user_prompt_override(override_token)
                 reset_trace_context(ctx_token)
 
             # 还有重试次数则退避
             if attempt < node.max_retries:
-                await asyncio.sleep(self.backoff_base * (_BACKOFF_MULT ** attempt))
+                await asyncio.sleep(self.backoff_base * (_BACKOFF_MULT**attempt))
 
-        # 3. 全部重试用完 —— Collector 在 hybrid 模式下尝试降级到 mock
+        # 3. 重试用完（或超时提前 break）—— Collector 在 hybrid 模式下尝试降级到 mock
         if self._should_degrade_collector(node):
             try:
                 degraded = await self._collector_fallback(node, input_obj)
                 return self._success_result(
-                    node, degraded, started_at, attempts=node.max_retries + 1, degraded=True
+                    node, degraded, started_at, attempts=attempts, degraded=True
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 last_error = AgentError(
                     code="DEGRADATION_FAILED",
                     message=f"collector mock fallback failed: {exc}",
@@ -230,13 +237,9 @@ class Executor:
                     retriable=False,
                 )
 
-        return self._failure_result(
-            node, last_error, started_at, attempts=node.max_retries + 1
-        )
+        return self._failure_result(node, last_error, started_at, attempts=attempts)
 
-    def _resolve_agent(
-        self, node: DAGNode, outputs: dict[str, AgentOutputBase]
-    ):
+    def _resolve_agent(self, node: DAGNode, outputs: dict[str, AgentOutputBase]):
         """为节点选择正确的 Agent 实例。
 
         Reporter / QA：每次新建，注入当前 outputs 汇总出的 Evidence DB（防止
@@ -247,9 +250,7 @@ class Executor:
             from backend.agents.reporter.tools import StaticEvidenceProvider
 
             ev_db = self._collect_evidences(outputs)
-            return self.registry.make_reporter(
-                evidence_provider=StaticEvidenceProvider(ev_db)
-            )
+            return self.registry.make_reporter(evidence_provider=StaticEvidenceProvider(ev_db))
         if node.agent_name == "qa":
             ev_db = self._collect_evidences(outputs)
             return self.registry.make_qa(evidence_db=ev_db)
@@ -315,13 +316,9 @@ class Executor:
             return self._build_reporter_input(node, outputs, qa_feedback)
         if agent_name == "qa":
             return self._build_qa_input(node, outputs, qa_feedback)
-        raise BuildInputError(
-            f"node {node.node_id}: unknown agent_name={agent_name!r}"
-        )
+        raise BuildInputError(f"node {node.node_id}: unknown agent_name={agent_name!r}")
 
-    def _build_collector_input(
-        self, node: DAGNode, qa_feedback: dict | None
-    ):
+    def _build_collector_input(self, node: DAGNode, qa_feedback: dict | None):
         return build_collector_input(
             self.project,
             trace_id=self.trace_id,
@@ -339,9 +336,7 @@ class Executor:
     ):
         product = node.metadata.get("product")
         if not product:
-            raise BuildInputError(
-                f"node {node.node_id}: extractor metadata missing 'product'"
-            )
+            raise BuildInputError(f"node {node.node_id}: extractor metadata missing 'product'")
         # 通过 input_refs 找上游 collector 输出
         upstream_id = next(iter(node.input_refs), None)
         if upstream_id is None or upstream_id not in outputs:
@@ -378,9 +373,7 @@ class Executor:
     ):
         analyst_out = self._latest_output(outputs, prefix_or_id="analyst")
         if analyst_out is None:
-            raise BuildInputError(
-                f"node {node.node_id}: missing analyst output"
-            )
+            raise BuildInputError(f"node {node.node_id}: missing analyst output")
         return build_reporter_input(
             self.project,
             trace_id=self.trace_id,
@@ -397,9 +390,7 @@ class Executor:
         reporter_out = self._latest_output(outputs, prefix_or_id="reporter")
         analyst_out = self._latest_output(outputs, prefix_or_id="analyst")
         if reporter_out is None or analyst_out is None:
-            raise BuildInputError(
-                f"node {node.node_id}: missing reporter/analyst upstream output"
-            )
+            raise BuildInputError(f"node {node.node_id}: missing reporter/analyst upstream output")
         prior_verdicts = self._prior_qa_verdicts(outputs, exclude_node_id=node.node_id)
         return build_qa_input(
             self.project,
@@ -440,9 +431,7 @@ class Executor:
         return outputs[candidates[0][1]]
 
     @staticmethod
-    def _prior_qa_verdicts(
-        outputs: dict[str, AgentOutputBase], *, exclude_node_id: str
-    ) -> list:
+    def _prior_qa_verdicts(outputs: dict[str, AgentOutputBase], *, exclude_node_id: str) -> list:
         """收集所有 QA 节点的 verdict，用于防死循环。"""
         verdicts: list[Any] = []
         for nid, out in outputs.items():

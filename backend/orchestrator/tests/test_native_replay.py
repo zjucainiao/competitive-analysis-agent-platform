@@ -10,18 +10,19 @@
 此测试在 Part A（_run_native 新增 save_qa_verdict 调用）之前必然 FAIL
 （verdicts 未落库 → list_qa_verdicts 返回空列表）；Part A 完成后 PASS。
 """
+
 from __future__ import annotations
 
 import pytest
 
-from backend.storage import build_storage
 from backend.orchestrator.tests.test_native_graph import (
-    _FakeRegistry,
-    _StubQA,
     _block_reporter_verdict,
+    _FakeRegistry,
     _load_demo_project,
     _pass_verdict,
+    _StubQA,
 )
+from backend.storage import build_storage
 
 
 @pytest.fixture
@@ -78,12 +79,9 @@ async def test_replay_from_persisted_state(
     assert plan2 is not None, "get_dag_plan 返回 None：投影 plan 未落库"
 
     node_ids = {n.node_id for n in plan2.nodes}
-    assert "reporter" in node_ids, (
-        f"reporter 节点不在投影 plan 里；现有节点：{sorted(node_ids)}"
-    )
+    assert "reporter" in node_ids, f"reporter 节点不在投影 plan 里；现有节点：{sorted(node_ids)}"
     assert "reporter_v2" in node_ids, (
-        f"reporter_v2 节点不在投影 plan 里（QA 返工未产出 v2）；"
-        f"现有节点：{sorted(node_ids)}"
+        f"reporter_v2 节点不在投影 plan 里（QA 返工未产出 v2）；现有节点：{sorted(node_ids)}"
     )
 
     # ── 2. 从 storage 重建 QA verdict 序列 ──────────────────────────────────
@@ -96,9 +94,5 @@ async def test_replay_from_persisted_state(
 
     # ── 3. 从 storage 重建节点输出 ──────────────────────────────────────────
     outs = await memory_storage.state_store.list_node_outputs(rework_project.project_id)
-    assert "reporter" in outs, (
-        f"reporter 输出未落库；现有 keys：{sorted(outs.keys())}"
-    )
-    assert "qa" in outs, (
-        f"qa 输出未落库；现有 keys：{sorted(outs.keys())}"
-    )
+    assert "reporter" in outs, f"reporter 输出未落库；现有 keys：{sorted(outs.keys())}"
+    assert "qa" in outs, f"qa 输出未落库；现有 keys：{sorted(outs.keys())}"

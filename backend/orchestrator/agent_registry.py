@@ -20,8 +20,7 @@ from backend.agents.collector import Collector
 from backend.agents.extractor import Extractor
 from backend.agents.qa import QA
 from backend.agents.reporter import Reporter
-from backend.observability import NullTracer, build_tracer_from_env
-
+from backend.observability import build_tracer_from_env
 
 _AGENT_CLASSES: dict[str, type[BaseAgent]] = {
     "collector": Collector,
@@ -75,9 +74,7 @@ class AgentRegistry:
 
         cls = _AGENT_CLASSES.get(agent_name)
         if cls is None:
-            raise ValueError(
-                f"unknown agent: {agent_name!r}; known={self.known_agents()}"
-            )
+            raise ValueError(f"unknown agent: {agent_name!r}; known={self.known_agents()}")
 
         kwargs: dict[str, Any] = {
             "mock": False,
@@ -133,7 +130,7 @@ class AgentRegistry:
         tools: Any = None,
         evidence_provider: Any = None,
         service_name: str = "competitive-analysis-agent",
-    ) -> "AgentRegistry":
+    ) -> AgentRegistry:
         """读 ``DOUBAO/DEEPSEEK/OPENAI_API_KEY`` 装配真实 LLM + OTLP Tracer。
 
         - 无 LLM key 直接 ``raise RuntimeError``（不静默退化）。

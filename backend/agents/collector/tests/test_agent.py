@@ -92,7 +92,9 @@ def test_real_mode_robots_blocked_then_fallback_to_mock(make_registry) -> None:
                 SearchHit(url="https://www.notion.so/", title="Notion home", provider="t"),
             ],
             "pricing": [
-                SearchHit(url="https://www.notion.so/pricing", title="Notion pricing", provider="t"),
+                SearchHit(
+                    url="https://www.notion.so/pricing", title="Notion pricing", provider="t"
+                ),
             ],
         }
     )
@@ -258,9 +260,7 @@ def test_paywall_blocked_when_not_allowed(make_registry) -> None:
 
 def test_domain_rate_limiter_invoked(make_registry) -> None:
     url = "https://asana.com/"
-    search = FakeSearch(
-        fixed={"official": [SearchHit(url=url, title="Asana home", provider="t")]}
-    )
+    search = FakeSearch(fixed={"official": [SearchHit(url=url, title="Asana home", provider="t")]})
     firecrawl = FakeScrape(
         name="scrape.firecrawl",
         enabled=True,
@@ -360,13 +360,10 @@ def test_reviews_via_llm_empty_finding_falls_through_to_seed(make_registry) -> N
 
     # LLM 路径报了 NO_RELEVANT_RESULTS
     assert any(
-        e.code == "NO_RELEVANT_RESULTS" and "LLM web search" in e.message
-        for e in out.errors
+        e.code == "NO_RELEVANT_RESULTS" and "LLM web search" in e.message for e in out.errors
     )
     # FakeLLM 被调用过一次（验证 LLM 主路径真的走了）
-    assert any(
-        c["response_format"] is _ReviewsFinding for c in fake_llm.call_log
-    )
+    assert any(c["response_format"] is _ReviewsFinding for c in fake_llm.call_log)
 
 
 def test_reviews_via_llm_failure_does_not_break_flow(make_registry) -> None:
@@ -383,10 +380,7 @@ def test_reviews_via_llm_failure_does_not_break_flow(make_registry) -> None:
     out = agent.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id)
 
     # LLM 路径报错被吃掉
-    assert any(
-        e.code == "TOOL_FAILED" and "reviews_finder" in e.message
-        for e in out.errors
-    )
+    assert any(e.code == "TOOL_FAILED" and "reviews_finder" in e.message for e in out.errors)
     # 没 scraper enabled 时主链也拿不到东西，但流程不崩
     assert out.status in (AgentStatus.FAILED, AgentStatus.PARTIAL)
 
@@ -539,9 +533,7 @@ def test_qa_feedback_reaches_reviews_finder_prompt(make_registry) -> None:
     agent.invoke(inp, trace_id=inp.trace_id, span_id=inp.span_id)
 
     # 找 reviews_finder 那次 chat（response_format == _ReviewsFinding）
-    reviews_calls = [
-        c for c in fake_llm.call_log if c["response_format"] is _ReviewsFinding
-    ]
+    reviews_calls = [c for c in fake_llm.call_log if c["response_format"] is _ReviewsFinding]
     assert reviews_calls, "reviews_finder LLM 路径未触达"
     user_content = next(
         (m["content"] for m in reviews_calls[0]["messages"] if m["role"] == "user"),
@@ -709,34 +701,23 @@ def _doc(
 def test_environmental_failure_with_usable_coverage_keeps_confidence() -> None:
     """某页短文本/失败，但该维度还有可用源 → confidence 不降（按可用覆盖，不按失败页数）。"""
     agent = Collector(mock=True)
-    inp = make_collector_input(
-        product_name="Notion", dimensions=[CollectDimension.FEATURES]
-    )
+    inp = make_collector_input(product_name="Notion", dimensions=[CollectDimension.FEATURES])
     good = _doc(agent, inp, CollectDimension.FEATURES, url="https://notion.so/features")
-    short = _doc(
-        agent, inp, CollectDimension.FEATURES, url="https://blog.com/n", text="x"
-    )
+    short = _doc(agent, inp, CollectDimension.FEATURES, url="https://blog.com/n", text="x")
     # 维度仍有 1 个可用源 → 不扣分
-    assert agent._compute_confidence(
-        [good, short], [CollectDimension.FEATURES]
-    ) == pytest.approx(agent.BASE_CONFIDENCE)
-    # 但若该维度**只有**短文本（无可用源）→ 实质缺口，扣分
-    assert (
-        agent._compute_confidence([short], [CollectDimension.FEATURES])
-        < agent.BASE_CONFIDENCE
+    assert agent._compute_confidence([good, short], [CollectDimension.FEATURES]) == pytest.approx(
+        agent.BASE_CONFIDENCE
     )
+    # 但若该维度**只有**短文本（无可用源）→ 实质缺口，扣分
+    assert agent._compute_confidence([short], [CollectDimension.FEATURES]) < agent.BASE_CONFIDENCE
 
 
 def test_self_critique_separates_actionable_and_environmental() -> None:
     """self_critique 把「需处理(身份不符)」与「采集受限(正文过短,信息性)」分开。"""
     agent = Collector(mock=True)
-    inp = make_collector_input(
-        product_name="Coda", dimensions=[CollectDimension.FEATURES]
-    )
+    inp = make_collector_input(product_name="Coda", dimensions=[CollectDimension.FEATURES])
     good = _doc(agent, inp, CollectDimension.FEATURES, url="https://coda.io/features")
-    short = _doc(
-        agent, inp, CollectDimension.FEATURES, url="https://blog.com/c", text="x"
-    )
+    short = _doc(agent, inp, CollectDimension.FEATURES, url="https://blog.com/c", text="x")
     mism = _doc(
         agent,
         inp,
@@ -745,9 +726,7 @@ def test_self_critique_separates_actionable_and_environmental() -> None:
         identity_status="mismatch",
         detected="YouTube",
     )
-    crit = agent._build_self_critique(
-        [good, short, mism], [CollectDimension.FEATURES], []
-    )
+    crit = agent._build_self_critique([good, short, mism], [CollectDimension.FEATURES], [])
     assert "需处理:" in crit and "采集受限" in crit
     actionable_part = crit.split("采集受限")[0]
     assert "身份不符" in actionable_part, "身份不符应在「需处理」段"

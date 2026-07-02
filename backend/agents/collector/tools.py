@@ -389,9 +389,7 @@ def _parse_ddg_results(html: str, *, provider_name: str, limit: int) -> list[Sea
         title = a.get_text(strip=True) or None
         snippet_el = result.select_one(".result__snippet")
         snippet = snippet_el.get_text(strip=True) if snippet_el else None
-        hits.append(
-            SearchHit(url=real_url, title=title, snippet=snippet, provider=provider_name)
-        )
+        hits.append(SearchHit(url=real_url, title=title, snippet=snippet, provider=provider_name))
         if len(hits) >= limit:
             break
     return hits
@@ -611,9 +609,7 @@ class Crawl4AIScraper:
             title=title,
             fetched_with=self.name,
             detected_paywall=detect_paywall(html, text),
-            error=None
-            if result.success and text
-            else (result.error_message or "empty_text"),
+            error=None if result.success and text else (result.error_message or "empty_text"),
         )
 
 

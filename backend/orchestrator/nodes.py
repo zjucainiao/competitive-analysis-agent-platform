@@ -17,9 +17,11 @@
 - ``add_edge("collect_one","extract_dispatch")`` 让 extract_dispatch 在**所有**
   collect_one 完成后只跑一次(barrier),看到合并后的全局 state。
 """
+
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from langgraph.graph import END
 from langgraph.types import Command, Send
@@ -101,9 +103,7 @@ def _node_run(
     )
 
 
-def _build_failed_run(
-    *, node: str, agent: str, product: str | None, round_: int
-) -> dict:
+def _build_failed_run(*, node: str, agent: str, product: str | None, round_: int) -> dict:
     """构造一个「构造输入即失败」的 node 返回(无 outputs + 一条 failed NodeRun)。
 
     fail-soft:``build_*_input`` 在 ``run_agent_node`` 之前调用,若上游缺失(collector
@@ -235,9 +235,7 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
                     {
                         "product": p,
                         # 取该产品「最新轮」collect 产物(返工后裸 key 可能仍是 v1)
-                        "collector_output": latest_output(
-                            state.outputs, f"collect.{p}"
-                        ),
+                        "collector_output": latest_output(state.outputs, f"collect.{p}"),
                         "round": round_,
                         "qa_feedback": fb.get(f"extract.{p}"),
                         "prompt_override": ov.get(f"extract.{p}"),
@@ -304,9 +302,7 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
         except BuildInputError:
             # 全部上游 extractor 失败 → 无 profiles → 不崩图,记 failed analyst,
             # 下游 reporter/qa 的 None fail-soft 接力优雅收尾。
-            return _build_failed_run(
-                node="analyst", agent="analyst", product=None, round_=round_
-            )
+            return _build_failed_run(node="analyst", agent="analyst", product=None, round_=round_)
         ref = versioned_ref("analyst", round_)
         res = await run_agent_node(
             registry,
@@ -356,9 +352,7 @@ def make_nodes(registry: Any, *, project: Any) -> dict[str, Callable]:
             }
         # B1 定向改稿：返工轮(round_>=2)把上一版 draft 传进去，让 reporter 只重写
         # 被 QA 命中的 section，其余复用 → 反馈真正有抓手。首轮无 prior。
-        prior_reporter = (
-            latest_output(state.outputs, "reporter") if round_ >= 2 else None
-        )
+        prior_reporter = latest_output(state.outputs, "reporter") if round_ >= 2 else None
         prior_draft = getattr(prior_reporter, "draft", None)
         inp = build_reporter_input(
             project,

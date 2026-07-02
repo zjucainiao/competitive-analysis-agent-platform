@@ -94,7 +94,27 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "N", "RUF"]
-ignore = ["E501"]  # line too long handled by formatter
+ignore = [
+    "E501",    # line too long handled by formatter
+    # RUF001/002/003（ambiguous-unicode）与本仓库中文注释/文档约定冲突：
+    # 全角标点（，、：等）会被整库误报数千条，精确豁免这三条；RUF 其余规则保留
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    # UP042（class Foo(str, Enum) → StrEnum）会改变 str()/f-string 行为，
+    # 且本仓库枚举大量参与 Pydantic 序列化与前端契约，机械迁移风险大于收益，缓办
+    "UP042",
+    # UP046（Generic[T] → PEP 695 类型参数）：BaseAgent 的 TypeVar 被各 agent
+    # 子类共享引用，机械迁移影响导出面，与 UP042 一并缓办
+    "UP046",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI 惯用法：路由签名里 Depends()/Query() 作默认参数是框架设计，非 bug
+"backend/api/**" = ["B008"]
+# 刻意布局：SCHEMA_VERSION 常量 + 版本变更注释置顶（先于 re-export import 块），
+# 是本包的「版本即文档」约定，非疏忽
+"backend/schemas/__init__.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -108,6 +128,8 @@ disallow_untyped_defs = false  # v1 阶段允许，v2 启用
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# 默认反选 e2e（真实网络 / 真实 LLM，慢且烧钱）；显式跑需追加 `-m e2e` 覆盖
+addopts = '-m "not e2e"'
 markers = [
     "slow: marks tests as slow",
     "e2e: end-to-end integration tests",
@@ -115,4 +137,4 @@ markers = [
     "redis: requires a running Redis (REDIS_URL env var)",
     "otlp: requires opentelemetry SDK + exporter installed",
 ]
-testpaths = ["backend/tests", "backend/agents", "backend/orchestrator", "backend/storage", "backend/api", "backend/tools", "backend/llm", "backend/observability"]
+testpaths = ["backend/agents", "backend/orchestrator", "backend/storage", "backend/api", "backend/tools", "backend/llm", "backend/observability"]

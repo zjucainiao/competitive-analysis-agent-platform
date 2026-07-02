@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -17,7 +16,6 @@ from backend.orchestrator.planner import Planner
 from backend.schemas import (
     AnalysisDimension,
     CollectConstraints,
-    NodeType,
     Project,
     ProjectStatus,
 )
@@ -32,7 +30,7 @@ def _make_project(
         project_id="proj_adaptive_test",
         project_name="adaptive test",
         owner="u",
-        created_at=datetime(2026, 6, 2, tzinfo=timezone.utc),
+        created_at=datetime(2026, 6, 2, tzinfo=UTC),
         target_product=target,
         competitors=list(competitors),
         industry=industry,
@@ -88,9 +86,18 @@ def test_adaptive_plan_returns_standard_shape() -> None:
     assert len(plan.nodes) == 12
     by_id = {n.node_id: n for n in plan.nodes}
     for nid in [
-        "start", "collect.notion", "collect.asana", "collect.clickup",
-        "extract.notion", "extract.asana", "extract.clickup",
-        "join_extract", "analyst", "reporter", "qa", "end",
+        "start",
+        "collect.notion",
+        "collect.asana",
+        "collect.clickup",
+        "extract.notion",
+        "extract.asana",
+        "extract.clickup",
+        "join_extract",
+        "analyst",
+        "reporter",
+        "qa",
+        "end",
     ]:
         assert nid in by_id, f"missing {nid}"
 
@@ -100,12 +107,8 @@ def test_adaptive_plan_seeds_official_url() -> None:
     out = _AdaptivePlanOutput(
         rationale="seed test",
         products=[
-            _AdaptiveProduct(
-                name="Notion", official_url="https://notion.so", notes="文档协作"
-            ),
-            _AdaptiveProduct(
-                name="Asana", official_url="https://asana.com", notes="项目管理"
-            ),
+            _AdaptiveProduct(name="Notion", official_url="https://notion.so", notes="文档协作"),
+            _AdaptiveProduct(name="Asana", official_url="https://asana.com", notes="项目管理"),
         ],
         collect_dimensions=["homepage", "pricing"],
         confidence=0.85,
@@ -181,9 +184,9 @@ def test_adaptive_plan_falls_back_when_all_dimensions_invalid() -> None:
 
 def test_adaptive_plan_rationale_marked() -> None:
     project = _make_project()
-    plan = AdaptivePlanner(
-        llm=_StubLLM(_canned_output(["Notion", "Asana", "ClickUp"]))
-    ).plan(project)
+    plan = AdaptivePlanner(llm=_StubLLM(_canned_output(["Notion", "Asana", "ClickUp"]))).plan(
+        project
+    )
     assert plan.rationale.startswith("[adaptive]")
     assert plan.template_id is None
 

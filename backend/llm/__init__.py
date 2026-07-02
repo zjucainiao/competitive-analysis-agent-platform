@@ -46,14 +46,19 @@ def __getattr__(name: str) -> Any:
     """
     if name in ("OpenAICompatibleLLM", "LLMResponse"):
         from backend.agents.collector.llm_providers import (
-            LLMResponse as _LR,
-            OpenAICompatibleLLM as _OCL,
+            LLMResponse as _LLMResponse,
+        )
+        from backend.agents.collector.llm_providers import (
+            OpenAICompatibleLLM as _OpenAICompatibleLLM,
         )
 
         # 缓存到模块全局，下次直接 getattr，不再走 __getattr__
-        globals()["LLMResponse"] = _LR
-        globals()["OpenAICompatibleLLM"] = _OCL
-        return {"LLMResponse": _LR, "OpenAICompatibleLLM": _OCL}[name]
+        globals()["LLMResponse"] = _LLMResponse
+        globals()["OpenAICompatibleLLM"] = _OpenAICompatibleLLM
+        return {
+            "LLMResponse": _LLMResponse,
+            "OpenAICompatibleLLM": _OpenAICompatibleLLM,
+        }[name]
     raise AttributeError(f"module 'backend.llm' has no attribute {name!r}")
 
 

@@ -10,7 +10,7 @@ token 是 JWT(HS256)，前端存起来后在 ``Authorization: Bearer`` 里带上
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -47,6 +47,7 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     """登录/注册成功返回。token_type 固定 bearer。"""
+
     model_config = ConfigDict(extra="forbid")
     access_token: str
     token_type: str = "bearer"
@@ -78,7 +79,7 @@ async def register(
         email=email,
         password_hash=hash_password(req.password),
         display_name=req.display_name.strip(),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     try:
         await storage.state_store.create_user(user)

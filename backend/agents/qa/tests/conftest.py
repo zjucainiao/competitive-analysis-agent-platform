@@ -19,9 +19,7 @@ class NullLLM:
     """空 LLM 桩。chat 报错 → checker 走规则降级。"""
 
     def chat(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError(
-            "NullLLM.chat called — QA checker should fall back to rules"
-        )
+        raise NotImplementedError("NullLLM.chat called — QA checker should fall back to rules")
 
     def embed(self, texts: list[str], **kwargs: Any) -> list[list[float]]:
         return [[0.0] * 8 for _ in texts]

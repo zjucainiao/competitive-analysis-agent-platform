@@ -103,9 +103,7 @@ def test_missing_competitor_profile_marks_partial() -> None:
 
     assert out.status in (AgentStatus.PARTIAL, AgentStatus.NEEDS_REWORK)
     assert any(e.code == "PROFILE_INCOMPLETE" for e in out.errors)
-    assert "Asana" in next(
-        e.message for e in out.errors if e.code == "PROFILE_INCOMPLETE"
-    )
+    assert "Asana" in next(e.message for e in out.errors if e.code == "PROFILE_INCOMPLETE")
 
 
 # ---------- 3. pricing 启发式语义 ----------

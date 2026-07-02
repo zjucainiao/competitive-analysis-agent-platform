@@ -18,13 +18,13 @@ import threading
 import time
 import traceback
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import (
     Any,
     ClassVar,
     Generic,
-    Iterator,
     Protocol,
     TypeVar,
     runtime_checkable,
@@ -49,9 +49,7 @@ from backend.schemas.agent_io import (
 # 这是个跨 Agent 的人工介入兜底：用户 PATCH /nodes/{nid}/edit-prompt 后，无需
 # 任何 Agent 子类配合即可生效；具体效果取决于 LLM 对 USER OVERRIDE 块的服从度。
 
-_USER_PROMPT_OVERRIDE: ContextVar[str | None] = ContextVar(
-    "_USER_PROMPT_OVERRIDE", default=None
-)
+_USER_PROMPT_OVERRIDE: ContextVar[str | None] = ContextVar("_USER_PROMPT_OVERRIDE", default=None)
 
 
 def set_user_prompt_override(text: str | None):
@@ -66,6 +64,7 @@ def reset_user_prompt_override(token) -> None:
 
 def _current_user_prompt_override() -> str | None:
     return _USER_PROMPT_OVERRIDE.get()
+
 
 # ---------- Type variables ----------
 
@@ -101,8 +100,7 @@ class LLMProviderProtocol(Protocol):
         """同步对话。返回值由实现决定（通常含 .parsed / .usage / .raw）。"""
         ...
 
-    def embed(self, texts: list[str], **kwargs: Any) -> list[list[float]]:
-        ...
+    def embed(self, texts: list[str], **kwargs: Any) -> list[list[float]]: ...
 
 
 @runtime_checkable
@@ -131,11 +129,9 @@ class TracerProtocol(Protocol):
 class ToolRegistryProtocol(Protocol):
     """工具注册表的最小接口。"""
 
-    def get(self, name: str) -> Any:
-        ...
+    def get(self, name: str) -> Any: ...
 
-    def has(self, name: str) -> bool:
-        ...
+    def has(self, name: str) -> bool: ...
 
 
 # ---------- Errors ----------
@@ -171,7 +167,7 @@ class _LLMUsageCounter:
     ``add`` 的 read-modify-write 用锁保护。
     """
 
-    __slots__ = ("tokens_input", "tokens_output", "cost_usd", "_lock")
+    __slots__ = ("_lock", "cost_usd", "tokens_input", "tokens_output")
 
     def __init__(self) -> None:
         self.tokens_input: int = 0
@@ -247,15 +243,14 @@ class _TrackingLLMWrapper:
                         model=model,
                         system_prompt=kwargs.get("system", ""),
                         messages=kwargs.get("messages"),
-                        response=getattr(resp, "content", None)
-                        or getattr(resp, "parsed", None),
+                        response=getattr(resp, "content", None) or getattr(resp, "parsed", None),
                         tokens_input=tokens_in,
                         tokens_output=tokens_out,
                         cost_usd=cost,
                         finish_reason=getattr(resp, "finish_reason", None),
                         duration_ms=duration_ms,
                     )
-                except Exception:  # noqa: BLE001
+                except Exception:
                     # tracer 异常永远不阻塞主流程
                     pass
         return resp
@@ -273,7 +268,7 @@ def _estimate_call_cost(model: str, tokens_in: int, tokens_out: int) -> float:
     """惰性 import 价格表，避免 backend.agents._base ↔ backend.llm 循环。"""
     try:
         from backend.llm.pricing import estimate_cost
-    except Exception:  # noqa: BLE001
+    except Exception:
         return 0.0
     return estimate_cost(model, tokens_in, tokens_out)
 
@@ -369,10 +364,7 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
         if not isinstance(inp, self.input_model):
             raise AgentRunError(
                 code="INPUT_INVALID",
-                message=(
-                    f"Expected {self.input_model.__name__}, "
-                    f"got {type(inp).__name__}"
-                ),
+                message=(f"Expected {self.input_model.__name__}, got {type(inp).__name__}"),
                 retriable=False,
             )
 
@@ -415,7 +407,7 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
                     duration_ms=int((time.monotonic() - started) * 1000),
                 )
                 self._safe_set_error(span, e)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 tb = traceback.format_exc()
                 errors.append(
                     AgentError(
@@ -442,8 +434,7 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
                     AgentError(
                         code="OUTPUT_TYPE_MISMATCH",
                         message=(
-                            f"Expected {self.output_model.__name__}, "
-                            f"got {type(out).__name__}"
+                            f"Expected {self.output_model.__name__}, got {type(out).__name__}"
                         ),
                         severity="fatal",
                         retriable=False,
@@ -525,8 +516,7 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
     def _run_mock(self, inp: TInput) -> TOutput:
         """Mock 模式。默认子类应当覆盖（return fixture）。"""
         raise NotImplementedError(
-            f"{self.name}._run_mock not implemented. "
-            "Override to support mock mode."
+            f"{self.name}._run_mock not implemented. Override to support mock mode."
         )
 
     def _post_validate(self, out: TOutput, inp: TInput) -> None:
@@ -570,10 +560,9 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
             span_id=span_id,
             status=AgentStatus.FAILED,
             confidence=0.0,
-            self_critique=(
-                "Execution failed; see errors. "
-                + "; ".join(e.message for e in errors)
-            )[:1000],
+            self_critique=("Execution failed; see errors. " + "; ".join(e.message for e in errors))[
+                :1000
+            ],
             tokens_input=0,
             tokens_output=0,
             cost_usd=0.0,
@@ -613,7 +602,7 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
             from backend.observability.io_snapshot import summarize_agent_input
 
             out.input_snapshot = summarize_agent_input(inp)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     @staticmethod
@@ -623,7 +612,7 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
         if callable(setter):
             try:
                 setter(out)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
     @staticmethod
@@ -632,14 +621,14 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
         if callable(setter):
             try:
                 setter(err)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
 
 class _NullSpan:
     """无 tracer 时的占位 span（仅用于 mock 模式下的单元测试）。"""
 
-    def __enter__(self) -> "_NullSpan":
+    def __enter__(self) -> _NullSpan:
         return self
 
     def __exit__(self, *args: Any) -> None:

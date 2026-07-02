@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -40,9 +41,7 @@ class DiscoveredCompetitor(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    reason: str = Field(
-        description="为什么把它列为竞品（一句话给用户做判断依据）"
-    )
+    reason: str = Field(description="为什么把它列为竞品（一句话给用户做判断依据）")
     official_url: str | None = None
 
 
@@ -112,14 +111,17 @@ async def discover_competitors(
     )
 
     try:
-        resp = llm.chat(
+        # llm.chat 是同步阻塞客户端（底层 openai.OpenAI），一次调用数秒；
+        # 挪进线程池执行，避免卡死整个事件循环（与 orchestrator run_agent 一致）。
+        resp = await asyncio.to_thread(
+            llm.chat,
             system=_DISCOVER_SYSTEM,
             messages=[{"role": "user", "content": user_prompt}],
             response_format=_DiscoverLLMResponse,
             temperature=0.2,
             max_tokens=800,
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         _log.exception("discover-competitors LLM call failed: %s", e)
         return DiscoverCompetitorsResponse(
             target_product=req.target_product,
@@ -139,11 +141,7 @@ async def discover_competitors(
 
     # 去掉 target_product 自己被列进去的情况（LLM 偶尔会犯）
     dedup_name = req.target_product.strip().lower()
-    filtered = [
-        c
-        for c in parsed.competitors
-        if c.name.strip().lower() != dedup_name
-    ]
+    filtered = [c for c in parsed.competitors if c.name.strip().lower() != dedup_name]
     # 限上限
     filtered = filtered[: req.max_competitors]
 
@@ -164,7 +162,7 @@ def _coerce(resp: Any) -> _DiscoverLLMResponse | None:
     if isinstance(parsed, dict):
         try:
             return _DiscoverLLMResponse.model_validate(parsed)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
     # 兜底：从 content 字符串 JSON 解
     content = getattr(resp, "content", None) or getattr(resp, "text", None)
@@ -172,6 +170,6 @@ def _coerce(resp: Any) -> _DiscoverLLMResponse | None:
         try:
             data = json.loads(content)
             return _DiscoverLLMResponse.model_validate(data)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
     return None

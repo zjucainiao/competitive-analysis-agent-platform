@@ -8,6 +8,7 @@ contract: run_state_to_view 接受 RunState.model_dump() 产出的 dict
 - token/cost/confidence 从 outputs 派生；
 - 整体 status 推导（done / failed / aborted / running）。
 """
+
 from __future__ import annotations
 
 import json
@@ -20,18 +21,14 @@ from backend.orchestrator.run_view import run_state_to_view
 from backend.schemas import Project, ProjectMetrics
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_DEMO_PROJECT_FILE = (
-    _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
-)
+_DEMO_PROJECT_FILE = _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"
 
 
 @pytest.fixture()
 def two_product_project() -> Project:
     data = json.loads(_DEMO_PROJECT_FILE.read_text(encoding="utf-8"))
     proj = Project.model_validate(data)
-    return proj.model_copy(
-        update={"target_product": "Notion", "competitors": ["Asana"]}
-    )
+    return proj.model_copy(update={"target_product": "Notion", "competitors": ["Asana"]})
 
 
 def _nr(
@@ -152,9 +149,7 @@ def test_collect_extract_instances_per_product(rework_state, two_product_project
 
 def test_instance_metrics_pulled_from_outputs(rework_state, two_product_project):
     view = run_state_to_view(rework_state, project=two_product_project)
-    notion = next(
-        i for i in _stage(view, "collect").instances if i.product == "Notion"
-    )
+    notion = next(i for i in _stage(view, "collect").instances if i.product == "Notion")
     assert notion.run_ref == "collect.Notion"
     assert notion.tokens_input == 100
     assert notion.tokens_output == 50
@@ -219,12 +214,19 @@ def test_rework_in_progress_reports_running_not_done(two_product_project):
         # QA blocking reject → 节点状态是 partial（不是 needs_rework）
         _nr("qa", "qa", round_=1, status="partial", output_ref="qa"),
         # 返工轮上游已启动
-        _nr("collect", "collector", product="Asana", round_=2, status="partial",
-            output_ref="collect.Asana_v2"),
+        _nr(
+            "collect",
+            "collector",
+            product="Asana",
+            round_=2,
+            status="partial",
+            output_ref="collect.Asana_v2",
+        ),
     ]
     state.qa_round = 1
-    state.verdicts = [{"verdict_id": "v1", "blocking": True,
-                       "routing": [{"target_agent": "collector"}]}]
+    state.verdicts = [
+        {"verdict_id": "v1", "blocking": True, "routing": [{"target_agent": "collector"}]}
+    ]
     view = run_state_to_view(state.model_dump(), project=two_product_project)
     assert view.status == "running"
 
@@ -246,8 +248,9 @@ def test_blocking_qa_last_entry_still_running(two_product_project):
         _nr("qa", "qa", round_=1, status="partial", output_ref="qa"),
     ]
     state.qa_round = 1
-    state.verdicts = [{"verdict_id": "v1", "blocking": True,
-                       "routing": [{"target_agent": "collector"}]}]
+    state.verdicts = [
+        {"verdict_id": "v1", "blocking": True, "routing": [{"target_agent": "collector"}]}
+    ]
     view = run_state_to_view(state.model_dump(), project=two_product_project)
     assert view.status == "running"
 
@@ -333,8 +336,7 @@ def test_failed_status_when_terminal_node_failed(two_product_project):
         products=["Notion"],
     )
     state.history = [
-        _nr("collect", "collector", product="Notion", status="failed",
-            output_ref="collect.Notion"),
+        _nr("collect", "collector", product="Notion", status="failed", output_ref="collect.Notion"),
     ]
     view = run_state_to_view(state.model_dump(), project=two_product_project)
     assert view.status == "failed"
