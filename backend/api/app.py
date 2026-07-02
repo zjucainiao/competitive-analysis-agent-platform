@@ -32,6 +32,7 @@ from .routes import (
     reports,
     runs,
 )
+from .run_lifecycle import ensure_single_worker
 from .security import ensure_jwt_secret
 from .version import build_version_info
 
@@ -78,6 +79,10 @@ def create_app(
         # 放 lifespan 而非构造期：模块 import（默认 app 实例）不炸，行为与
         # AgentRegistry.from_env 的"无 key 启动报错"一致。
         ensure_jwt_secret(mode)
+        # 单进程守卫：run 控制面（running_tasks 防重/stop/pause）与 LLM-call 环形
+        # 缓冲都是进程内状态，多 worker 部署下会静默失效——检测到多 worker 环境
+        # 变量（UVICORN_WORKERS / WEB_CONCURRENCY / GUNICORN_CMD_ARGS 等）即拒启。
+        ensure_single_worker()
 
         storage = build_storage(mode=mode, pg_dsn=pg_dsn, redis_url=redis_url)
         await init_storage(storage)
@@ -90,6 +95,10 @@ def create_app(
         app.state.agent_registry = registry
         app.state.orchestrator = orch
         app.state.running_tasks = {}
+        # spawn 锁：把所有发起后台 run 路径的「检查/取消旧任务 → create_task →
+        # 登记」整段原子化，堵 start_run 并发双击起两个 run 的 TOCTOU（P1）。
+        # 进程级即可——上面的 ensure_single_worker 已保证单 worker 部署。
+        app.state.run_spawn_lock = asyncio.Lock()
 
         _log.info(
             "API started (mode=%s, agent_mode=real, schema=%s)",

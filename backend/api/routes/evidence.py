@@ -20,13 +20,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from ulid import ULID
 
 from backend.api.deps import get_orchestrator, get_owned_project, get_storage
+from backend.api.run_lifecycle import drive_run_to_completion, is_native_engine
 from backend.orchestrator import Orchestrator
 from backend.orchestrator.orchestrator import _apply_feedback_outcome
 from backend.schemas import (
@@ -43,6 +44,7 @@ from backend.schemas import (
     QAVerdict,
     ReporterOutput,
 )
+from backend.schemas.project import RunRef
 from backend.storage import Storage
 
 router = APIRouter(tags=["evidence"])
@@ -147,37 +149,44 @@ async def patch_evidence(
     )
 
     running_tasks: dict[str, asyncio.Task] = request.app.state.running_tasks
-    busy = (existing := running_tasks.get(project_id)) is not None and not existing.done()
+    # P1-TOCTOU：busy 检查与 create_task 之间隔着多个 await，持 spawn 锁把
+    # 「检查 → 起后台任务 → 登记」原子化（与 start_run / interventions 同一把锁）。
+    spawn_lock: asyncio.Lock = request.app.state.run_spawn_lock
     latest_project = await storage.state_store.get_project(project_id)
     run_project = latest_project or project
 
-    if os.getenv("ORCH_ENGINE", "native") == "native":
+    if is_native_engine():
         # P1-AUTOREWORK：native 走「定向返工」——只重跑 reporter(+qa)，复用 checkpoint 里
         # 既有 collect/extract/analyst，而不是经 FeedbackRouter 派生 plan、被 native 忽略后
         # 从头重跑整个项目。
         from backend.orchestrator.routing import _build_qa_feedback_by_node
 
+        # 返工延续「当前 run」的身份（rework_native 读的就是最近 RunRef 那条 thread）；
+        # 无 RunRef 意味着从未经 API 起过 run、也就没有可返工的 checkpoint，不起任务。
         run_id = run_project.runs[-1].run_id if run_project.runs else None
         await storage.state_store.save_qa_verdict(project_id, verdict, run_id=run_id)
         fb = _build_qa_feedback_by_node(verdict, chosen="reporter", rework=[], qa_round=1)
         triggered = False
-        if not busy and fb:
-
-            async def _rework_bg() -> None:
-                try:
-                    async for _ in orch.rework_native(run_project, qa_feedback_by_node=fb):
-                        pass
-                    await storage.state_store.update_project_status(project_id, ProjectStatus.DONE)
-                except Exception:
-                    _log.exception("evidence-auto-rework(native) failed project=%s", project_id)
-                    await storage.state_store.update_project_status(
-                        project_id, ProjectStatus.FAILED
-                    )
-
-            await storage.state_store.update_project_status(project_id, ProjectStatus.RUNNING)
-            task = asyncio.create_task(_rework_bg(), name=f"evidence-rework-{project_id}-{ULID()}")
-            running_tasks[project_id] = task
-            triggered = True
+        async with spawn_lock:
+            busy = (existing := running_tasks.get(project_id)) is not None and not existing.done()
+            if not busy and fb and run_id is not None:
+                await storage.state_store.update_project_status(project_id, ProjectStatus.RUNNING)
+                # 收尾走共享 drive_run_to_completion：返工结束后回写同一 RunRef 的终态，
+                # 并按同 (project_id, run_id) 主键把快照刷新为含返工产物的最新终态——
+                # 修复前这里只改 project status，返工后快照停留在返工前(P1)。
+                task = asyncio.create_task(
+                    drive_run_to_completion(
+                        orch.rework_native(run_project, qa_feedback_by_node=fb),
+                        storage=storage,
+                        orch=orch,
+                        project=run_project,
+                        run_id=run_id,
+                        label="evidence-rework",
+                    ),
+                    name=f"evidence-rework-{project_id}-{ULID()}",
+                )
+                running_tasks[project_id] = task
+                triggered = True
 
         return EvidenceDisputeResponse(
             evidence_id=evidence_id,
@@ -215,21 +224,39 @@ async def patch_evidence(
     await storage.state_store.save_dag_plan(new_plan)
 
     triggered = False
-    if not busy:
-
-        async def _resume_in_bg() -> None:
-            try:
-                async for _ in orch.run(new_plan, run_project):
-                    pass
-                await storage.state_store.update_project_status(project_id, ProjectStatus.DONE)
-            except Exception:
-                _log.exception("evidence-auto-rework run failed for project=%s", project_id)
-                await storage.state_store.update_project_status(project_id, ProjectStatus.FAILED)
-
-        await storage.state_store.update_project_status(project_id, ProjectStatus.RUNNING)
-        task = asyncio.create_task(_resume_in_bg(), name=f"evidence-rework-{project_id}-{ULID()}")
-        running_tasks[project_id] = task
-        triggered = True
+    async with spawn_lock:
+        busy = (existing := running_tasks.get(project_id)) is not None and not existing.done()
+        if not busy:
+            # legacy 返工是一次真实的新 run：补建 RunRef（修复前无 RunRef，违背
+            # 「每个真实执行的 run 都有 RunRef + 终态 + 快照」不变式），收尾同样
+            # 走共享 drive_run_to_completion。
+            run_id = f"run_{ULID()}"
+            new_run = RunRef(
+                run_id=run_id,
+                plan_id=new_plan.plan_id,
+                started_at=datetime.now(UTC),
+                final_status=None,
+            )
+            project_with_run = run_project.model_copy(
+                update={
+                    "runs": [*run_project.runs, new_run],
+                    "status": ProjectStatus.RUNNING,
+                }
+            )
+            await storage.state_store.save_project(project_with_run)
+            task = asyncio.create_task(
+                drive_run_to_completion(
+                    orch.run(new_plan, project_with_run, run_id=run_id),
+                    storage=storage,
+                    orch=orch,
+                    project=project_with_run,
+                    run_id=run_id,
+                    label="evidence-rework",
+                ),
+                name=f"evidence-rework-{project_id}-{ULID()}",
+            )
+            running_tasks[project_id] = task
+            triggered = True
 
     return EvidenceDisputeResponse(
         evidence_id=evidence_id,

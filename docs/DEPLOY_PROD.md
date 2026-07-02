@@ -196,7 +196,13 @@ $C exec backend curl -fsS http://localhost:8000/version
 - **托管数据库**：把 PG/Redis 换成云托管，删掉 compose 里这两个 service，
   把真实连接串写进 `.env.prod` 的 `POSTGRES_DSN` / `REDIS_URL`，并删掉 compose `backend.environment` 里对应的覆盖。
 - **可观测**：配 `OTEL_EXPORTER_OTLP_ENDPOINT` 指向 Jaeger/Tempo，agent span + LLM call 全量入外部 trace。
-- **横向扩展**：state 都在 PG/Redis，后端可多副本 + 负载均衡；但进程内 LLM-call 实时缓冲是 per-worker（已持久化的不受影响）。当前默认 `--workers 1`。
+- **横向扩展**：**后端目前必须单 worker 单副本**（`--workers 1`，Dockerfile.backend 默认）。
+  run 控制面是进程内状态——`running_tasks` 负责重复启动的 409 防重与 stop/pause 的任务句柄，
+  LLM-call 实时缓冲也是 per-worker；多 worker 下这些能力会静默失效（409 形同虚设、
+  stop/pause 可能打到不持有该 run 的进程）。应用启动时会检测多 worker 迹象
+  （`UVICORN_WORKERS` / `WEB_CONCURRENCY` / `GUNICORN_WORKERS` / `GUNICORN_CMD_ARGS` 里的
+  `--workers N`，N>1）并直接拒启。PG/Redis 里的持久化 state 不受影响；
+  真正的多副本横向扩展需要分布式 run 状态（跨进程共享 run 句柄与控制信令）。
 
 ---
 

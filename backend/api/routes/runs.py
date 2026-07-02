@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from ulid import ULID
 
 from backend.api.deps import get_orchestrator, get_owned_project, get_storage
+from backend.api.run_lifecycle import drive_run_to_completion, read_native_run_state
 from backend.api.schemas import RunStartedResponse
 from backend.orchestrator import Orchestrator
 from backend.orchestrator.run_state import RunState
@@ -20,66 +20,10 @@ from backend.orchestrator.run_view import run_state_to_view
 from backend.schemas import Project, ProjectStatus, RunSnapshot, RunStateView
 from backend.schemas.project import RunRef
 from backend.storage import Storage
-from backend.storage.serde import dump_output
 
 router = APIRouter(tags=["runs"])
 
 _log = logging.getLogger(__name__)
-
-
-def _is_native() -> bool:
-    """当前是否走原生 LangGraph 引擎（与 Orchestrator.run 同判据）。"""
-    return os.getenv("ORCH_ENGINE", "native") == "native"
-
-
-async def _read_native_run_state(orch: Orchestrator, project: Project) -> dict | None:
-    """从 LangGraph checkpoint 读取该项目最近一次 native run 的 RunState。
-
-    重建同一张 native 图（挂同一 checkpointer）后 ``aget_state`` 只读 checkpoint、
-    **不**触发任何节点执行；无 checkpoint（从未跑过 native）时返回 None。
-
-    返回 ``RunState.model_dump()``（history/verdicts 归一为 dict，outputs 仍是
-    AgentOutput 对象 —— 装配器只取其 metric 字段，对象/dict 皆可）。
-    """
-    from backend.orchestrator.graph import build_native_graph
-    from backend.orchestrator.orchestrator import native_thread_config
-    from backend.storage.langgraph_adapter import to_langgraph_saver
-
-    try:
-        graph = build_native_graph(
-            orch.registry,
-            project=project,
-            checkpointer=to_langgraph_saver(orch.storage.checkpointer),
-        )
-        # P2-RUNSCOPE：读「当前 run」那条 thread(= 最近 RunRef 的 run_id)，与执行侧一致。
-        run_id = project.runs[-1].run_id if project.runs else None
-        config = native_thread_config(project.project_id, run_id)
-        snapshot = await graph.aget_state(config)
-    except Exception:
-        _log.exception("read native checkpoint failed project=%s", project.project_id)
-        return None
-
-    values: dict[str, Any] = getattr(snapshot, "values", None) or {}
-    if not values:
-        return None
-    # values 里 history 是 NodeRun 对象、outputs 是 AgentOutput 对象；
-    # model_validate→model_dump 归一为装配器契约要求的 dict 形态。
-    try:
-        return RunState.model_validate(values).model_dump()
-    except Exception:
-        # 兼容极端情况：直接退回原始 values（装配器对 dict/对象都健壮）。
-        return values
-
-
-async def read_native_run_history(orch: Orchestrator, project: Project) -> list[dict]:
-    """读取 native checkpoint 里 RunState.history 的 dict 列表（供 RunSnapshot 落库）。
-
-    无 checkpoint 或读取失败时返回空列表（best-effort，不阻塞快照持久化）。
-    """
-    state = await _read_native_run_state(orch, project)
-    if not state:
-        return []
-    return list(state.get("history", []))
 
 
 @router.post(
@@ -94,103 +38,49 @@ async def start_run(
     orch: Orchestrator = Depends(get_orchestrator),
     project: Project = Depends(get_owned_project),
 ) -> RunStartedResponse:
-    running_tasks: dict[str, asyncio.Task] = request.app.state.running_tasks
-    if project_id in running_tasks and not running_tasks[project_id].done():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"project {project_id!r} already running",
-        )
-
-    plan = orch.plan(project)
-    run_id = f"run_{ULID()}"
-    started_at = datetime.now(UTC)
-
-    # 把这次 run 的 metadata 追加到 project.runs（前端可看 run 历史时间线）
-    new_run = RunRef(
-        run_id=run_id,
-        plan_id=plan.plan_id,
-        started_at=started_at,
-        final_status=None,
-    )
-    project_with_run = project.model_copy(
-        update={"runs": [*project.runs, new_run], "status": ProjectStatus.RUNNING}
-    )
-    await storage.state_store.save_project(project_with_run)
-
-    async def _run_in_bg() -> None:
-        final_status = "done"
-        try:
-            # 复用本次 run_id，让 native RunState.run_id 与 RunRef/快照/URL 一致(P2-a)
-            async for _ in orch.run(plan, project_with_run, run_id=run_id):
-                pass
-        except Exception:
-            _log.exception("orchestrator run failed for project_id=%s", project_id)
-            final_status = "failed"
-
-        # 写回该 RunRef 的 ended_at + final_status
-        latest = await storage.state_store.get_project(project_id)
-        if latest is not None:
-            updated_runs = []
-            for r in latest.runs:
-                if r.run_id == run_id:
-                    updated_runs.append(
-                        r.model_copy(
-                            update={
-                                "ended_at": datetime.now(UTC),
-                                "final_status": final_status,
-                            }
-                        )
-                    )
-                else:
-                    updated_runs.append(r)
-            new_status = ProjectStatus.DONE if final_status == "done" else ProjectStatus.FAILED
-            await storage.state_store.save_project(
-                latest.model_copy(update={"runs": updated_runs, "status": new_status})
+    # P1-TOCTOU：「检查 running_tasks → create_task」之间有多个 await（save_project
+    # 等），并发双击会双双通过检查、起两个 run。用进程级 spawn 锁把「检查 + 建
+    # RunRef + create_task + 登记」整段原子化——同一时刻只有一个请求能走完，其余
+    # 在锁后看到未完成的 task，仍按原语义返回 409。
+    spawn_lock: asyncio.Lock = request.app.state.run_spawn_lock
+    async with spawn_lock:
+        running_tasks: dict[str, asyncio.Task] = request.app.state.running_tasks
+        if project_id in running_tasks and not running_tasks[project_id].done():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"project {project_id!r} already running",
             )
 
-            # 落不可变 RunSnapshot（按 (project_id, run_id) 主键）。
-            # 与 latest 状态独立：之后再启动新 run 不会污染这份历史。
-            try:
-                final_plan = await storage.state_store.get_dag_plan(project_id)
-                final_outputs = await storage.state_store.list_node_outputs(project_id)
-                # 翻成升序(round1..N)落快照：与 LIVE 视图(RunState.verdicts 为 append 升序)
-                # 一致，且 best_round / 回放按轮次升序理解(P1P2-VERDICT-ORDER)。
-                final_verdicts = list(
-                    reversed(await storage.state_store.list_qa_verdicts(project_id))
-                )
-                # native 引擎：从 checkpoint 取最终 history（回放真相源），落进快照。
-                # legacy 引擎无 native RunState，history 保持空（向后兼容）。
-                history: list[dict] = []
-                if _is_native():
-                    try:
-                        history = await read_native_run_history(orch, project_with_run)
-                    except Exception:
-                        _log.exception(
-                            "read native history for snapshot failed project=%s",
-                            project_id,
-                        )
-                if final_plan is not None:
-                    snapshot = RunSnapshot(
-                        project_id=project_id,
-                        run_id=run_id,
-                        captured_at=datetime.now(UTC),
-                        plan=final_plan,
-                        outputs={nid: dump_output(out) for nid, out in final_outputs.items()},
-                        verdicts=final_verdicts,
-                        metrics=latest.metrics,
-                        final_status=final_status,
-                        history=history,
-                    )
-                    await storage.state_store.save_run_snapshot(snapshot)
-            except Exception:
-                _log.exception(
-                    "save_run_snapshot failed (non-fatal) project=%s run=%s",
-                    project_id,
-                    run_id,
-                )
+        plan = orch.plan(project)
+        run_id = f"run_{ULID()}"
+        started_at = datetime.now(UTC)
 
-    task = asyncio.create_task(_run_in_bg(), name=f"run-{project_id}-{run_id}")
-    running_tasks[project_id] = task
+        # 把这次 run 的 metadata 追加到 project.runs（前端可看 run 历史时间线）
+        new_run = RunRef(
+            run_id=run_id,
+            plan_id=plan.plan_id,
+            started_at=started_at,
+            final_status=None,
+        )
+        project_with_run = project.model_copy(
+            update={"runs": [*project.runs, new_run], "status": ProjectStatus.RUNNING}
+        )
+        await storage.state_store.save_project(project_with_run)
+
+        # 复用本次 run_id，让 native RunState.run_id 与 RunRef/快照/URL 一致(P2-a)；
+        # 收尾（RunRef 终态 + RunSnapshot + 异常兜底）统一走共享 drive_run_to_completion。
+        task = asyncio.create_task(
+            drive_run_to_completion(
+                orch.run(plan, project_with_run, run_id=run_id),
+                storage=storage,
+                orch=orch,
+                project=project_with_run,
+                run_id=run_id,
+                label="start",
+            ),
+            name=f"run-{project_id}-{run_id}",
+        )
+        running_tasks[project_id] = task
 
     return RunStartedResponse(
         project_id=project_id,
@@ -343,7 +233,8 @@ async def get_run_state_view(
         nid: (out.model_dump(mode="json") if hasattr(out, "model_dump") else out)
         for nid, out in persisted.items()
     }
-    state = await _read_native_run_state(orch, project)
+    # P2-RUNSCOPE：读「当前 run」那条 thread(= 最近 RunRef 的 run_id)，与执行侧一致。
+    state = await read_native_run_state(orch, project)
     if state is None:
         # 兜底：从持久化 outputs 构造一个最小 RunState dump（history 空）。
         state = RunState(
