@@ -94,7 +94,14 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "N", "RUF"]
-ignore = ["E501"]  # line too long handled by formatter
+ignore = [
+    "E501",    # line too long handled by formatter
+    # RUF001/002/003（ambiguous-unicode）与本仓库中文注释/文档约定冲突：
+    # 全角标点（，、：等）会被整库误报数千条，精确豁免这三条；RUF 其余规则保留
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
 
 [tool.ruff.format]
 quote-style = "double"

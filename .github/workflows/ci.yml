@@ -1,0 +1,67 @@
+# 最小 CI：守住「lint 可观察 + 单元/集成测试全绿 + 前端能编译」三条底线。
+#
+# 关键前提（CI 环境无任何 .env / API key / PG / Redis 也必须全绿）：
+# - pyproject 的 addopts = '-m "not e2e"' 已反选真实网络/真实 LLM 的 e2e 测试；
+# - backend/storage/tests/conftest.py 在缺 POSTGRES_DSN / REDIS_URL 时自动 skip PG/Redis 用例。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          # 仓库无 requirements.txt，显式指向 pyproject 作为缓存 key，否则 cache 步骤报错
+          cache-dependency-path: pyproject.toml
+
+      # 可编辑安装 + dev 依赖（pytest / ruff / mypy），与 CONTRIBUTING 的本地环境一致
+      - name: 安装依赖
+        run: pip install -e ".[dev]"
+
+      # 观察期：存量 lint 问题（unused-import / unsorted-imports 等）尚未清零，
+      # 先 continue-on-error 让结果可见不阻塞合并；清零后删掉这行收紧为强制门禁
+      - name: Ruff lint（观察，不阻塞）
+        run: ruff check backend
+        continue-on-error: true
+
+      # addopts 已保证不跑 e2e（真实网络/LLM）；无 PG/Redis 环境变量时相关用例自动 skip
+      - name: Pytest（单元 + 集成）
+        run: pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # 按 lockfile 精确安装，保证与本地/部署一致
+      - name: 安装依赖
+        run: npm ci
+
+      # 类型检查（next build 内部也会跑，但单列一步让类型错误的反馈更直接）
+      - name: TypeScript 类型检查
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        run: npx eslint src
+
+      # 确保生产构建能产出（Dockerfile 部署走的同一条命令）
+      - name: 生产构建
+        run: npm run build
