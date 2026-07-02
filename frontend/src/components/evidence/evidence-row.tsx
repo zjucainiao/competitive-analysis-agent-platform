@@ -83,6 +83,7 @@ export function EvidenceRow({
   selected,
   expanded,
   isDisputedOverride,
+  readOnly,
   paragraphHref,
   onToggleSelect,
   onToggleExpand,
@@ -93,6 +94,8 @@ export function EvidenceRow({
   selected: boolean;
   expanded: boolean;
   isDisputedOverride: boolean;
+  /** 历史运行只读回放：隐藏「标记有异议」入口 */
+  readOnly?: boolean;
   /** 反向跳转链接构造器（注入当前真实 project/run；demo 模式回退到 demo run）。 */
   paragraphHref: (paragraphId: string) => string;
   onToggleSelect: () => void;
@@ -267,20 +270,22 @@ export function EvidenceRow({
             )}
           </section>
 
-          {/* actions */}
+          {/* actions（历史回放只读：不给异议入口，复制类动作保留） */}
           <div className="flex flex-wrap items-center gap-1.5 border-t border-border-subtle pt-3">
-            <Button
-              type="button"
-              size="sm"
-              variant={isDisputedOverride ? "outline" : "ghost"}
-              onClick={onToggleDisputed}
-              className="gap-1.5"
-            >
-              <AlertTriangleIcon className="h-3 w-3" />
-              <span>
-                {isDisputedOverride ? "取消异议" : "标记有异议"}
-              </span>
-            </Button>
+            {!readOnly ? (
+              <Button
+                type="button"
+                size="sm"
+                variant={isDisputedOverride ? "outline" : "ghost"}
+                onClick={onToggleDisputed}
+                className="gap-1.5"
+              >
+                <AlertTriangleIcon className="h-3 w-3" />
+                <span>
+                  {isDisputedOverride ? "取消异议" : "标记有异议"}
+                </span>
+              </Button>
+            ) : null}
             <Button
               type="button"
               size="sm"

@@ -19,6 +19,9 @@ export interface WorkspaceApi {
   runId: string;
   /** 触发 SWR /state 立刻重拉（也会顺手让 projects 列表失效）。 */
   revalidate: () => void | Promise<unknown>;
+  /** 历史运行只读回放：为 true 时干预类动作（节点重跑 / 编辑 prompt /
+   *  段落编辑 / 证据异议等）一律隐藏或拒绝，深链仍复用 projectId/runId。 */
+  readOnly?: boolean;
 }
 
 const WorkspaceApiContext = createContext<WorkspaceApi | null>(null);

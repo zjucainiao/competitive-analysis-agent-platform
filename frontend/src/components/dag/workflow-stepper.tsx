@@ -290,15 +290,17 @@ function StageDetail({
     0
   );
 
-  const actions = headerRunRef
-    ? nodeActionsFor({
-        nodeId: headerRunRef,
-        label: step.label,
-        agentName: step.agent,
-        status: statusToRun(step.status),
-        api,
-      })
-    : [];
+  // 历史回放（api.readOnly）只读：不渲染节点级干预动作（重跑/编辑 prompt/跳过等）
+  const actions =
+    headerRunRef && !api?.readOnly
+      ? nodeActionsFor({
+          nodeId: headerRunRef,
+          label: step.label,
+          agentName: step.agent,
+          status: statusToRun(step.status),
+          api,
+        })
+      : [];
 
   return (
     <section className="rounded-xl border border-border-subtle bg-bg-raised p-5 shadow-card">

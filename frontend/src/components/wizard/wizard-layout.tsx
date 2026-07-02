@@ -229,6 +229,9 @@ export function WizardLayout() {
         }
       }
       void revalidate.projects();
+      // 后端 RunStartedResponse 只带 plan_id/thread_id，不携带真实 run_id，
+      // 故这里用 project_id 充当 runId 路由段 ——「当前运行」别名，
+      // ClientWorkspace 将其解析为实时视图（等后端响应带 run_id 后可换成真值）。
       router.push(`/projects/${project.project_id}/runs/${project.project_id}?tab=dag`);
     } catch (e) {
       toast.error("创建项目失败", { description: describeError(e) });

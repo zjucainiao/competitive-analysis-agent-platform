@@ -35,6 +35,7 @@ export function ReportParagraph({
   paragraph,
   showV2,
   reviewMode,
+  readOnly,
   isFocused,
   onEvidenceClick,
   onFocusEvidence,
@@ -45,6 +46,8 @@ export function ReportParagraph({
   showV2: boolean;
   /** 审阅模式：显示 QA 提示 / 数据核对标 / 编辑标等审阅信息；关闭时纯净阅读 */
   reviewMode: boolean;
+  /** 历史运行只读回放：隐藏 hover ✎ 编辑入口，段落不可修改 */
+  readOnly?: boolean;
   isFocused: boolean;
   onEvidenceClick: (evidenceId: string) => void;
   onFocusEvidence: (evidenceId: string | null) => void;
@@ -171,20 +174,23 @@ export function ReportParagraph({
     >
       {showIssue ? <QaIssueLine issue={paragraph.qaIssue!} /> : null}
 
-      {/* hover 露出 ✎ 编辑：绝对定位角标，纯净模式下也不占阅读版面 */}
-      <button
-        type="button"
-        onClick={() => setEditing(true)}
-        className={cn(
-          "absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
-          "border border-border-subtle bg-bg-raised/90 text-text-muted backdrop-blur-sm",
-          "opacity-0 transition-all duration-120 ease-out-quart",
-          "group-hover:opacity-100 hover:border-accent-border hover:bg-accent-bg hover:text-accent-base"
-        )}
-      >
-        <PenLineIcon className="h-3 w-3" />
-        <span>编辑</span>
-      </button>
+      {/* hover 露出 ✎ 编辑：绝对定位角标，纯净模式下也不占阅读版面；
+          历史运行只读回放不给编辑入口 */}
+      {!readOnly ? (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className={cn(
+            "absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+            "border border-border-subtle bg-bg-raised/90 text-text-muted backdrop-blur-sm",
+            "opacity-0 transition-all duration-120 ease-out-quart",
+            "group-hover:opacity-100 hover:border-accent-border hover:bg-accent-bg hover:text-accent-base"
+          )}
+        >
+          <PenLineIcon className="h-3 w-3" />
+          <span>编辑</span>
+        </button>
+      ) : null}
 
       <p
         className={cn(

@@ -54,7 +54,11 @@ export function ContextBar({ ctx }: { ctx: RunContext }) {
             run #{String(ctx.runNumber).padStart(2, "0")}
           </span>
           {ctx.runs && ctx.runs.length > 0 ? (
-            <RunHistoryBadge runs={ctx.runs} activeRunId={ctx.runId} />
+            <RunHistoryBadge
+              projectId={ctx.projectId}
+              runs={ctx.runs}
+              activeRunId={ctx.runId}
+            />
           ) : null}
           <StatusPill
             tone={ctx.status.tone}

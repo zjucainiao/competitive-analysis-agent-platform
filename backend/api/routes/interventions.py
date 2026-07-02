@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -19,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ulid import ULID
 
 from backend.api.deps import get_orchestrator, get_owned_project, get_storage
+from backend.api.run_lifecycle import drive_run_to_completion, is_native_engine
 from backend.orchestrator import Orchestrator
 from backend.orchestrator.metrics import best_round_reporter_key
 from backend.schemas import (
@@ -63,57 +63,59 @@ async def _cancel_running_task(request: Request, project_id: str) -> bool:
     return False
 
 
-def _is_native() -> bool:
-    return os.getenv("ORCH_ENGINE", "native") == "native"
-
-
-async def _start_fresh_native_run(
+async def _start_fresh_run(
     orch: Orchestrator,
     storage: Storage,
     request: Request,
     project: Any,
     *,
     seed_state: dict[str, Any] | None = None,
-) -> str:
-    """新建一次 run 身份(RunRef) + 后台从头跑 native，可带 ``seed_state`` 注入定向意图
-    (P1-INTERVENE 的 prompt_override / P1-AUTOREWORK 的 rework 种子)。返回 run_id。
+    task_label: str = "rerun",
+) -> tuple[str, bool]:
+    """新建一次 run 身份(RunRef) + 后台从头重跑，可带 ``seed_state`` 注入定向意图
+    (P1-INTERVENE 的 prompt_override / P1-AUTOREWORK 的 rework 种子)。
+    返回 (run_id, 是否取消了旧任务)。
 
     run_id 贯穿 checkpoint thread / node_outputs 作用域 / 快照主键 / live-read，与
-    start_run 一致(P2-RUNSCOPE)。
+    start_run 一致(P2-RUNSCOPE)。收尾（RunRef 终态 + RunSnapshot + 异常兜底）统一
+    走共享 drive_run_to_completion——修复前这里只回写 project status，导致 restart/
+    retry/edit-prompt 起的 run 永远 final_status=None、无快照(P1)。
+
+    P1-TOCTOU：整段「取消旧任务 → 建 RunRef → create_task → 登记」持 spawn 锁，
+    与 start_run 互斥，避免并发路径各起一个 run、后登记者把先登记的 task 顶成孤儿。
     """
-    await _cancel_running_task(request, project.project_id)
-    new_plan = orch.plan(project)
-    run_id = f"run_{ULID()}"
-    new_run = RunRef(
-        run_id=run_id,
-        plan_id=new_plan.plan_id,
-        started_at=datetime.now(UTC),
-        final_status=None,
-    )
-    project_with_run = project.model_copy(
-        update={
-            "runs": [*project.runs, new_run],
-            "status": ProjectStatus.RUNNING,
-        }
-    )
-    await storage.state_store.save_project(project_with_run)
+    spawn_lock: asyncio.Lock = request.app.state.run_spawn_lock
+    async with spawn_lock:
+        cancelled = await _cancel_running_task(request, project.project_id)
+        new_plan = orch.plan(project)
+        run_id = f"run_{ULID()}"
+        new_run = RunRef(
+            run_id=run_id,
+            plan_id=new_plan.plan_id,
+            started_at=datetime.now(UTC),
+            final_status=None,
+        )
+        project_with_run = project.model_copy(
+            update={
+                "runs": [*project.runs, new_run],
+                "status": ProjectStatus.RUNNING,
+            }
+        )
+        await storage.state_store.save_project(project_with_run)
 
-    async def _bg() -> None:
-        try:
-            async for _ in orch.run(
-                new_plan, project_with_run, run_id=run_id, seed_state=seed_state
-            ):
-                pass
-            await storage.state_store.update_project_status(project.project_id, ProjectStatus.DONE)
-        except Exception:
-            _log.exception("native rerun failed project=%s", project.project_id)
-            await storage.state_store.update_project_status(
-                project.project_id, ProjectStatus.FAILED
-            )
-
-    task = asyncio.create_task(_bg(), name=f"rerun-{project.project_id}")
-    request.app.state.running_tasks[project.project_id] = task
-    return run_id
+        task = asyncio.create_task(
+            drive_run_to_completion(
+                orch.run(new_plan, project_with_run, run_id=run_id, seed_state=seed_state),
+                storage=storage,
+                orch=orch,
+                project=project_with_run,
+                run_id=run_id,
+                label=task_label,
+            ),
+            name=f"{task_label}-{project.project_id}-{run_id}",
+        )
+        request.app.state.running_tasks[project.project_id] = task
+    return run_id, cancelled
 
 
 def _count_paragraphs(reporter_out: ReporterOutput) -> int:
@@ -283,8 +285,8 @@ async def retry_node(
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
 
-    if _is_native():
-        await _start_fresh_native_run(orch, storage, request, project)
+    if is_native_engine():
+        await _start_fresh_run(orch, storage, request, project, task_label="retry")
         return NodeActionResponse(
             project_id=project_id,
             node_id=node_id,
@@ -339,7 +341,7 @@ async def skip_node(
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
 
-    if _is_native():
+    if is_native_engine():
         # native 是固定 5 阶段流水线，无「单节点跳过」语义。诚实返回 409 而非静默改
         # 一份 native 不执行的 DAGPlan、让按钮假装成功(P1-INTERVENE)。
         raise HTTPException(
@@ -386,7 +388,7 @@ async def force_start_node(
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
 
-    if _is_native():
+    if is_native_engine():
         # 同 skip：native 固定流水线无「强制启动单节点」语义。
         raise HTTPException(
             status_code=409,
@@ -462,16 +464,17 @@ async def edit_prompt_and_rerun(
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
 
-    if _is_native():
+    if is_native_engine():
         # node_id(投影 id，可能带 _v2)→ prompt_override_by_node 的逻辑键(去版本后缀)。
         # 例：reporter_v2→reporter、collect.Notion_v2→collect.Notion、analyst→analyst。
         override_key, _ = split_versioned(node_id)
-        await _start_fresh_native_run(
+        await _start_fresh_run(
             orch,
             storage,
             request,
             project,
             seed_state={"prompt_override_by_node": {override_key: req.prompt_override}},
+            task_label="edit-prompt",
         )
         return NodeActionResponse(
             project_id=project_id,
@@ -606,29 +609,38 @@ async def resume_run(
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
 
-    running_tasks: dict[str, asyncio.Task] = request.app.state.running_tasks
-    if project_id in running_tasks and not running_tasks[project_id].done():
-        raise HTTPException(status_code=409, detail="run is already in progress")
+    # P1-TOCTOU：409 检查与 create_task 之间隔着 plan 加载 await，持 spawn 锁原子化
+    # （与 start_run 同法），并发双击 resume 只成功一个。
+    spawn_lock: asyncio.Lock = request.app.state.run_spawn_lock
+    async with spawn_lock:
+        running_tasks: dict[str, asyncio.Task] = request.app.state.running_tasks
+        if project_id in running_tasks and not running_tasks[project_id].done():
+            raise HTTPException(status_code=409, detail="run is already in progress")
 
-    # plan 仍需加载以确认它存在（404 保护），但不再作为参数传给 resume()。
-    # orch.resume() 内部按 ORCH_ENGINE 路由：
-    #   native  → _resume_native(astream(None) 从 checkpoint 续跑)
-    #   legacy  → 从 legacy OrchestratorState checkpoint 续跑
-    # 两条路径都不需要调用方传入 plan。
-    await _load_plan_or_404(storage, project_id)
+        # plan 仍需加载以确认它存在（404 保护），但不再作为参数传给 resume()。
+        # orch.resume() 内部按 ORCH_ENGINE 路由：
+        #   native  → _resume_native(astream(None) 从 checkpoint 续跑)
+        #   legacy  → 从 legacy OrchestratorState checkpoint 续跑
+        # 两条路径都不需要调用方传入 plan。
+        await _load_plan_or_404(storage, project_id)
 
-    async def _continue_in_bg() -> None:
-        try:
-            async for _ in orch.resume(project_id, project):
-                pass
-            await storage.state_store.update_project_status(project_id, ProjectStatus.DONE)
-        except Exception:
-            _log.exception("resume run failed for project_id=%s", project_id)
-            await storage.state_store.update_project_status(project_id, ProjectStatus.FAILED)
-
-    task = asyncio.create_task(_continue_in_bg(), name=f"resume-{project_id}")
-    running_tasks[project_id] = task
-    await storage.state_store.update_project_status(project_id, ProjectStatus.RUNNING)
+        # resume 延续「当前 run」的身份（最近一条 RunRef）：结束时由共享收尾回写
+        # 该 RunRef 终态并落快照——pause 中断过的 run 也满足「有终态 + 快照」不变式。
+        # 无 RunRef（历史遗留数据）时退化为只回写 project status。
+        resume_run_id = project.runs[-1].run_id if project.runs else None
+        task = asyncio.create_task(
+            drive_run_to_completion(
+                orch.resume(project_id, project),
+                storage=storage,
+                orch=orch,
+                project=project,
+                run_id=resume_run_id,
+                label="resume",
+            ),
+            name=f"resume-{project_id}",
+        )
+        running_tasks[project_id] = task
+        await storage.state_store.update_project_status(project_id, ProjectStatus.RUNNING)
     return RunControlResponse(project_id=project_id, action="resumed", cancelled_task=False)
 
 
@@ -644,44 +656,18 @@ async def restart_run(
     orch: Orchestrator = Depends(get_orchestrator),
 ) -> RunControlResponse:
     """从头重跑：取消旧任务 + 用新 plan 起 run（旧 plan 历史保留在 storage 的旧主键下，
-    不会被覆盖——save_dag_plan 按 plan_id 主键）。"""
+    不会被覆盖——save_dag_plan 按 plan_id 主键）。
+
+    新建 run 身份(RunRef) + 共享收尾 + spawn 锁全部收敛在 _start_fresh_run
+    （与 retry / edit-prompt 同一条路径，P1 收尾不变式 + P1-TOCTOU 一处修）。
+    """
     project = await storage.state_store.get_project(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
 
-    cancelled = await _cancel_running_task(request, project_id)
-
-    new_plan = orch.plan(project)
-    # 新建一次 run 身份(RunRef)：让 run_id 贯穿 checkpoint thread / node_outputs 作用域 /
-    # 快照主键 / 后续 live-read，与 start_run 一致(P2-RUNSCOPE：否则 restart 写一条 thread、
-    # live-read 仍读旧 run 那条)。
-    run_id = f"run_{ULID()}"
-    new_run = RunRef(
-        run_id=run_id,
-        plan_id=new_plan.plan_id,
-        started_at=datetime.now(UTC),
-        final_status=None,
+    _run_id, cancelled = await _start_fresh_run(
+        orch, storage, request, project, task_label="restart"
     )
-    project_with_run = project.model_copy(
-        update={
-            "runs": [*project.runs, new_run],
-            "status": ProjectStatus.RUNNING,
-        }
-    )
-    await storage.state_store.save_project(project_with_run)
-
-    async def _run_in_bg() -> None:
-        try:
-            async for _ in orch.run(new_plan, project_with_run, run_id=run_id):
-                pass
-            await storage.state_store.update_project_status(project_id, ProjectStatus.DONE)
-        except Exception:
-            _log.exception("restart run failed for project_id=%s", project_id)
-            await storage.state_store.update_project_status(project_id, ProjectStatus.FAILED)
-
-    running_tasks: dict[str, asyncio.Task] = request.app.state.running_tasks
-    task = asyncio.create_task(_run_in_bg(), name=f"restart-{project_id}")
-    running_tasks[project_id] = task
 
     return RunControlResponse(
         project_id=project_id,

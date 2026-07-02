@@ -17,7 +17,6 @@ import type {
   QAOverrideResponse,
   RunControlResponse,
   RunListResponse,
-  RunSnapshotResponse,
   RunStartedResponse,
   ParagraphPatchRequest,
   ParagraphPatchResponse,
@@ -315,20 +314,29 @@ export function patchEvidence(
 
 /* ── Runs 历史 ───────────────────────────────────────────────────────── */
 
+/** 单项目所有 run 的 metadata 时间线（运行历史下拉的数据源）。 */
 export function listRuns(projectId: string): Promise<RunListResponse> {
   return request<RunListResponse>(
     `/api/projects/${encodeURIComponent(projectId)}/runs`
   );
 }
 
+/**
+ * 历史 run 的只读回放数据源：后端把不可变 RunSnapshot 投影成与 LIVE
+ * `/run-state` 同构的 RunStateView（`GET /runs/{run_id}/view`），前端可用
+ * 同一套组件 + run-view-to-state 投影渲染回放，无需另写投影层。
+ * （原始快照端点 `/runs/{run_id}/state` 返回 RunSnapshotResponse，形状是
+ * DAGPlan+outputs，前端渲染链路已迁到 RunStateView，故这里消费 /view。）
+ * 快照缺失（老数据 / 异常中止）时后端返 404，由调用方渲染空态。
+ */
 export function getRunSnapshot(
   projectId: string,
   runId: string
-): Promise<RunSnapshotResponse> {
-  return request<RunSnapshotResponse>(
+): Promise<RunStateView> {
+  return request<RunStateView>(
     `/api/projects/${encodeURIComponent(
       projectId
-    )}/runs/${encodeURIComponent(runId)}/state`
+    )}/runs/${encodeURIComponent(runId)}/view`
   );
 }
 

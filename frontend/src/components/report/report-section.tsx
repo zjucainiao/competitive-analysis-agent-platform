@@ -8,6 +8,7 @@ export function ReportSection({
   globalParagraphStart,
   showV2,
   reviewMode,
+  readOnly,
   focusedParagraphId,
   onEvidenceClick,
   onFocusEvidence,
@@ -17,6 +18,8 @@ export function ReportSection({
   globalParagraphStart: number;
   showV2: boolean;
   reviewMode: boolean;
+  /** 历史运行只读回放：隐藏段落编辑入口 */
+  readOnly?: boolean;
   focusedParagraphId: string | null;
   onEvidenceClick: (evidenceId: string) => void;
   onFocusEvidence: (evidenceId: string | null) => void;
@@ -48,6 +51,7 @@ export function ReportSection({
             index={globalParagraphStart + i}
             showV2={showV2}
             reviewMode={reviewMode}
+            readOnly={readOnly}
             isFocused={p.id === focusedParagraphId}
             onEvidenceClick={onEvidenceClick}
             onFocusEvidence={onFocusEvidence}

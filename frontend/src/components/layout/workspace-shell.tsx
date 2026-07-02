@@ -41,6 +41,8 @@ export function WorkspaceShell({
   runStatus,
   runs,
   activeRunId,
+  projectId,
+  historical,
   detailsRail,
   children,
 }: {
@@ -55,6 +57,10 @@ export function WorkspaceShell({
   runStatus: RunStatus;
   runs?: RunRef[];
   activeRunId?: string;
+  /** 运行历史下拉跳转需要（demo/mock 不传）。 */
+  projectId?: string;
+  /** 历史运行只读回放：顶栏标示 + 隐藏干预动作。 */
+  historical?: boolean;
   detailsRail?: React.ReactNode;
   children: React.ReactNode;
 }) {
@@ -100,6 +106,8 @@ export function WorkspaceShell({
         runStatus={runStatus}
         runs={runs}
         activeRunId={activeRunId}
+        projectId={projectId}
+        historical={historical}
         railOpen={railOpen}
         onToggleRail={detailsRail ? toggleRail : undefined}
       />

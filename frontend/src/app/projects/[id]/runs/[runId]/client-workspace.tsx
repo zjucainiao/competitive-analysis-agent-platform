@@ -6,6 +6,7 @@ import {
   AlertTriangleIcon,
   BarChart3Icon,
   FileTextIcon,
+  HistoryIcon,
   Loader2Icon,
   PlugZapIcon,
 } from "lucide-react";
@@ -25,7 +26,13 @@ import { TraceLayout } from "@/components/trace";
 import { EvidenceLayout } from "@/components/evidence";
 import { MetricsLayout } from "@/components/metrics";
 import { Button } from "@/components/ui/button";
-import { useProject, useRunState, revalidate } from "@/lib/api/hooks";
+import {
+  useProject,
+  useRunState,
+  useRunSnapshot,
+  revalidate,
+} from "@/lib/api/hooks";
+import { ApiError } from "@/lib/api/client";
 import { runViewToProjectState } from "@/lib/api/run-view-to-state";
 import { useProjectEvents } from "@/lib/api/ws";
 import {
@@ -238,17 +245,77 @@ function DemoMockWorkspace({ tab }: { tab: TabKey }) {
   );
 }
 
-/* ── live API path ───────────────────────────────────────────────────── */
+/* ── API path 分发：URL runId 决定实时视图还是历史回放 ─────────────────── */
 
+/**
+ * runId 路由段语义：
+ *  - 等于 project_id（向导/项目卡的「当前运行」别名）、"current"、或最新一次
+ *    run 的 run_id → 实时视图（/run-state + WS + 轮询，行为与从前一致）
+ *  - 其余 → 历史 run 的只读回放（快照 /runs/{run_id}/view，无 WS/轮询）
+ */
 function ApiWorkspace({
   projectId,
+  runId,
   tab,
 }: {
   projectId: string;
   runId: string;
   tab: TabKey;
 }) {
+  const {
+    data: project,
+    error: projectError,
+    isLoading: projectLoading,
+    mutate: mutateProject,
+  } = useProject(projectId);
+
+  if (projectError) {
+    return (
+      <ErrorView
+        error={projectError}
+        projectId={projectId}
+        onRetry={() => void mutateProject()}
+      />
+    );
+  }
+  if (projectLoading || !project) {
+    return <LoadingView />;
+  }
+
+  const latestRunId =
+    project.runs.length > 0
+      ? project.runs[project.runs.length - 1].run_id
+      : null;
+  if (
+    latestRunId === null ||
+    runId === projectId ||
+    runId === "current" ||
+    runId === latestRunId
+  ) {
+    return <LiveApiWorkspace projectId={projectId} tab={tab} />;
+  }
+  return (
+    <HistoricalRunWorkspace
+      project={project}
+      projectId={projectId}
+      runId={runId}
+      tab={tab}
+      latestRunId={latestRunId}
+    />
+  );
+}
+
+/* ── live API path ───────────────────────────────────────────────────── */
+
+function LiveApiWorkspace({
+  projectId,
+  tab,
+}: {
+  projectId: string;
+  tab: TabKey;
+}) {
   // Stage D：单一数据源 /run-state(RunStateView) + project，前端投影出旧 state 形状。
+  // useProject 与上层分发器同 key，SWR 去重不会多打请求。
   const {
     data: project,
     error: projectError,
@@ -413,6 +480,7 @@ function ApiWorkspaceShell({
         runStatus={toneToRunStatus(ctx.status.tone)}
         runs={ctx.runs}
         activeRunId={ctx.runId}
+        projectId={projectId}
         detailsRail={
           <WorkspaceDetailsRail
             nodeId={selected?.id ?? null}
@@ -454,6 +522,192 @@ function ApiWorkspaceShell({
         />
         <EditPromptDialog />
         <ExportMenu />
+      </WorkspaceShell>
+    </WorkspaceApiProvider>
+  );
+}
+
+/* ── historical replay path（只读回放，无 WS / 无轮询）───────────────── */
+
+/** 历史 run 终态 → 顶栏状态 pill（中文，不落裸枚举值）。 */
+const HISTORICAL_STATUS_META: Record<
+  string,
+  { tone: StatusTone; label: string }
+> = {
+  done: { tone: "success", label: "已完成" },
+  failed: { tone: "error", label: "失败" },
+  stopped: { tone: "warning", label: "已停止" },
+  aborted: { tone: "warning", label: "已中止" },
+};
+
+function HistoricalRunWorkspace({
+  project,
+  projectId,
+  runId,
+  tab,
+  latestRunId,
+}: {
+  project: Project;
+  projectId: string;
+  runId: string;
+  tab: TabKey;
+  latestRunId: string;
+}) {
+  // 不可变快照：一次拉取，无轮询；404 = 快照缺失（老数据 / 异常中止）。
+  const {
+    data: snapshot,
+    error,
+    isLoading,
+    mutate,
+  } = useRunSnapshot(projectId, runId);
+
+  const snapshotMissing = error instanceof ApiError && error.status === 404;
+  if (error && !snapshotMissing) {
+    return (
+      <ErrorView
+        error={error}
+        projectId={projectId}
+        onRetry={() => void mutate()}
+      />
+    );
+  }
+  if (!snapshotMissing && (isLoading || !snapshot)) {
+    return <LoadingView />;
+  }
+  return (
+    <HistoricalWorkspaceShell
+      project={project}
+      projectId={projectId}
+      runId={runId}
+      tab={tab}
+      latestRunId={latestRunId}
+      runState={snapshotMissing ? null : snapshot ?? null}
+    />
+  );
+}
+
+function HistoricalWorkspaceShell({
+  project,
+  projectId,
+  runId,
+  tab,
+  latestRunId,
+  runState,
+}: {
+  project: Project;
+  projectId: string;
+  runId: string;
+  tab: TabKey;
+  latestRunId: string;
+  /** null = 快照缺失（404），渲染空态但保留顶栏 / 运行切换。 */
+  runState: RunStateView | null;
+}) {
+  const runRef = project.runs.find((r) => r.run_id === runId) ?? null;
+  const finalStatus = runRef?.final_status ?? runState?.status ?? null;
+
+  // 历史 run 的项目投影：状态 / 指标取该 run 终态（快照），
+  // 避免「看历史 run 却混入当前项目的实时状态 / 指标」。
+  // 快照无 metrics（老数据）时留空 → 指标 tab 走「尚未生成」空态，不冒用当前值。
+  const historicalProject = useMemo<Project>(
+    () => ({
+      ...project,
+      status: finalStatus === "done" ? "done" : "failed",
+      metrics: runState?.metrics ?? null,
+    }),
+    [project, finalStatus, runState]
+  );
+  const state = useMemo(
+    () =>
+      runState ? runViewToProjectState(runState, historicalProject) : null,
+    [runState, historicalProject]
+  );
+  const [selected, setSelected] = useState<{
+    id: string;
+    data: DagNodeData;
+  } | null>(null);
+
+  // readOnly 上下文：干预动作（节点重跑 / 编辑 prompt / 段落编辑 / 证据异议）
+  // 一律隐藏或拒绝；深链（证据 → 报告段落）仍复用本历史 runId。
+  const apiContext = useMemo(
+    () => ({
+      projectId,
+      runId,
+      readOnly: true,
+      // 只读回放不产生服务端变更，无需触发 SWR 重拉
+      revalidate: () => Promise.resolve(),
+    }),
+    [projectId, runId]
+  );
+
+  const { progressDone, progressTotal } = useMemo(
+    () => computeProgress(state?.plan?.nodes ?? []),
+    [state]
+  );
+
+  const statusMeta = HISTORICAL_STATUS_META[finalStatus ?? ""] ?? {
+    tone: "neutral" as StatusTone,
+    label: "已结束",
+  };
+  const backHref = `/projects/${encodeURIComponent(
+    projectId
+  )}/runs/${encodeURIComponent(latestRunId)}?tab=${tab}`;
+
+  return (
+    <WorkspaceApiProvider value={apiContext}>
+      <WorkspaceShell
+        projectName={project.project_name}
+        statusTone={statusMeta.tone}
+        statusLabel={statusMeta.label}
+        progressDone={progressDone}
+        progressTotal={progressTotal}
+        startedAt={runRef?.started_at ?? null}
+        endedAt={runRef?.ended_at ?? null}
+        runStatus={finalStatus === "done" ? "success" : "failed"}
+        runs={project.runs}
+        activeRunId={runId}
+        projectId={projectId}
+        historical
+        detailsRail={
+          state ? (
+            <WorkspaceDetailsRail
+              nodeId={selected?.id ?? null}
+              data={selected?.data ?? null}
+              projectId={projectId}
+              state={state}
+              onClose={() => setSelected(null)}
+            />
+          ) : undefined
+        }
+      >
+        <div className="mb-4 flex items-center gap-2 rounded-md border border-warning-border bg-warning-bg px-3 py-1.5 text-[11px] text-warning-base">
+          <HistoryIcon className="h-3 w-3 shrink-0" />
+          <span>
+            正在查看历史运行的只读回放 · 干预操作已停用，页面不做实时刷新
+          </span>
+          <Link
+            href={backHref}
+            className="ml-auto rounded px-1.5 py-0.5 font-medium underline-offset-2 hover:underline"
+          >
+            回到最新运行
+          </Link>
+        </div>
+        {state && runState ? (
+          <TabBody
+            tab={tab}
+            state={state}
+            runState={runState}
+            projectId={projectId}
+            onSelectNode={(id, data) =>
+              data ? setSelected({ id, data }) : setSelected(null)
+            }
+          />
+        ) : (
+          <WorkspaceEmpty
+            icon={HistoryIcon}
+            title="该运行无快照记录"
+            desc="这次运行没有留下可回放的快照（可能是较早版本的数据，或运行被异常中止）。可从顶部「运行历史」切换到其他运行查看。"
+          />
+        )}
       </WorkspaceShell>
     </WorkspaceApiProvider>
   );

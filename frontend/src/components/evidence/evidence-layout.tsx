@@ -47,6 +47,8 @@ export function EvidenceLayout({
 }: EvidenceLayoutProps = {}) {
   const api = useWorkspaceApi();
   const isApi = apiEvidences !== undefined;
+  /* 历史运行只读回放：证据异议（单条 / 批量）停用；复制 / 导出仍可用 */
+  const readOnly = !!api?.readOnly;
 
   // 反向跳转链接：真实 workspace 用当前 project/run；demo/mock 回退到 demo run。
   const paragraphHref = useCallback(
@@ -142,6 +144,10 @@ export function EvidenceLayout({
   };
 
   const handleToggleDisputed = (id: string) => {
+    if (readOnly) {
+      toast.info("历史运行为只读回放，不能标记证据异议");
+      return;
+    }
     setDisputedOverride((cur) => {
       const next = new Set(cur);
       if (next.has(id)) {
@@ -249,10 +255,12 @@ export function EvidenceLayout({
               选中 <span className="font-mono tabular-nums" data-num>{selected.size}</span> 条
             </span>
             <div className="ml-auto flex items-center gap-1.5">
-              <Button size="sm" variant="outline" onClick={handleBulkMarkDisputed} className="gap-1.5">
-                <AlertTriangleIcon className="h-3 w-3" />
-                <span>标记有误</span>
-              </Button>
+              {!readOnly ? (
+                <Button size="sm" variant="outline" onClick={handleBulkMarkDisputed} className="gap-1.5">
+                  <AlertTriangleIcon className="h-3 w-3" />
+                  <span>标记有误</span>
+                </Button>
+              ) : null}
               <Button size="sm" variant="ghost" onClick={handleBulkExport}>
                 复制为 JSON
               </Button>
@@ -281,6 +289,7 @@ export function EvidenceLayout({
                   selected={selected.has(ev.id)}
                   expanded={expandedId === ev.id}
                   isDisputedOverride={disputedOverride.has(ev.id)}
+                  readOnly={readOnly}
                   paragraphHref={paragraphHref}
                   onToggleSelect={() => handleToggleSelect(ev.id)}
                   onToggleExpand={() =>

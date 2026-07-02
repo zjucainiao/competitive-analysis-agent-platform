@@ -2,14 +2,19 @@
 
 import useSWR, { type SWRConfiguration, type SWRResponse, mutate } from "swr";
 import {
+  ApiError,
   listProjects,
   getProject,
   getRunStateView,
+  listRuns,
+  getRunSnapshot,
 } from "./client";
 import type {
   Project,
   ProjectListResponse,
   ProjectStatus,
+  RunListResponse,
+  RunRef,
   RunStateView,
 } from "./types";
 
@@ -31,6 +36,9 @@ export const KEYS = {
   },
   runState(id: string) {
     return `/api/projects/${id}/run-state`;
+  },
+  runs(id: string) {
+    return `/api/projects/${id}/runs`;
   },
 };
 
@@ -86,6 +94,49 @@ export function useRunState(
       // 返工时尤其割裂。
       refreshInterval: (latest?: RunStateView) =>
         latest === undefined || latest.status === "running" ? 3000 : 0,
+      ...config,
+    }
+  );
+}
+
+/** 运行历史时间线（运行历史下拉的数据源）。
+ *  `fallbackRuns` 用 project.runs 兜底，首次渲染不闪空；key 落在
+ *  `/api/projects` 前缀下，干预动作触发的全量 revalidate 会顺带刷新它。 */
+export function useRunHistory(
+  id: string | null | undefined,
+  fallbackRuns: RunRef[] = [],
+  config?: SWRConfiguration<RunListResponse>
+): SWRResponse<RunListResponse> {
+  return useSWR<RunListResponse>(
+    id ? KEYS.runs(id) : null,
+    () => listRuns(id!),
+    {
+      revalidateOnFocus: false,
+      fallbackData: id
+        ? { project_id: id, runs: fallbackRuns }
+        : undefined,
+      ...config,
+    }
+  );
+}
+
+/** 历史 run 的只读回放视图（不可变快照，无轮询）。
+ *  用元组 key 避开 `/api/projects` 前缀匹配的全量 revalidate ——
+ *  快照不可变，重拉只是浪费；404（快照缺失）不重试，由调用方渲染空态。 */
+export function useRunSnapshot(
+  projectId: string | null | undefined,
+  runId: string | null | undefined,
+  config?: SWRConfiguration<RunStateView>
+): SWRResponse<RunStateView> {
+  return useSWR<RunStateView>(
+    projectId && runId ? ["run-snapshot", projectId, runId] : null,
+    () => getRunSnapshot(projectId!, runId!),
+    {
+      revalidateOnFocus: false,
+      revalidateIfStale: false,
+      refreshInterval: 0,
+      shouldRetryOnError: (err: unknown) =>
+        !(err instanceof ApiError && err.status === 404),
       ...config,
     }
   );
