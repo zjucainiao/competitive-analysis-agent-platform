@@ -393,9 +393,9 @@ export function allLLMCalls(limit = 500): Promise<LLMCallsResponse> {
 /* ── 导出 ────────────────────────────────────────────────────────────── */
 
 /**
- * 导出文件下载 URL —— 走浏览器 GET（带 Content-Disposition），
- * 不通过 request() 是因为 PDF / DOCX 是二进制流，直接 anchor click 触发下载更省事。
- * PDF / DOCX 后端缺依赖时返回 503，调用方需要 fetch HEAD 预检或捕错处理。
+ * 导出文件下载 URL。注意后端 /export 与其它路由一样要求 Bearer JWT，
+ * 浏览器 anchor GET 带不上 Authorization header 会 401，
+ * 所以真正下载走 fetchProjectExport()（fetch → blob），此 URL 仅用于 UI 展示。
  */
 export function exportProjectUrl(
   projectId: string,
@@ -404,6 +404,78 @@ export function exportProjectUrl(
   return `${API_BASE}/api/projects/${encodeURIComponent(
     projectId
   )}/export?format=${fmt}`;
+}
+
+/** Content-Disposition 兜底扩展名（后端文件名为 {project_id}.{ext}） */
+const EXPORT_EXT: Record<ExportFormat, string> = {
+  markdown: "md",
+  pdf: "pdf",
+  docx: "docx",
+  json: "json",
+};
+
+/** 从 Content-Disposition 解析文件名；解析不出返回 null 由调用方兜底 */
+function parseDispositionFilename(header: string | null): string | null {
+  if (!header) return null;
+  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(header);
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return m[1];
+  }
+}
+
+/**
+ * 带 Authorization 的导出下载。不复用 request() 是因为 PDF / DOCX 是二进制流，
+ * 要拿 blob 而非 json / text。失败抛 ApiError（503 = 后端缺 PDF / DOCX 导出依赖），
+ * 文件名优先取后端 Content-Disposition，缺失时按 {projectId}.{ext} 兜底。
+ */
+export async function fetchProjectExport(
+  projectId: string,
+  fmt: ExportFormat
+): Promise<{ blob: Blob; filename: string }> {
+  const token = getAuthToken();
+  let res: Response;
+  try {
+    res = await fetch(exportProjectUrl(projectId, fmt), {
+      cache: "no-store",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  } catch (e) {
+    throw new ApiError(
+      0,
+      `Network error: ${e instanceof Error ? e.message : String(e)}`,
+      null
+    );
+  }
+  if (res.status === 401) {
+    // token 失效/缺失：清掉并通知上层跳登录（与 request() 同一逻辑）
+    setAuthToken(null);
+    _onUnauthorized?.();
+  }
+  if (!res.ok) {
+    const ct = res.headers.get("content-type") ?? "";
+    const body = ct.includes("application/json")
+      ? await res.json().catch(() => null)
+      : await res.text().catch(() => "");
+    const detail =
+      (body && typeof body === "object" && "detail" in body
+        ? (body as { detail: unknown }).detail
+        : null) ?? body;
+    throw new ApiError(
+      res.status,
+      `GET /export?format=${fmt} → ${res.status} ${res.statusText}: ${
+        typeof detail === "string" ? detail : JSON.stringify(detail)
+      }`,
+      body
+    );
+  }
+  const blob = await res.blob();
+  const filename =
+    parseDispositionFilename(res.headers.get("content-disposition")) ??
+    `${projectId}.${EXPORT_EXT[fmt]}`;
+  return { blob, filename };
 }
 
 /* ── ws helper ───────────────────────────────────────────────────────── */

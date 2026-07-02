@@ -1,4 +1,9 @@
-import { MOCK_REPORT, getEvidence, type MockSection } from "./report-mock";
+import {
+  getEvidence,
+  type MockEvidence,
+  type MockReport,
+  type MockSection,
+} from "./report-mock";
 
 /**
  * 把 MockReport 渲染为「读者向」Markdown 交付物。
@@ -7,14 +12,20 @@ import { MOCK_REPORT, getEvidence, type MockSection } from "./report-mock";
  * 不含任何内部标签 —— evidence_id 渲染成编号引用 `[n]` + 末尾「数据来源」列表，
  * soft conclusion / quantitative / QA issue / v2 这些是屏幕视图的溯源标记，
  * 不进交付物。用户改过的段落静默采用其文本，不打「user-edited」标。
+ *
+ * report / lookupEvidence 由调用方注入：API 模式传适配后的真实 draft +
+ * ApiEvidence 查找（useEvidenceLookup），demo 模式传 MOCK_REPORT + mock 查找，
+ * 保证「导出的 = 屏幕上看到的」，绝不静默回退 mock。
  */
 
 export function renderReportAsMarkdown(
+  report: MockReport,
   localEdits: Record<string, string> = {},
-  showV2 = false
+  showV2 = false,
+  lookupEvidence: (id: string) => MockEvidence | undefined = getEvidence
 ): string {
   const lines: string[] = [];
-  const r = MOCK_REPORT;
+  const r = report;
 
   lines.push(`# ${r.target} vs ${r.competitors.join("、")}`);
   lines.push("");
@@ -30,7 +41,7 @@ export function renderReportAsMarkdown(
   // 引用编号：按正文首次出现顺序分配 [1][2]...，只给能溯源到的 evidence 编号
   const citeNo = new Map<string, number>();
   const cite = (eid: string): number | null => {
-    if (!getEvidence(eid)) return null;
+    if (!lookupEvidence(eid)) return null;
     if (!citeNo.has(eid)) citeNo.set(eid, citeNo.size + 1);
     return citeNo.get(eid)!;
   };
@@ -60,7 +71,7 @@ export function renderReportAsMarkdown(
     Array.from(citeNo.entries())
       .sort((a, b) => a[1] - b[1])
       .forEach(([eid, n]) => {
-        const ev = getEvidence(eid);
+        const ev = lookupEvidence(eid);
         if (!ev) return;
         lines.push(`${n}. ${ev.product} · ${ev.sourceLabel} — ${ev.sourceUrl}`);
       });
@@ -80,10 +91,9 @@ export function renderReportAsMarkdown(
   return lines.join("\n");
 }
 
-/** 在浏览器中触发下载 */
-export function downloadMarkdown(filename: string, content: string): void {
+/** 在浏览器中触发 blob 下载（markdown 字符串 / 二进制导出共用） */
+export function downloadBlob(filename: string, blob: Blob): void {
   if (typeof window === "undefined") return;
-  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -92,6 +102,14 @@ export function downloadMarkdown(filename: string, content: string): void {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** 在浏览器中触发 markdown 文本下载 */
+export function downloadMarkdown(filename: string, content: string): void {
+  downloadBlob(
+    filename,
+    new Blob([content], { type: "text/markdown;charset=utf-8" })
+  );
 }
 
 /** 简化的 section 计数（report-layout.tsx 用） */

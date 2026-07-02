@@ -18,7 +18,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useWorkspaceApi } from "@/lib/workspace-api-context";
-import { exportProjectUrl, API_BASE } from "@/lib/api/client";
+import { fetchProjectExport, describeError, ApiError, API_BASE } from "@/lib/api/client";
+import { downloadBlob } from "@/lib/report-export";
 import type { ExportFormat } from "@/lib/api/types";
 
 const FORMATS: Array<{
@@ -60,9 +61,11 @@ const FORMATS: Array<{
  * 监听 `atlas:open-export` 事件（顶栏 Export 按钮 / ⌘K Export report 触发），
  * 弹一个 sheet 让用户选 Markdown / PDF / DOCX / JSON。
  *
- *  - 下载走 GET /api/projects/{id}/export?format=...
- *  - PDF / DOCX 后端缺依赖返 503 → 用 fetch HEAD 预检，503 时 toast 降级提示
- *  - JSON / Markdown 直接 anchor 触发浏览器下载
+ *  - 下载走 GET /api/projects/{id}/export?format=...，后端要求 Bearer JWT，
+ *    所以用带 Authorization 的 fetch → blob → objectURL 触发下载
+ *    （纯 anchor GET 带不上 header，真实部署会 401）
+ *  - PDF / DOCX 后端缺依赖返 503 → toast 降级提示
+ *  - 文件名跟随后端 Content-Disposition（{project_id}.{ext}）
  */
 export function ExportMenu() {
   const api = useWorkspaceApi();
@@ -84,37 +87,24 @@ export function ExportMenu() {
       return;
     }
     setBusyFmt(fmt);
-    const url = exportProjectUrl(api.projectId, fmt);
     try {
-      /* HEAD 预检 PDF / DOCX 是否 503（依赖缺失） */
-      if (fmt === "pdf" || fmt === "docx") {
-        const res = await fetch(url, { method: "HEAD" });
-        if (res.status === 503) {
-          toast.warning(`${fmt.toUpperCase()} 导出不可用`, {
-            description: `后端缺导出依赖 · 在后端跑：pip install '.[export-pdf-docx]'`,
-          });
-          return;
-        }
-        if (!res.ok) {
-          toast.error(`${fmt.toUpperCase()} 导出失败`, {
-            description: `${res.status} ${res.statusText}`,
-          });
-          return;
-        }
-      }
-      /* 触发下载（用 anchor，让浏览器走 Content-Disposition） */
-      const a = document.createElement("a");
-      a.href = url;
-      a.rel = "noopener noreferrer";
-      a.target = "_self";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      toast.success(`${fmt.toUpperCase()} 下载已开始`);
+      /* 带 Authorization 的 fetch → blob，成功才触发下载（文件名来自
+       * Content-Disposition）；503 = PDF / DOCX 依赖缺失，toast 降级提示 */
+      const { blob, filename } = await fetchProjectExport(api.projectId, fmt);
+      downloadBlob(filename, blob);
+      toast.success(`${fmt.toUpperCase()} 下载已开始`, {
+        description: filename,
+      });
       setOpen(false);
     } catch (e) {
-      toast.error("下载失败", {
-        description: e instanceof Error ? e.message : String(e),
+      if (e instanceof ApiError && e.status === 503) {
+        toast.warning(`${fmt.toUpperCase()} 导出不可用`, {
+          description: `后端缺导出依赖 · 在后端跑：pip install '.[export-pdf-docx]'`,
+        });
+        return;
+      }
+      toast.error(`${fmt.toUpperCase()} 导出失败`, {
+        description: describeError(e),
       });
     } finally {
       setBusyFmt(null);
@@ -161,7 +151,7 @@ export function ExportMenu() {
                       </span>
                       {busy ? (
                         <span className="text-[10px] uppercase tracking-wider text-text-muted">
-                          checking…
+                          downloading…
                         </span>
                       ) : null}
                     </div>
