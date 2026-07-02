@@ -20,6 +20,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -44,7 +47,6 @@ from backend.schemas import (
     ReportParagraph,
     ReportSection,
 )
-from datetime import UTC, datetime
 
 
 def _make_evidence(eid: str, content: str) -> Evidence:

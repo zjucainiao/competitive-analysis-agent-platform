@@ -16,15 +16,15 @@ from ._base import (
     BaseAgent,
     LLMProviderProtocol,
     SelfCritiqueRequiredError,
-    TracerProtocol,
     ToolRegistryProtocol,
+    TracerProtocol,
 )
 
 __all__ = [
-    "BaseAgent",
     "AgentRunError",
-    "SelfCritiqueRequiredError",
+    "BaseAgent",
     "LLMProviderProtocol",
-    "TracerProtocol",
+    "SelfCritiqueRequiredError",
     "ToolRegistryProtocol",
+    "TracerProtocol",
 ]

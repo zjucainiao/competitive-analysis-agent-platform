@@ -10,11 +10,10 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Sequence
 from typing import (
     Any,
-    AsyncIterator,
     Protocol,
-    Sequence,
     runtime_checkable,
 )
 
@@ -37,7 +36,6 @@ from .checkpoint_types import (
     CheckpointMetadata,
     CheckpointTuple,
 )
-
 
 # ---------- Checkpointer ----------
 

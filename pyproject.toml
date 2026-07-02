@@ -101,7 +101,20 @@ ignore = [
     "RUF001",
     "RUF002",
     "RUF003",
+    # UP042（class Foo(str, Enum) → StrEnum）会改变 str()/f-string 行为，
+    # 且本仓库枚举大量参与 Pydantic 序列化与前端契约，机械迁移风险大于收益，缓办
+    "UP042",
+    # UP046（Generic[T] → PEP 695 类型参数）：BaseAgent 的 TypeVar 被各 agent
+    # 子类共享引用，机械迁移影响导出面，与 UP042 一并缓办
+    "UP046",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI 惯用法：路由签名里 Depends()/Query() 作默认参数是框架设计，非 bug
+"backend/api/**" = ["B008"]
+# 刻意布局：SCHEMA_VERSION 常量 + 版本变更注释置顶（先于 re-export import 块），
+# 是本包的「版本即文档」约定，非疏忽
+"backend/schemas/__init__.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"

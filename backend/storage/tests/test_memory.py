@@ -23,7 +23,6 @@ from backend.storage.protocols import (
     StateStoreProtocol,
 )
 
-
 # ---------- Protocol conformance ----------
 
 

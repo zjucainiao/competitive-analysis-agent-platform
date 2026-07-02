@@ -9,7 +9,6 @@ import pytest
 
 from backend.orchestrator.planner import (
     Planner,
-    TemplateExpandError,
     TemplateNotFoundError,
 )
 from backend.schemas import (
@@ -17,7 +16,6 @@ from backend.schemas import (
     NodeType,
     Project,
 )
-
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DEMO_PROJECT_FILE = (

@@ -17,23 +17,21 @@ from typing import Any
 
 import pytest
 
+from backend.orchestrator.tests.test_native_graph import (
+    _block_reporter_verdict,
+    _FakeRegistry,
+    _load_demo_project,
+    _pass_verdict,
+    _StubQA,
+)
 from backend.schemas import (
     AgentError,
     AgentStatus,
-    AnalystOutput,
     AnalysisResult,
+    AnalystOutput,
     NodeStatus,
 )
 from backend.storage import build_storage
-
-from backend.orchestrator.tests.test_native_graph import (
-    _FakeRegistry,
-    _StubAnalyst,
-    _StubQA,
-    _block_reporter_verdict,
-    _load_demo_project,
-    _pass_verdict,
-)
 
 
 @pytest.fixture
@@ -100,7 +98,7 @@ async def test_gap7_analyst_failure_failsoft(
     plan = orch.plan(two_product_project)
 
     # 不应抛 KeyError;能跑完
-    results = [r async for r in orch.run(plan, two_product_project)]
+    _results = [r async for r in orch.run(plan, two_product_project)]
 
     # analyst output 为 None → 不应落库 analyst/reporter/qa output
     saved = await memory_storage.state_store.list_node_outputs(

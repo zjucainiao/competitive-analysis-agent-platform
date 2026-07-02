@@ -463,7 +463,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
                 return source, extraction, t_in, t_out, None
             except AgentRunError:
                 raise
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return (
                     source,
                     None,
@@ -492,7 +492,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
             ) as pool:
                 futures = [
                     pool.submit(ctx.run, _extract_one, s)
-                    for s, ctx in zip(sources, contexts)
+                    for s, ctx in zip(sources, contexts, strict=True)
                 ]
                 # 按提交顺序取结果 → all_claims 顺序与串行一致（确定性）
                 source_results = [f.result() for f in futures]
@@ -523,7 +523,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
                     placeholder = inp.raw_sources[0]
                     for cc in cons_claims:
                         all_claims.append((cc, placeholder))
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(
                     AgentError(
                         code="LLM_SCHEMA_INVALID",
@@ -562,7 +562,7 @@ class Extractor(BaseAgent[ExtractorInput, ExtractorOutput]):
                     profile.industry_extension = ext
                     evidences.extend(ext_evs)
                     unmatched.extend(ext_unmatched)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(
                     AgentError(
                         code="LLM_SCHEMA_INVALID",

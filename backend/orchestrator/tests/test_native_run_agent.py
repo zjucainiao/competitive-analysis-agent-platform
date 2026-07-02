@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import ClassVar
 
 import pytest
-from backend.orchestrator.run_agent import run_agent_node, AgentRunResult
+
+from backend.orchestrator.run_agent import run_agent_node
 from backend.schemas import AgentError, AgentStatus
 
 
@@ -31,7 +33,7 @@ class _FakeAgent:
         class _Out:
             status = AgentStatus.SUCCESS
             self_critique = None
-            errors = []
+            errors: ClassVar[list] = []
 
         return _Out()
 
@@ -97,7 +99,7 @@ async def test_timeout_fails_without_retry():
             class _Out:
                 status = AgentStatus.SUCCESS
                 self_critique = None
-                errors = []
+                errors: ClassVar[list] = []
 
             return _Out()
 
@@ -130,7 +132,7 @@ async def test_non_retriable_failed_returns_immediately():
 
             class _Out:
                 status = AgentStatus.FAILED
-                errors = [
+                errors: ClassVar[list] = [
                     AgentError(
                         code="INPUT_INVALID",
                         message="required field missing",
@@ -166,7 +168,7 @@ async def test_partial_returned_as_is():
             class _Out:
                 status = AgentStatus.PARTIAL
                 self_critique = None
-                errors = []
+                errors: ClassVar[list] = []
 
             return _Out()
 

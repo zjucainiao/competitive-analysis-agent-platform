@@ -10,8 +10,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 from dotenv import load_dotenv
 
@@ -44,7 +42,7 @@ def _network_or_skip() -> None:
         import httpx
 
         httpx.get("https://duckduckgo.com/", timeout=5.0)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         pytest.skip(f"network unreachable: {e}")
 
 

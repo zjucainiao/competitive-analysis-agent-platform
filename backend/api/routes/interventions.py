@@ -11,21 +11,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
+from ulid import ULID
 
 from backend.api.deps import get_orchestrator, get_owned_project, get_storage
 from backend.orchestrator import Orchestrator
 from backend.orchestrator.metrics import best_round_reporter_key
-from ulid import ULID
-
 from backend.schemas import (
-    DAGNode,
     NodeStatus,
-    NodeType,
     ProjectMetrics,
     ProjectStatus,
     ReporterOutput,
@@ -62,7 +59,7 @@ async def _cancel_running_task(request: Request, project_id: str) -> bool:
         task.cancel()
         try:
             await task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+        except (asyncio.CancelledError, Exception):
             pass
         return True
     return False
@@ -92,12 +89,12 @@ async def _start_fresh_native_run(
     new_run = RunRef(
         run_id=run_id,
         plan_id=new_plan.plan_id,
-        started_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
         final_status=None,
     )
     project_with_run = project.model_copy(
         update={
-            "runs": list(project.runs) + [new_run],
+            "runs": [*project.runs, new_run],
             "status": ProjectStatus.RUNNING,
         }
     )
@@ -112,7 +109,7 @@ async def _start_fresh_native_run(
             await storage.state_store.update_project_status(
                 project.project_id, ProjectStatus.DONE
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             _log.exception("native rerun failed project=%s", project.project_id)
             await storage.state_store.update_project_status(
                 project.project_id, ProjectStatus.FAILED
@@ -628,7 +625,7 @@ async def resume_run(
             async for _ in orch.resume(project_id, project):
                 pass
             await storage.state_store.update_project_status(project_id, ProjectStatus.DONE)
-        except Exception:  # noqa: BLE001
+        except Exception:
             _log.exception("resume run failed for project_id=%s", project_id)
             await storage.state_store.update_project_status(project_id, ProjectStatus.FAILED)
 
@@ -665,12 +662,12 @@ async def restart_run(
     new_run = RunRef(
         run_id=run_id,
         plan_id=new_plan.plan_id,
-        started_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
         final_status=None,
     )
     project_with_run = project.model_copy(
         update={
-            "runs": list(project.runs) + [new_run],
+            "runs": [*project.runs, new_run],
             "status": ProjectStatus.RUNNING,
         }
     )
@@ -681,7 +678,7 @@ async def restart_run(
             async for _ in orch.run(new_plan, project_with_run, run_id=run_id):
                 pass
             await storage.state_store.update_project_status(project_id, ProjectStatus.DONE)
-        except Exception:  # noqa: BLE001
+        except Exception:
             _log.exception("restart run failed for project_id=%s", project_id)
             await storage.state_store.update_project_status(project_id, ProjectStatus.FAILED)
 

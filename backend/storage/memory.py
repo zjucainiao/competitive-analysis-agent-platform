@@ -10,8 +10,9 @@ import asyncio
 import contextlib
 import uuid
 from collections import defaultdict
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime
-from typing import Any, AsyncIterator, Sequence
+from typing import Any
 
 from backend.schemas import (
     AgentOutputBase,
@@ -37,7 +38,6 @@ from .checkpoint_types import (
     now_ts,
     thread_id_of,
 )
-
 
 # ---------- Checkpointer ----------
 

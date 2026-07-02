@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -57,7 +57,7 @@ async def _read_native_run_state(
         run_id = project.runs[-1].run_id if project.runs else None
         config = native_thread_config(project.project_id, run_id)
         snapshot = await graph.aget_state(config)
-    except Exception:  # noqa: BLE001
+    except Exception:
         _log.exception(
             "read native checkpoint failed project=%s", project.project_id
         )
@@ -70,7 +70,7 @@ async def _read_native_run_state(
     # model_validate→model_dump 归一为装配器契约要求的 dict 形态。
     try:
         return RunState.model_validate(values).model_dump()
-    except Exception:  # noqa: BLE001
+    except Exception:
         # 兼容极端情况：直接退回原始 values（装配器对 dict/对象都健壮）。
         return values
 
@@ -109,14 +109,14 @@ async def start_run(
 
     plan = orch.plan(project)
     run_id = f"run_{ULID()}"
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
 
     # 把这次 run 的 metadata 追加到 project.runs（前端可看 run 历史时间线）
     new_run = RunRef(
         run_id=run_id, plan_id=plan.plan_id, started_at=started_at, final_status=None,
     )
     project_with_run = project.model_copy(
-        update={"runs": list(project.runs) + [new_run], "status": ProjectStatus.RUNNING}
+        update={"runs": [*project.runs, new_run], "status": ProjectStatus.RUNNING}
     )
     await storage.state_store.save_project(project_with_run)
 
@@ -126,7 +126,7 @@ async def start_run(
             # 复用本次 run_id，让 native RunState.run_id 与 RunRef/快照/URL 一致(P2-a)
             async for _ in orch.run(plan, project_with_run, run_id=run_id):
                 pass
-        except Exception:  # noqa: BLE001
+        except Exception:
             _log.exception("orchestrator run failed for project_id=%s", project_id)
             final_status = "failed"
 
@@ -139,7 +139,7 @@ async def start_run(
                     updated_runs.append(
                         r.model_copy(
                             update={
-                                "ended_at": datetime.now(timezone.utc),
+                                "ended_at": datetime.now(UTC),
                                 "final_status": final_status,
                             }
                         )
@@ -169,7 +169,7 @@ async def start_run(
                 if _is_native():
                     try:
                         history = await read_native_run_history(orch, project_with_run)
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         _log.exception(
                             "read native history for snapshot failed project=%s",
                             project_id,
@@ -178,7 +178,7 @@ async def start_run(
                     snapshot = RunSnapshot(
                         project_id=project_id,
                         run_id=run_id,
-                        captured_at=datetime.now(timezone.utc),
+                        captured_at=datetime.now(UTC),
                         plan=final_plan,
                         outputs={
                             nid: dump_output(out) for nid, out in final_outputs.items()
@@ -189,7 +189,7 @@ async def start_run(
                         history=history,
                     )
                     await storage.state_store.save_run_snapshot(snapshot)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 _log.exception(
                     "save_run_snapshot failed (non-fatal) project=%s run=%s",
                     project_id,

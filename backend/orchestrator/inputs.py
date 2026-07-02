@@ -8,6 +8,7 @@ from __future__ import annotations
 from ulid import ULID
 
 from backend.schemas import (
+    AgentOutputBase,
     AnalystInput,
     CollectorInput,
     CompetitorProfile,
@@ -15,8 +16,8 @@ from backend.schemas import (
     Project,
     QAInput,
     QAVerdict,
+    ReportDraft,
     ReporterInput,
-    AgentOutputBase,
 )
 from backend.schemas.evidence import CollectDimension
 
@@ -150,7 +151,7 @@ def build_reporter_input(
     trace_id: str,
     analyst_output: AgentOutputBase,
     qa_feedback: dict | None,
-    prior_draft: "ReportDraft | None" = None,
+    prior_draft: ReportDraft | None = None,
 ) -> ReporterInput:
     return ReporterInput(
         task_id="reporter",
@@ -218,11 +219,11 @@ def build_qa_input(
 
 __all__ = [
     "BuildInputError",
-    "new_span_id",
+    "build_analyst_input",
     "build_collector_input",
     "build_extractor_input",
-    "build_analyst_input",
-    "build_reporter_input",
     "build_qa_input",
+    "build_reporter_input",
+    "new_span_id",
     "profiles_from_outputs",
 ]

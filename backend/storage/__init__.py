@@ -28,17 +28,17 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
-from .protocols import (
-    CheckpointerProtocol,
-    EventBusProtocol,
-    StateStoreProtocol,
-)
 from .checkpoint_types import (
     Checkpoint,
     CheckpointConfig,
     CheckpointMetadata,
     CheckpointTuple,
     make_config,
+)
+from .protocols import (
+    CheckpointerProtocol,
+    EventBusProtocol,
+    StateStoreProtocol,
 )
 
 

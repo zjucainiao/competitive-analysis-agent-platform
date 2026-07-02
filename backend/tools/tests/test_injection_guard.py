@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from backend.tools.injection_guard import scan
 
-
 # ---------- 正例：应命中 ----------
 
 

@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from backend.orchestrator.feedback_router import (
-    FeedbackOutcome,
     FeedbackRouter,
 )
 from backend.orchestrator.planner import Planner
@@ -24,7 +23,6 @@ from backend.schemas import (
     QAStatus,
     QAVerdict,
 )
-
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DEMO_PROJECT_FILE = (
@@ -101,7 +99,7 @@ def test_aborts_when_no_routing_entries() -> None:
 
 def test_aborts_when_no_targets_match() -> None:
     """routing 指向不存在的 agent → 无匹配 → aborted。"""
-    plan = _make_plan()
+    _make_plan()
     # 用一个 plan 里没有节点的合法值（"collector" 有节点；尝试 plan 删 collector 模拟）
     # 简化：plan 拿 analyst 单一节点版本，再 routing 到 reporter——还在；那构造一个空 plan
     empty_plan = DAGPlan(
@@ -169,7 +167,7 @@ def test_analyst_rework_resets_all_downstream_status() -> None:
 
     expected_reset = {"reporter", "qa", "end"}
     assert set(outcome.node_status_resets) == expected_reset
-    for nid, status in outcome.node_status_resets.items():
+    for _nid, status in outcome.node_status_resets.items():
         assert status == NodeStatus.PENDING
 
 

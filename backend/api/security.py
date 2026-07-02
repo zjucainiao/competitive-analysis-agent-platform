@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
@@ -132,7 +132,7 @@ class TokenError(Exception):
 
 def create_access_token(user_id: str) -> str:
     """签发 access token，sub=user_id。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": user_id,
         "iat": int(now.timestamp()),
@@ -156,13 +156,13 @@ def decode_access_token(token: str) -> str:
 
 
 __all__ = [
-    "hash_password",
-    "verify_password",
+    "ACCESS_TOKEN_TTL_HOURS",
+    "TokenError",
+    "allowed_emails",
     "create_access_token",
     "decode_access_token",
     "ensure_jwt_secret",
-    "TokenError",
-    "ACCESS_TOKEN_TTL_HOURS",
-    "allowed_emails",
+    "hash_password",
     "is_email_allowed",
+    "verify_password",
 ]

@@ -32,23 +32,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-
-def _parallel_map(fn, items: list, *, max_workers: int) -> list:
-    """对独立任务并行求值，保持输入顺序。
-
-    每个任务提交前 ``copy_context()``，把 LLM trace 的 node_id/trace_id 带进
-    worker 线程（否则并发产生的 LLM call 会丢节点归属）。``max_workers<=1`` 或
-    单元素时退化为串行。
-    """
-    if len(items) <= 1 or max_workers <= 1:
-        return [fn(it) for it in items]
-    contexts = [contextvars.copy_context() for _ in items]
-    with ThreadPoolExecutor(max_workers=min(len(items), max_workers)) as pool:
-        futures = [
-            pool.submit(ctx.run, fn, it) for it, ctx in zip(items, contexts)
-        ]
-        return [f.result() for f in futures]
-
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from backend.agents._base import (
@@ -86,6 +69,25 @@ from .tools import (
     find_banned_terms,
     quantity_supported,
 )
+
+
+def _parallel_map(fn, items: list, *, max_workers: int) -> list:
+    """对独立任务并行求值，保持输入顺序。
+
+    每个任务提交前 ``copy_context()``，把 LLM trace 的 node_id/trace_id 带进
+    worker 线程（否则并发产生的 LLM call 会丢节点归属）。``max_workers<=1`` 或
+    单元素时退化为串行。
+    """
+    if len(items) <= 1 or max_workers <= 1:
+        return [fn(it) for it in items]
+    contexts = [contextvars.copy_context() for _ in items]
+    with ThreadPoolExecutor(max_workers=min(len(items), max_workers)) as pool:
+        futures = [
+            pool.submit(ctx.run, fn, it)
+            for it, ctx in zip(items, contexts, strict=True)
+        ]
+        return [f.result() for f in futures]
+
 
 PROMPT_DIR = Path(__file__).parent / "prompts"
 
@@ -574,7 +576,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                         valid_evidence=valid_evidence,
                         ev_db=ev_db,
                     )
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     errors.append(
                         AgentError(
                             code="LLM_SCHEMA_INVALID",
@@ -819,7 +821,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
             return _coerce_pydantic(resp, EntailmentVerdict)
         except (ValueError, ValidationError, NotImplementedError):
             return None
-        except Exception:  # noqa: BLE001
+        except Exception:
             # LLM 自身异常不应阻塞 Reporter；后置校验在 entailed=None 时直接放行
             return None
 
@@ -910,7 +912,9 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                 compute_issue, paras, max_workers=self.MAX_LLM_WORKERS
             )
             return [
-                (p, iss) for p, iss in zip(paras, issues) if iss is not None
+                (p, iss)
+                for p, iss in zip(paras, issues, strict=True)
+                if iss is not None
             ]
 
         repair_attempts = 0
@@ -946,6 +950,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
                 _parallel_map(
                     compute_issue, _final_paras, max_workers=self.MAX_LLM_WORKERS
                 ),
+                strict=True,
             )
         }
         forced = 0
@@ -1077,7 +1082,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
             return _coerce_pydantic(resp, RepairedParagraph)
         except (ValueError, ValidationError, NotImplementedError):
             return None
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
     # ---- 启发式路径 ----
@@ -1323,7 +1328,7 @@ class Reporter(BaseAgent[ReporterInput, ReporterOutput]):
             return {}
         try:
             return self.evidence_provider.get_many(sorted(evidence_ids))
-        except Exception:  # noqa: BLE001
+        except Exception:
             return {}
 
     @staticmethod
@@ -1511,4 +1516,4 @@ def _strip_number_token(text: str, kind: str, value: float) -> str:
     )
 
 
-__all__ = ["Reporter", "BANNED_TERMS"]
+__all__ = ["BANNED_TERMS", "Reporter"]

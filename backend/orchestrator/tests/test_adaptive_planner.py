@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -17,7 +16,6 @@ from backend.orchestrator.planner import Planner
 from backend.schemas import (
     AnalysisDimension,
     CollectConstraints,
-    NodeType,
     Project,
     ProjectStatus,
 )
@@ -32,7 +30,7 @@ def _make_project(
         project_id="proj_adaptive_test",
         project_name="adaptive test",
         owner="u",
-        created_at=datetime(2026, 6, 2, tzinfo=timezone.utc),
+        created_at=datetime(2026, 6, 2, tzinfo=UTC),
         target_product=target,
         competitors=list(competitors),
         industry=industry,

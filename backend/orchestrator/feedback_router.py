@@ -42,7 +42,6 @@ from backend.schemas import (
     QAVerdict,
 )
 
-
 # QA 循环上限（docs/QA.md / DAG.md 默认 3 轮；可在构造时覆盖）
 DEFAULT_MAX_ROUNDS = 3
 

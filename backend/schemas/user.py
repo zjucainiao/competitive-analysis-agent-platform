@@ -36,7 +36,7 @@ class UserPublic(BaseModel):
     created_at: datetime
 
     @classmethod
-    def of(cls, u: User) -> "UserPublic":
+    def of(cls, u: User) -> UserPublic:
         return cls(
             user_id=u.user_id,
             email=u.email,

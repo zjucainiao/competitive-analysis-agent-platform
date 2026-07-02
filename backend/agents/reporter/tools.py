@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from backend.schemas import Evidence
-
 
 # ---------- 禁用词 ----------
 #
@@ -287,7 +287,7 @@ class FixtureEvidenceProvider:
                     obj = json.loads(line)
                     ev = Evidence.model_validate(obj)
                     out[ev.evidence_id] = ev
-                except Exception:  # noqa: BLE001
+                except Exception:
                     # fixture 损坏不应阻塞 Reporter；测试会单独覆盖
                     continue
         self._cache = out

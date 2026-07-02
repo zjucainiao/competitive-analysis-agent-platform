@@ -8,7 +8,6 @@ v1 阶段不上 alembic：`init_schema(engine)` 跑一次 `CREATE TABLE IF NOT E
 
 from __future__ import annotations
 
-
 CREATE_CHECKPOINTS = """
 CREATE TABLE IF NOT EXISTS checkpoints (
     thread_id            text NOT NULL,

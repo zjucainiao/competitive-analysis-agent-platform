@@ -22,11 +22,9 @@ from backend.schemas import (
     DAGEdge,
     DAGNode,
     DAGPlan,
-    NodeStatus,
     NodeType,
     Project,
     ProjectStatus,
-    QADimension,
     QAStatus,
     QAVerdict,
 )

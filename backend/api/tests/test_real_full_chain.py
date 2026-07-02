@@ -138,7 +138,7 @@ def test_real_full_chain_end_to_end(client: TestClient) -> None:
     # 2. Analyst 真出了 claim
     analyst_out = outputs["analyst"]
     analyst_status = analyst_out.get("status")
-    print(f"\n=== ANALYST DEBUG ===")
+    print("\n=== ANALYST DEBUG ===")
     print(f"  status: {analyst_status}")
     print(f"  confidence: {analyst_out.get('confidence')}")
     print(f"  errors[:3]: {analyst_out.get('errors', [])[:3]}")
@@ -187,10 +187,10 @@ def test_real_full_chain_end_to_end(client: TestClient) -> None:
 
     # 7. QA verdict 全量诊断（找 reject 真凶）
     last_v = verdicts[-1]
-    print(f"\n=== QA verdict (final) ===")
+    print("\n=== QA verdict (final) ===")
     print(f"  overall_status: {last_v.get('overall_status')}")
     print(f"  blocking: {last_v.get('blocking')}")
-    print(f"  dimensions:")
+    print("  dimensions:")
     for dim, res in (last_v.get("dimension_results") or {}).items():
         marker = "✓" if res.get("pass") else "✗"
         print(f"    {marker} {dim}: score={res.get('score'):.2f}  notes={(res.get('notes') or '')[:120]}")

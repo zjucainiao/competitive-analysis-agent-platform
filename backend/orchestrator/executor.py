@@ -12,7 +12,7 @@ Executor 不感知 DAG 拓扑 / LangGraph state，仅按"一个节点 + 上游 o
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from backend.schemas import (
@@ -31,14 +31,13 @@ from backend.schemas import (
 from .agent_registry import AgentRegistry
 from .inputs import (
     BuildInputError,
-    new_span_id,
+    build_analyst_input,
     build_collector_input,
     build_extractor_input,
-    build_analyst_input,
-    build_reporter_input,
     build_qa_input,
+    build_reporter_input,
+    new_span_id,
 )
-
 
 # ---------- 常量 ----------
 
@@ -58,7 +57,7 @@ _CONTROL_NODE_TYPES = frozenset(
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Executor:
@@ -172,7 +171,7 @@ class Executor:
                         ),
                         timeout=node.timeout_ms / 1000.0,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # 超时不重试：asyncio.wait_for 超时只取消这里的 await，
                     # to_thread 里的同步 agent.invoke 没有协作式取消、仍会在
                     # 后台线程跑完（僵尸线程）。此时若重试，会与僵尸线程并发
@@ -190,7 +189,7 @@ class Executor:
                         retriable=False,
                     )
                     break
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     last_error = AgentError(
                         code="UNEXPECTED",
                         message=f"{type(exc).__name__}: {exc}",
@@ -232,7 +231,7 @@ class Executor:
                 return self._success_result(
                     node, degraded, started_at, attempts=attempts, degraded=True
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 last_error = AgentError(
                     code="DEGRADATION_FAILED",
                     message=f"collector mock fallback failed: {exc}",

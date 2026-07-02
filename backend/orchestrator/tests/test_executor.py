@@ -34,7 +34,6 @@ from backend.schemas import (
 )
 from backend.schemas.evidence import CollectDimension
 
-
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DEMO_PROJECT_FILE = (
     _REPO_ROOT / "fixtures" / "mock_data" / "projects" / "collab_saas_demo.json"

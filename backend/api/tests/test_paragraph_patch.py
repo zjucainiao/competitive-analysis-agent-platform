@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,9 +14,9 @@ from backend.schemas import (
     Project,
     ProjectStatus,
     ReportDraft,
+    ReporterOutput,
     ReportParagraph,
     ReportSection,
-    ReporterOutput,
     User,
 )
 
@@ -51,7 +51,7 @@ def auth(client: TestClient) -> dict[str, str]:
                 email="u1@test.com",
                 password_hash="x",
                 display_name="U1",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
 
@@ -67,7 +67,7 @@ def _seed_project_and_report(client: TestClient) -> tuple[str, str]:
         project_id="proj_test_patch",
         project_name="patch test",
         owner="u1",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         target_product="Notion",
         competitors=["Asana"],
         industry="collaboration_saas",
@@ -160,7 +160,7 @@ def test_patch_other_users_project_forbidden(client: TestClient, auth: dict) -> 
         project_id="proj_other_owner",
         project_name="x",
         owner="someone_else",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         target_product="X",
         competitors=[],
         industry="collaboration_saas",

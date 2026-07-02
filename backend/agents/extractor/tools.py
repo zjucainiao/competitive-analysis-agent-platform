@@ -21,7 +21,6 @@ from pydantic import BaseModel
 
 from backend.schemas import EvidenceLocation, RawSourceDoc
 
-
 # ---------- TextChunker ----------
 
 
@@ -355,12 +354,12 @@ def content_hash_for(content: str) -> str:
 
 __all__ = [
     "Chunk",
-    "TextChunker",
     "EvidenceLinker",
     "LinkResult",
-    "split_prompt",
-    "render",
+    "TextChunker",
     "coerce_pydantic",
-    "evidence_id_for",
     "content_hash_for",
+    "evidence_id_for",
+    "render",
+    "split_prompt",
 ]

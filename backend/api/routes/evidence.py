@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -179,7 +178,7 @@ async def patch_evidence(
                     await storage.state_store.update_project_status(
                         project_id, ProjectStatus.DONE
                     )
-                except Exception:  # noqa: BLE001
+                except Exception:
                     _log.exception(
                         "evidence-auto-rework(native) failed project=%s", project_id
                     )
@@ -241,7 +240,7 @@ async def patch_evidence(
                 await storage.state_store.update_project_status(
                     project_id, ProjectStatus.DONE
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 _log.exception(
                     "evidence-auto-rework run failed for project=%s", project_id
                 )

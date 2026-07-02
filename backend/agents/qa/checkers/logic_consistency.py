@@ -67,7 +67,7 @@ class LogicConsistencyChecker(BaseChecker):
         if ctx.llm is not None and ctx.prompt_dir:
             try:
                 pairs = self._call_llm(ctx)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(
                     AgentError(
                         code="LLM_SCHEMA_INVALID",

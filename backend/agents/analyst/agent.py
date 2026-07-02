@@ -188,7 +188,7 @@ class Analyst(BaseAgent[AnalystInput, AnalystOutput]):
             ) as pool:
                 futures = [
                     pool.submit(ctx.run, _run_one, dim)
-                    for dim, ctx in zip(dims, contexts)
+                    for dim, ctx in zip(dims, contexts, strict=True)
                 ]
                 # 按提交顺序取结果 → per_dim / errors 顺序与串行一致（确定性）
                 dim_results = [f.result() for f in futures]

@@ -12,7 +12,7 @@ v2 升级 Redis Stream 时新增 `replay(channel, since=...)` 方法，不破现
 from __future__ import annotations
 
 import contextlib
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from redis.asyncio import Redis
 from redis.exceptions import TimeoutError as RedisTimeoutError

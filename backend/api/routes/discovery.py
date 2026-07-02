@@ -123,7 +123,7 @@ async def discover_competitors(
             temperature=0.2,
             max_tokens=800,
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         _log.exception("discover-competitors LLM call failed: %s", e)
         return DiscoverCompetitorsResponse(
             target_product=req.target_product,
@@ -168,7 +168,7 @@ def _coerce(resp: Any) -> _DiscoverLLMResponse | None:
     if isinstance(parsed, dict):
         try:
             return _DiscoverLLMResponse.model_validate(parsed)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
     # 兜底：从 content 字符串 JSON 解
     content = getattr(resp, "content", None) or getattr(resp, "text", None)
@@ -176,6 +176,6 @@ def _coerce(resp: Any) -> _DiscoverLLMResponse | None:
         try:
             data = json.loads(content)
             return _DiscoverLLMResponse.model_validate(data)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
     return None

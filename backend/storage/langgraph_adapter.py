@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.base import BaseCheckpointSaver  # type: ignore
 
 
-def to_langgraph_saver(impl: CheckpointerProtocol) -> "BaseCheckpointSaver":
+def to_langgraph_saver(impl: CheckpointerProtocol) -> BaseCheckpointSaver:
     """把 `CheckpointerProtocol` 实现包装成 langgraph 的 `BaseCheckpointSaver`。
 
     思路：动态子类化 `BaseCheckpointSaver`，把 a*-prefixed 方法委托给 impl。

@@ -37,12 +37,12 @@ DEFAULT_CHECKERS: tuple[type[BaseChecker], ...] = (
 
 
 __all__ = [
+    "DEFAULT_CHECKERS",
     "BaseChecker",
     "Checker",
     "CheckerContext",
     "CheckerResult",
     "CoverageDensityChecker",
-    "DEFAULT_CHECKERS",
     "EvidenceCompletenessChecker",
     "ExpressionChecker",
     "FactConsistencyChecker",

@@ -40,7 +40,6 @@ from backend.schemas import (
 
 from ._base import BaseChecker, CheckerContext, CheckerResult
 
-
 # ---------- 数字提取（与 Reporter tools.py 对齐） ----------
 
 
@@ -163,7 +162,7 @@ class FactConsistencyChecker(BaseChecker):
         if ctx.llm is not None and ctx.prompt_dir:
             try:
                 llm_verdicts = self._call_llm(ctx, para_index)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(
                     AgentError(
                         code="ENTAILMENT_FAILED",

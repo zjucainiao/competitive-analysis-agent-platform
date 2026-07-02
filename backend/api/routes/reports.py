@@ -23,9 +23,8 @@ from backend.api.deps import get_owned_project, get_storage
 from backend.schemas import (
     Project,
     ProjectMetrics,
-    ReportDraft,
-    ReportParagraph,
     ReporterOutput,
+    ReportParagraph,
 )
 from backend.storage import Storage
 

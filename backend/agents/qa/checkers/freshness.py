@@ -26,7 +26,7 @@ routing：
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import ClassVar
 
 from backend.schemas import Evidence, QADimension, QAIssue, ReportParagraph
@@ -47,7 +47,7 @@ class FreshnessChecker(BaseChecker):
         issues: list[QAIssue] = []
         now = ctx.now
         if now.tzinfo is None:
-            now = now.replace(tzinfo=timezone.utc)
+            now = now.replace(tzinfo=UTC)
         contributions: list[float] = []
         dated_count = 0
         undated_count = 0
@@ -174,7 +174,7 @@ def _published_at(ev: Evidence) -> datetime | None:
     if published is None:
         return None
     if published.tzinfo is None:
-        published = published.replace(tzinfo=timezone.utc)
+        published = published.replace(tzinfo=UTC)
     return published
 
 

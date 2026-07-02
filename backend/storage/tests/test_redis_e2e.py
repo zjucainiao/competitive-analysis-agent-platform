@@ -20,7 +20,6 @@ import pytest
 from backend.schemas import NodeExecutionResult, NodeStatus
 from backend.storage.redis_bus import RedisEventBus
 
-
 pytestmark = pytest.mark.redis
 
 

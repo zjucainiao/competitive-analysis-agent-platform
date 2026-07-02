@@ -20,7 +20,7 @@ token/cost/confidence/duration 由对应 ``AgentOutput``（outputs[run_ref]）�
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -50,15 +50,15 @@ class StageInstance(BaseModel):
     product: str
     status: str                       # NodeRun.status: success/partial/needs_rework/failed
     revision: int = 1                 # 该产品对应 NodeRun 的最新 round
-    run_ref: Optional[str] = None     # 投影节点 ID（collect.{product} 等），用于查 outputs
-    span_id: Optional[str] = None
-    started_at: Optional[str] = None
-    ended_at: Optional[str] = None
-    tokens_input: Optional[int] = None
-    tokens_output: Optional[int] = None
-    cost_usd: Optional[float] = None
-    confidence: Optional[float] = None
-    duration_ms: Optional[int] = None
+    run_ref: str | None = None     # 投影节点 ID（collect.{product} 等），用于查 outputs
+    span_id: str | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
+    tokens_input: int | None = None
+    tokens_output: int | None = None
+    cost_usd: float | None = None
+    confidence: float | None = None
+    duration_ms: int | None = None
 
 
 class StageRevision(BaseModel):
@@ -68,15 +68,15 @@ class StageRevision(BaseModel):
 
     round: int = 1
     status: str
-    run_ref: Optional[str] = None     # 投影节点 ID（reporter / reporter_v2 / ...）
-    span_id: Optional[str] = None
-    started_at: Optional[str] = None
-    ended_at: Optional[str] = None
-    tokens_input: Optional[int] = None
-    tokens_output: Optional[int] = None
-    cost_usd: Optional[float] = None
-    confidence: Optional[float] = None
-    duration_ms: Optional[int] = None
+    run_ref: str | None = None     # 投影节点 ID（reporter / reporter_v2 / ...）
+    span_id: str | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
+    tokens_input: int | None = None
+    tokens_output: int | None = None
+    cost_usd: float | None = None
+    confidence: float | None = None
+    duration_ms: int | None = None
 
 
 class RunStageView(BaseModel):
@@ -100,7 +100,7 @@ class RunStateView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     project_id: str
-    run_id: Optional[str] = None
+    run_id: str | None = None
     status: str                       # running/done/failed/aborted
     products: list[str] = Field(default_factory=list)
     stages: list[RunStageView] = Field(default_factory=list)
@@ -113,17 +113,17 @@ class RunStateView(BaseModel):
     outputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     qa_round: int = 0
     aborted: bool = False
-    abort_reason: Optional[str] = None
+    abort_reason: str | None = None
     metrics: ProjectMetrics | None = None
     computed_at: str
 
 
 __all__ = [
-    "STATIC_STAGES",
-    "STAGE_AGENT",
     "PRODUCT_STAGES",
-    "StageInstance",
-    "StageRevision",
+    "STAGE_AGENT",
+    "STATIC_STAGES",
     "RunStageView",
     "RunStateView",
+    "StageInstance",
+    "StageRevision",
 ]

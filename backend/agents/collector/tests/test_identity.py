@@ -13,13 +13,13 @@ from datetime import UTC, datetime
 
 from backend.agents.collector.agent import (
     Collector,
-    _IdentityCheck,
     _assess_identity_heuristic,
     _domain_label,
     _identity_aliases,
+    _IdentityCheck,
 )
 from backend.agents.collector.tools import ScrapeResult, SearchHit
-from backend.schemas import AgentStatus, CollectDimension, CollectorInput, RawSourceDoc
+from backend.schemas import AgentStatus, CollectDimension, RawSourceDoc
 
 from .conftest import (
     FakeLLM,
@@ -29,7 +29,6 @@ from .conftest import (
     NullTracer,
     make_collector_input,
 )
-
 
 # ---------- 启发式工具 ----------
 

@@ -25,6 +25,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from backend.agents._authority import authority_for
 from backend.agents._base import (
     AgentRunError,
     BaseAgent,
@@ -32,9 +33,7 @@ from backend.agents._base import (
     ToolRegistryProtocol,
     TracerProtocol,
 )
-from backend.agents._authority import authority_for
 from backend.agents._progress import emit_collect_progress
-from backend.tools.injection_guard import scan as _scan_injection
 from backend.schemas import (
     AgentError,
     AgentStatus,
@@ -44,6 +43,7 @@ from backend.schemas import (
     RawSourceDoc,
 )
 from backend.schemas.evidence import IdentityStatus
+from backend.tools.injection_guard import scan as _scan_injection
 
 from .fixtures import get_mock_sources
 from .tools import (
@@ -596,7 +596,7 @@ class Collector(BaseAgent[CollectorInput, CollectorOutput]):
             ) as pool:
                 futures = [
                     pool.submit(ctx.run, _run_dimension, dim)
-                    for dim, ctx in zip(dims, contexts)
+                    for dim, ctx in zip(dims, contexts, strict=True)
                 ]
                 # 按提交顺序取结果 → all_sources 维度顺序与串行一致（确定性）
                 results = [f.result() for f in futures]

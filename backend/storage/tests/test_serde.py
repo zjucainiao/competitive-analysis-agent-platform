@@ -8,8 +8,8 @@ from backend.schemas import (
     AgentStatus,
     CollectDimension,
     CollectorOutput,
-    ReporterOutput,
     ReportDraft,
+    ReporterOutput,
     ReportSection,
 )
 from backend.storage.serde import dump_output, load_output

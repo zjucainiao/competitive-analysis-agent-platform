@@ -14,8 +14,8 @@ contract：
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from backend.schemas import Project, ProjectMetrics
 from backend.schemas.run_view import (
@@ -34,7 +34,7 @@ from .projection import _node_id
 _SUCCESS_STATUSES = frozenset({"success", "partial", "needs_rework"})
 
 
-def _metric_fields(out: Any) -> dict[str, Optional[float]]:
+def _metric_fields(out: Any) -> dict[str, float | None]:
     """从一个 AgentOutput（dict 或对象）取 token/cost/confidence/duration。
 
     缺字段时返回 None（前端按缺失渲染），不强行填 0。
@@ -85,7 +85,7 @@ def _overall_status(
         return "aborted"
 
     # 按 (node, product) 分组，取每组最后一条记录的状态：若最终态是 failed 则视为失败。
-    last_status_by_key: dict[tuple[str, Optional[str]], str] = {}
+    last_status_by_key: dict[tuple[str, str | None], str] = {}
     for run in history:
         key = (run.get("node"), run.get("product"))
         last_status_by_key[key] = run.get("status", "")
@@ -179,7 +179,7 @@ def run_state_to_view(
         aborted=aborted,
         abort_reason=abort_reason,
         metrics=metrics,
-        computed_at=datetime.now(timezone.utc).isoformat(),
+        computed_at=datetime.now(UTC).isoformat(),
     )
 
 

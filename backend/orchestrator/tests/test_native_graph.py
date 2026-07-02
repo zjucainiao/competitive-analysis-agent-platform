@@ -499,7 +499,7 @@ async def test_collect_one_passes_prompt_override_to_agent(
     captured: dict[str, Any] = {}
     real = nodes_mod.run_agent_node
 
-    async def _spy(registry, agent_name, inp, **kw):  # noqa: ANN001, ANN202
+    async def _spy(registry, agent_name, inp, **kw):
         captured["override"] = kw.get("user_prompt_override")
         return await real(registry, agent_name, inp, **kw)
 

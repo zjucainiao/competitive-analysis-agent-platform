@@ -18,7 +18,6 @@ from backend.observability import (
     build_tracer_from_env,
 )
 
-
 # ---------- NullTracer 行为 ----------
 
 

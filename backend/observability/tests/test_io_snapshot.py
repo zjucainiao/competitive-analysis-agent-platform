@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from pydantic import Field
+
 from backend.agents._base import BaseAgent
 from backend.observability.io_snapshot import summarize_agent_input
 from backend.schemas import CollectDimension, CollectorInput
 from backend.schemas.agent_io import AgentInputBase, AgentOutputBase, AgentStatus
-
 
 # ----- summarize_agent_input：真实 schema -----
 
@@ -90,7 +91,7 @@ def test_summarize_never_raises_on_garbage() -> None:
 
 class _DummyInput(AgentInputBase):
     product_name: str
-    dimensions: list[str] = []
+    dimensions: list[str] = Field(default_factory=list)
 
 
 class _DummyOutput(AgentOutputBase):

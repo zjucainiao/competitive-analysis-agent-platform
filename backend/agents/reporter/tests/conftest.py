@@ -12,8 +12,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-from backend.schemas import ReportSection
-
 
 @dataclass
 class NullLLM:

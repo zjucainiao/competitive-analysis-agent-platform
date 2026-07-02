@@ -51,7 +51,7 @@ _HIJACK_PHRASES = (
 
 
 class _NullSpan:
-    def __enter__(self) -> "_NullSpan":
+    def __enter__(self) -> _NullSpan:
         return self
 
     def __exit__(self, *_a: object) -> None:

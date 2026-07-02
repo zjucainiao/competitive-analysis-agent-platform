@@ -53,6 +53,6 @@ async def project_events(websocket: WebSocket, project_id: str) -> None:
             await websocket.send_json(result.model_dump(mode="json"))
     except WebSocketDisconnect:
         return
-    except Exception:  # noqa: BLE001
+    except Exception:
         _log.exception("WS event stream failed for %s", project_id)
         await websocket.close(code=1011)

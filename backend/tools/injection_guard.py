@@ -17,8 +17,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, Pattern
+from re import Pattern
 
 # tainted 判定阈值：score ≥ 此值即标记。单条强模式权重 ≥ 0.5，故单击即中。
 TAINT_THRESHOLD = 0.5
@@ -157,9 +158,9 @@ def scan(text: str) -> InjectionVerdict:
 
 __all__ = [
     "DEFAULT_INJECTION_PATTERNS",
+    "TAINT_THRESHOLD",
     "InjectionGuard",
     "InjectionPattern",
     "InjectionVerdict",
-    "TAINT_THRESHOLD",
     "scan",
 ]

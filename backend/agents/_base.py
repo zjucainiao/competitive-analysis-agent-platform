@@ -18,13 +18,13 @@ import threading
 import time
 import traceback
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import (
     Any,
     ClassVar,
     Generic,
-    Iterator,
     Protocol,
     TypeVar,
     runtime_checkable,
@@ -171,7 +171,7 @@ class _LLMUsageCounter:
     ``add`` 的 read-modify-write 用锁保护。
     """
 
-    __slots__ = ("tokens_input", "tokens_output", "cost_usd", "_lock")
+    __slots__ = ("_lock", "cost_usd", "tokens_input", "tokens_output")
 
     def __init__(self) -> None:
         self.tokens_input: int = 0
@@ -255,7 +255,7 @@ class _TrackingLLMWrapper:
                         finish_reason=getattr(resp, "finish_reason", None),
                         duration_ms=duration_ms,
                     )
-                except Exception:  # noqa: BLE001
+                except Exception:
                     # tracer 异常永远不阻塞主流程
                     pass
         return resp
@@ -273,7 +273,7 @@ def _estimate_call_cost(model: str, tokens_in: int, tokens_out: int) -> float:
     """惰性 import 价格表，避免 backend.agents._base ↔ backend.llm 循环。"""
     try:
         from backend.llm.pricing import estimate_cost
-    except Exception:  # noqa: BLE001
+    except Exception:
         return 0.0
     return estimate_cost(model, tokens_in, tokens_out)
 
@@ -415,7 +415,7 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
                     duration_ms=int((time.monotonic() - started) * 1000),
                 )
                 self._safe_set_error(span, e)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 tb = traceback.format_exc()
                 errors.append(
                     AgentError(
@@ -613,7 +613,7 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
             from backend.observability.io_snapshot import summarize_agent_input
 
             out.input_snapshot = summarize_agent_input(inp)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     @staticmethod
@@ -623,7 +623,7 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
         if callable(setter):
             try:
                 setter(out)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
     @staticmethod
@@ -632,14 +632,14 @@ class BaseAgent(ABC, Generic[TInput, TOutput]):
         if callable(setter):
             try:
                 setter(err)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
 
 class _NullSpan:
     """无 tracer 时的占位 span（仅用于 mock 模式下的单元测试）。"""
 
-    def __enter__(self) -> "_NullSpan":
+    def __enter__(self) -> _NullSpan:
         return self
 
     def __exit__(self, *args: Any) -> None:

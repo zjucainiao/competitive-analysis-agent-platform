@@ -33,17 +33,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Any, AsyncIterator
-
-from backend.agents._progress import (
-    reset_collect_progress_emitter,
-    set_collect_progress_emitter,
-)
+from collections.abc import AsyncIterator
+from datetime import UTC
+from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 from ulid import ULID
 
+from backend.agents._progress import (
+    reset_collect_progress_emitter,
+    set_collect_progress_emitter,
+)
+from backend.observability.llm_call_log import list_calls
 from backend.schemas import (
     AgentOutputBase,
     DAGEdge,
@@ -51,12 +53,10 @@ from backend.schemas import (
     DAGPlan,
     NodeExecutionResult,
     NodeStatus,
-    NodeType,
     Project,
     QAOutput,
     QAVerdict,
 )
-from backend.observability.llm_call_log import list_calls
 from backend.storage import Storage
 from backend.storage.langgraph_adapter import to_langgraph_saver
 
@@ -334,7 +334,7 @@ class Orchestrator:
                 )
                 # 取回异常避免「Future exception was never retrieved」噪音(纯观测)。
                 fut.add_done_callback(lambda f: f.exception())
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
         emit_token = set_collect_progress_emitter(_emit_collect_progress)
@@ -363,7 +363,7 @@ class Orchestrator:
                     # (observability 永不阻塞主流程)。
                     try:
                         await self._persist_node_llm_calls(project.project_id, res)
-                    except Exception as exc:  # noqa: BLE001
+                    except Exception as exc:
                         _log.warning("native _persist_node_llm_calls failed: %s", exc, exc_info=True)
                     await self.storage.event_bus.publish(channel, res)
                     yield res
@@ -402,7 +402,7 @@ class Orchestrator:
                         await self.storage.state_store.update_node_status(
                             project.project_id, nid, NodeStatus.FAILED
                         )
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         pass
                     await self.storage.event_bus.publish(channel, fail_res)
                     yield fail_res
@@ -414,7 +414,7 @@ class Orchestrator:
         # 故先 model_validate→model_dump 归一化(与 projection 文档约定一致)。
         if final_state is not None:
             normalized = _RunState.model_validate(final_state).model_dump()
-            proj_plan, out_map = run_state_to_dagplan(normalized, project=project)
+            proj_plan, _out_map = run_state_to_dagplan(normalized, project=project)
             await self.storage.state_store.save_dag_plan(proj_plan)
 
             # 持久化所有 QA verdict(legacy 引擎在 _process_qa_routing 里逐条落库;
@@ -446,7 +446,7 @@ class Orchestrator:
                     verdicts=verdict_objs,
                     qa_round_count=int(final_state.get("qa_round", 0) or 0),
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 _log.warning("native _persist_metrics failed: %s", exc, exc_info=True)
 
     async def resume(
@@ -547,7 +547,7 @@ class Orchestrator:
                         status=NodeStatus.RUNNING,
                     ),
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
         # 3. 并发执行
@@ -639,7 +639,7 @@ class Orchestrator:
                 await self.storage.state_store.append_llm_calls(
                     project_id, [r.to_dict() for r in recs]
                 )
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     async def _persist_metrics(
@@ -652,7 +652,7 @@ class Orchestrator:
         qa_round_count: int,
     ) -> None:
         """终态时把 ProjectMetrics 写回 storage + 追加到 metrics_history（sparkline 用）。"""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from backend.schemas.project import ProjectMetricsSnapshot
 
@@ -678,9 +678,9 @@ class Orchestrator:
             )
 
         snapshot = ProjectMetricsSnapshot(
-            captured_at=datetime.now(timezone.utc), metrics=metrics
+            captured_at=datetime.now(UTC), metrics=metrics
         )
-        new_history = list(base_project.metrics_history) + [snapshot]
+        new_history = [*base_project.metrics_history, snapshot]
         updated = base_project.model_copy(
             update={"metrics": metrics, "metrics_history": new_history}
         )
@@ -753,7 +753,7 @@ def _native_outputs_for_metrics(
         elif isinstance(out, dict):
             try:
                 result[nid] = load_output(out)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 continue
     return result
 

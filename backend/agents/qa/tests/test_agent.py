@@ -19,7 +19,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -264,12 +264,12 @@ def test_freshness_passes_when_all_evidence_undated() -> None:
 
 def test_freshness_drops_when_six_months_old_publish_date() -> None:
     """敏感字段引用了 6 个月前发布的 evidence → 分数明显下降并开 collector 路由。"""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     inp = load_demo_input()
     old_db = load_evidence_db()
     six_months_ago = (
-        datetime.now(timezone.utc) - timedelta(days=180)
+        datetime.now(UTC) - timedelta(days=180)
     ).isoformat()
     dated = {
         eid: Evidence.model_validate(
@@ -907,7 +907,7 @@ def _ec_checker():
 def test_low_authority_does_not_flip_evidence_pass() -> None:
     """权威 issue 在 pass_ 之后 append——压低全部证据 authority 不改本维度 score/pass_，
     只额外浮出权威 issue（消费 source_authority，但不经 core 路径强制阻塞）。"""
-    CheckerContext, EvidenceCompletenessChecker = _ec_checker()
+    CheckerContext, EvidenceCompletenessChecker = _ec_checker()  # noqa: N806
     inp = load_demo_input()
     db = load_evidence_db()
     base = EvidenceCompletenessChecker().run(
@@ -944,7 +944,7 @@ def test_low_authority_does_not_flip_evidence_pass() -> None:
 def test_cross_dimension_authority_correction_flags_review_in_pricing() -> None:
     """评论类证据(存值 0.92)用到**定价**段落 → 跨维度重算为 0.6(<0.7) → 标关键弱源。
     证明 QA 是按「段落主题维度」重算，而非沿用证据采集时的 source_authority。"""
-    CheckerContext, EvidenceCompletenessChecker = _ec_checker()
+    CheckerContext, EvidenceCompletenessChecker = _ec_checker()  # noqa: N806
     inp = load_demo_input()
     db = load_evidence_db()
     sec = next(s for s in inp.draft.sections if "pricing" in s.section_id.lower())
@@ -978,10 +978,10 @@ def test_cross_dimension_authority_correction_flags_review_in_pricing() -> None:
 
 def test_multi_source_class_corroboration_exempts() -> None:
     """同段落证据来自 ≥2 个不同 source_class（多源互证）→ 即便都低权威也豁免。"""
-    CheckerContext, EvidenceCompletenessChecker = _ec_checker()
+    CheckerContext, EvidenceCompletenessChecker = _ec_checker()  # noqa: N806
     inp = load_demo_input()
     db = load_evidence_db()
-    sec = next(s for s in inp.draft.sections if "pricing" in s.section_id.lower())
+    next(s for s in inp.draft.sections if "pricing" in s.section_id.lower())
     # 注入一个引用 2 条不同 source_class 证据的定价量化段
     eids = [e for e in db][:2]
     assert len(eids) == 2

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -23,20 +23,18 @@ from backend.schemas import (
     ExtractorOutput,
     NodeStatus,
     NodeType,
-    ProductBasicInfo,
     PricingProfile,
+    ProductBasicInfo,
     QADimension,
     QADimensionResult,
     QAStatus,
     QAVerdict,
     RawSourceDoc,
 )
-from backend.schemas.competitor import CompetitorProfile
-from backend.schemas.competitor import PricingModel
+from backend.schemas.competitor import CompetitorProfile, PricingModel
 from backend.schemas.evidence import CollectDimension
 
-
-_T0 = datetime(2026, 6, 1, 10, 0, 0, tzinfo=timezone.utc)
+_T0 = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
 
 
 def _node(node_id: str, *, agent: str | None, start_offset: int, duration: int) -> DAGNode:

@@ -13,7 +13,8 @@ DSN 示例：`postgresql+asyncpg://app:app@localhost:5432/app`。
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Sequence
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -50,7 +51,6 @@ from .serde import (
     unpickle_checkpoint,
     unpickle_value,
 )
-
 
 # ---------- StateStore ----------
 

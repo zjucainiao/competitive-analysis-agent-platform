@@ -10,12 +10,12 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from backend.api.deps import (
     get_current_user,
@@ -24,7 +24,7 @@ from backend.api.deps import (
 )
 from backend.observability.llm_call_log import list_calls
 from backend.orchestrator.metrics import best_round_reporter_key
-from backend.schemas import Project, ProjectStatus, ReporterOutput, User
+from backend.schemas import Project, ReporterOutput, User
 from backend.schemas.labels import industry_label
 from backend.schemas.project import ProjectMetricsSnapshot
 from backend.storage import Storage
@@ -276,7 +276,7 @@ async def export_project(
                 nid: out.model_dump(mode="json") for nid, out in outputs.items()
             },
             "verdicts": [v.model_dump(mode="json") for v in verdicts],
-            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "exported_at": datetime.now(UTC).isoformat(),
         }
         body = json.dumps(payload, ensure_ascii=False, indent=2)
         return Response(
@@ -408,7 +408,7 @@ def _render_markdown(
     lines: list[str] = []
     lines.append(f"# {project.project_name}")
     lines.append("")
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(UTC).date().isoformat()
     lines.append(f"> 竞品分析报告 · {today}")
     lines.append("")
     meta_bits = [f"**目标产品**：{project.target_product}"]
@@ -626,7 +626,7 @@ def _render_pdf(title: str, md_text: str) -> bytes:
     return buf.getvalue()
 
 
-def _register_cjk_font(pdfmetrics, TTFont) -> str:
+def _register_cjk_font(pdfmetrics, TTFont) -> str:  # noqa: N803
     """注册一个支持中文的字体并返回 fontName。任一系统候选可用即注册成功。"""
     candidates = [
         # macOS
@@ -644,7 +644,7 @@ def _register_cjk_font(pdfmetrics, TTFont) -> str:
         try:
             pdfmetrics.registerFont(TTFont(name, path))
             return name
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
     return "Helvetica"  # 兜底（中文会变方框，但不报错）
 

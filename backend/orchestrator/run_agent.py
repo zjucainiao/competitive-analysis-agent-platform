@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from backend.orchestrator.inputs import new_span_id
 from backend.schemas import AgentError, AgentOutputBase, AgentStatus, Evidence
@@ -33,8 +33,8 @@ class AgentRunResult:
     """
 
     status: AgentStatus
-    output: Optional[AgentOutputBase]
-    error: Optional[AgentError]
+    output: AgentOutputBase | None
+    error: AgentError | None
     attempts: int
     span_id: str
     started_at: datetime
@@ -42,7 +42,7 @@ class AgentRunResult:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _collect_evidences(outputs: dict[str, AgentOutputBase]) -> dict[str, Evidence]:
@@ -159,7 +159,7 @@ async def run_agent_node(
                     ),
                     timeout=timeout_ms / 1000.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # 超时不重试：asyncio.wait_for 超时只取消这里的 await，
                 # to_thread 里的同步 agent.invoke 没有协作式取消、仍会在后台
                 # 线程跑完（僵尸线程）。此时若重试，会与僵尸线程并发执行同一
@@ -182,7 +182,7 @@ async def run_agent_node(
                     started_at=started,
                     ended_at=_now(),
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 last_error = AgentError(
                     code="UNEXPECTED",
                     message=f"{type(exc).__name__}: {exc}",
@@ -241,4 +241,4 @@ async def run_agent_node(
     )
 
 
-__all__ = ["run_agent_node", "AgentRunResult"]
+__all__ = ["AgentRunResult", "run_agent_node"]

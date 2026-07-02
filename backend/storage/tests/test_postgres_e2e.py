@@ -20,7 +20,6 @@ from backend.schemas import NodeStatus, ProjectStatus
 from backend.storage import init_storage, make_config
 from backend.storage.postgres import PostgresCheckpointer, PostgresStateStore
 
-
 pytestmark = pytest.mark.postgres
 
 

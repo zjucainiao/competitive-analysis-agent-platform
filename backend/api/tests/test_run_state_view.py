@@ -19,10 +19,10 @@ from fastapi.testclient import TestClient
 from backend.api import create_app
 from backend.orchestrator import Orchestrator
 from backend.orchestrator.tests.test_native_graph import (
-    _FakeRegistry,
-    _StubQA,
     _block_reporter_verdict,
+    _FakeRegistry,
     _pass_verdict,
+    _StubQA,
 )
 
 
@@ -169,7 +169,7 @@ def test_run_state_overlays_node_output_edits(
     )
     store = native_client.app.state.storage.state_store
 
-    async def _fake_list(project_id: str):  # noqa: ANN202
+    async def _fake_list(project_id: str):
         return {"reporter": edited}
 
     monkeypatch.setattr(store, "list_node_outputs", _fake_list)

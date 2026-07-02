@@ -102,7 +102,7 @@ class QAFeedback(BaseModel):
     revision: int = Field(default=0, description="当前返工轮次(供 Reporter bump 版本)")
 
 
-def validate_qa_feedback(payload: "dict | None") -> None:
+def validate_qa_feedback(payload: dict | None) -> None:
     """对将注入 Agent 的 ``qa_feedback`` dict 做边界结构校验（早发现坏 payload）。
 
     非 None 时按 ``QAFeedback`` 校验；失败只 ``log.warning`` **不抛**——fail-soft，
@@ -114,7 +114,7 @@ def validate_qa_feedback(payload: "dict | None") -> None:
         return
     try:
         QAFeedback.model_validate(payload)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         import logging
 
         logging.getLogger(__name__).warning(

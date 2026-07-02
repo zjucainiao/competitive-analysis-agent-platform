@@ -152,7 +152,7 @@ class QA(BaseAgent[QAInput, QAOutput]):
             checker = checker_cls()
             try:
                 result: CheckerResult = checker.run(ctx)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(
                     AgentError(
                         code="CHECKER_FAILED",
@@ -381,7 +381,7 @@ def _load_evidence_db() -> dict[str, Evidence]:
             data: dict[str, Any] = json.loads(line)
             ev = Evidence.model_validate(data)
             out[ev.evidence_id] = ev
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
     return out
 

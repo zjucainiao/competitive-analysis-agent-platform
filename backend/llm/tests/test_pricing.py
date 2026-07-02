@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # pytest 真环境装齐依赖（httpx 等）后，子包根 __init__.py 能正常加载，
 # 这里 import 子模块本身是稳的。
 from backend.llm.pricing import (
@@ -19,7 +18,6 @@ from backend.llm.pricing import (
     get_price,
     register_price,
 )
-
 
 # ---------- builtin lookup ----------
 

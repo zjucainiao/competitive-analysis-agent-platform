@@ -14,12 +14,11 @@ import pickle
 from typing import Any
 
 from backend.schemas.agent_io import AgentOutputBase
+from backend.schemas.analyst import AnalystOutput
 from backend.schemas.collector import CollectorOutput
 from backend.schemas.extractor import ExtractorOutput
-from backend.schemas.analyst import AnalystOutput
-from backend.schemas.reporter import ReporterOutput
 from backend.schemas.qa import QAOutput
-
+from backend.schemas.reporter import ReporterOutput
 
 _OUTPUT_REGISTRY: dict[str, type[AgentOutputBase]] = {
     "collector": CollectorOutput,

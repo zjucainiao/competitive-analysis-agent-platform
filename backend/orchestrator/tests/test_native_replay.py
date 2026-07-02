@@ -14,14 +14,14 @@ from __future__ import annotations
 
 import pytest
 
-from backend.storage import build_storage
 from backend.orchestrator.tests.test_native_graph import (
-    _FakeRegistry,
-    _StubQA,
     _block_reporter_verdict,
+    _FakeRegistry,
     _load_demo_project,
     _pass_verdict,
+    _StubQA,
 )
+from backend.storage import build_storage
 
 
 @pytest.fixture
