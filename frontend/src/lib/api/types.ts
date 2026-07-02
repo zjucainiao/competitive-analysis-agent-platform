@@ -610,6 +610,9 @@ export interface RunListResponse {
   runs: RunRef[];
 }
 
+/** `GET /runs/{run_id}/state` 的镜像（原始 RunSnapshot 形状）。历史回放前端
+ *  实际消费的是 `/runs/{run_id}/view`（RunStateView 投影，见 getRunSnapshot），
+ *  此类型保留作后端 schema 镜像参考。 */
 export interface RunSnapshotResponse {
   project_id: string;
   run_id: string;

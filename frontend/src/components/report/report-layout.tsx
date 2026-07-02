@@ -76,6 +76,8 @@ export function ReportLayout(props: ReportLayoutProps = {}) {
   }, [isApi, apiReporter, apiVerdicts, apiTarget, apiCompetitors]);
 
   const api = useWorkspaceApi();
+  /* 历史运行只读回放：段落编辑 / 证据异议一律停用（导出 / 复制仍可用） */
+  const readOnly = !!api?.readOnly;
   const [showV2, setShowV2] = useState(false);
   /* 审阅模式：默认关（纯净阅读）；打开后段落显示 QA 提示 / 数据核对标 / 编辑标 */
   const [reviewMode, setReviewMode] = useState(false);
@@ -160,6 +162,10 @@ export function ReportLayout(props: ReportLayoutProps = {}) {
   };
 
   const handleToggleDisputed = (evidenceId: string) => {
+    if (readOnly) {
+      toast.info("历史运行为只读回放，不能标记证据异议");
+      return;
+    }
     setDisputed((cur) => {
       const next = new Set(cur);
       if (next.has(evidenceId)) {
@@ -273,6 +279,7 @@ export function ReportLayout(props: ReportLayoutProps = {}) {
                 globalParagraphStart={start}
                 showV2={showV2}
                 reviewMode={reviewMode}
+                readOnly={readOnly}
                 focusedParagraphId={focusedParagraphId}
                 onEvidenceClick={handleEvidenceClick}
                 onFocusEvidence={(eid) =>

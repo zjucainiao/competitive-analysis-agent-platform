@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ClockIcon,
+  HistoryIcon,
   PanelRightCloseIcon,
   PanelRightOpenIcon,
 } from "lucide-react";
@@ -37,6 +38,8 @@ export function WorkspaceTopBar({
   runStatus,
   runs,
   activeRunId,
+  projectId,
+  historical,
   railOpen,
   onToggleRail,
 }: {
@@ -51,6 +54,10 @@ export function WorkspaceTopBar({
   runStatus: RunStatus;
   runs?: RunRef[];
   activeRunId?: string;
+  /** 运行历史下拉的跳转链接需要（demo/mock 不传，下拉不显示）。 */
+  projectId?: string;
+  /** 历史运行只读回放：顶栏标示「历史运行」，隐藏 pause/stop 等干预动作。 */
+  historical?: boolean;
   railOpen?: boolean;
   onToggleRail?: () => void;
 }) {
@@ -97,8 +104,21 @@ export function WorkspaceTopBar({
           label={statusLabel}
           pulse={statusPulse}
         />
-        {runs && runs.length > 0 && activeRunId ? (
-          <RunHistoryBadge runs={runs} activeRunId={activeRunId} />
+        {historical ? (
+          <span
+            className="inline-flex shrink-0 items-center gap-1 rounded-pill border border-warning-border bg-warning-bg px-2 py-0.5 text-[11px] font-medium text-warning-base"
+            title="正在查看历史运行的只读回放"
+          >
+            <HistoryIcon className="h-3 w-3" />
+            <span>历史运行</span>
+          </span>
+        ) : null}
+        {runs && runs.length > 0 && activeRunId && projectId ? (
+          <RunHistoryBadge
+            projectId={projectId}
+            runs={runs}
+            activeRunId={activeRunId}
+          />
         ) : null}
 
         {/* 中段进度 —— 占主要宽度 */}
@@ -119,12 +139,14 @@ export function WorkspaceTopBar({
         </div>
       </div>
 
-      {/* 右：runtime + actions */}
+      {/* 右：runtime + actions（历史回放只读，不给干预动作） */}
       <div className="flex shrink-0 items-center gap-2 px-4">
         <RunTimer startedAt={startedAt} endedAt={endedAt} runStatus={runStatus} />
-        <div className="hidden lg:flex">
-          <WorkspaceActions status={runStatus} />
-        </div>
+        {!historical ? (
+          <div className="hidden lg:flex">
+            <WorkspaceActions status={runStatus} />
+          </div>
+        ) : null}
         <CmdTrigger />
         <ThemeToggle />
         {onToggleRail ? (
